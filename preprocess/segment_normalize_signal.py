@@ -1,24 +1,16 @@
 import argparse
 import gc
-import multiprocessing as mp
-
 import glob
+import multiprocessing as mp
+import os
 import pickle
 
 import numpy as np
-import os
 import pandas as pd
 import pod5
 import pysam
 import scipy
 import tqdm
-
-EXPIDS = ["ON0089", "ON0087"]
-DIGITISATION = 8192
-
-
-def mean_phred(phred):
-    return -10 * np.log10(np.mean(10 ** (-phred / 10)))
 
 
 def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict):
@@ -135,7 +127,6 @@ def segment_spectrogram(signal, move, min_freq=0, max_freq=3000, step_size=10):
 
 
 def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df, pid_arr):
-
     for pid in tqdm.tqdm(pid_arr):
         signal_df = pd.read_pickle(f"{signal_df_path}/{pid}.pkl")
         signal_df = signal_df.merge(move_df, on="id", how="inner")
@@ -154,8 +145,10 @@ def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df,
         signal_df.to_pickle(f"{seg_df_path}/segment/signal_segment_{pid}.pkl")
 
         block_df_proc = block_df.merge(signal_df, left_on="id", right_on="id", how="inner")
-        block_df_proc["signal_seg"] = block_df_proc.apply(lambda row: row["signal_seg"][row["start_pos"]:row["end_pos"]], axis=1)
-        block_df_proc["signal_fft"] = block_df_proc.apply(lambda row: row["signal_fft"][row["start_pos"]:row["end_pos"]], axis=1)
+        block_df_proc["signal_seg"] = block_df_proc.apply(
+            lambda row: row["signal_seg"][row["start_pos"]:row["end_pos"]], axis=1)
+        block_df_proc["signal_fft"] = block_df_proc.apply(
+            lambda row: row["signal_fft"][row["start_pos"]:row["end_pos"]], axis=1)
 
         block_df_proc.to_pickle(f"{seg_df_path}/block/signal_block_{pid}.pkl")
         del signal_df, block_df_proc
@@ -206,7 +199,7 @@ def main():
     block_df = pd.read_pickle(args.block)
 
     proc_list = []
-    thread_reduction_factor = 8 ## Not to blow up memory. It is a temporary fix and will be removed in the future.
+    thread_reduction_factor = 8  ## Not to blow up memory. It is a temporary fix and will be removed in the future.
     pid_arr_split = np.array_split(list(range(args.cpu)), min(1, args.cpu // thread_reduction_factor))
     move_df_proc_list = []
     block_df_proc_list = []
@@ -224,7 +217,8 @@ def main():
     gc.collect()
 
     for pid_arr, move_df_proc, block_df_proc in zip(pid_arr_split, move_df_proc_list, block_df_proc_list):
-        proc = mp.Process(target=segment_normalize_fft_signal, args=(signal_raw_path, args.output, move_df_proc, block_df_proc, pid_arr))
+        proc = mp.Process(target=segment_normalize_fft_signal,
+                          args=(signal_raw_path, args.output, move_df_proc, block_df_proc, pid_arr))
         proc_list.append(proc)
         proc.start()
 

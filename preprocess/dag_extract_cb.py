@@ -412,7 +412,7 @@ def extract_blocks_from_read_list_mp_worker(fastq_list, linker_front, linker_bac
 
             block_df_flush["id"] = block_df_flush["read_idx"].apply(lambda x: readid_dict[x])
             block_df_flush["motif"] = block_df_flush["read_idx"].apply(lambda x: seq_dict[x])
-            block_df_flush["phred"] = block_df_flush["read_idx"].apply(lambda x: phred_dict[x])
+            block_df_flush["bq"] = block_df_flush["read_idx"].apply(lambda x: phred_dict[x])
             block_df_flush["seq_len"] = block_df_flush["motif"].apply(len)
             block_df_flush = block_df_flush.explode("pos_RM")
 
@@ -421,16 +421,13 @@ def extract_blocks_from_read_list_mp_worker(fastq_list, linker_front, linker_bac
 
             block_df_flush = block_df_flush[block_df_flush["end_pos"] <= block_df_flush["seq_len"]]
             block_df_flush["motif"] = block_df_flush.apply(lambda x: x["motif"][x["start_pos"]:x["end_pos"]], axis=1)
-            block_df_flush["phred"] = block_df_flush.apply(lambda x: x["phred"][x["start_pos"]:x["end_pos"]], axis=1)
+            block_df_flush["bq"] = block_df_flush.apply(lambda x: x["bq"][x["start_pos"]:x["end_pos"]], axis=1)
 
             block_df_flush["seq_len"] = block_df_flush["motif"].apply(len)
             block_df_flush["phred_len"] = block_df_flush["phred"].apply(len)
             block_df_flush = block_df_flush[
                 (block_df_flush["seq_len"] == cb_len) & (block_df_flush["phred_len"] == cb_len)].copy().reset_index(
                 drop=True)
-
-            for i in range(cb_pad * 2 + 1):
-                block_df_flush[f"bq_{i}"] = block_df_flush["phred"].apply(lambda x: x[i])
 
             block_df_flush.drop(columns=["read_idx", "seq_len", "phred_len", "phred"], inplace=True)
 
