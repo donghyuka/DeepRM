@@ -1,33 +1,51 @@
 import math
 import os
 from typing import Tuple
+import torch
 from torch import nn, Tensor
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-from conv_module import Conv1DModel, Conv2DModel
-
 
 class TransformerModel(nn.Module):
 
-    def __init__(self, ntoken: int, d_model: int, nhead: int, d_hid: int,
-                 d_kmer_embedding: int, d_signal_embedding: int, d_spectrogram_embedding: int,
-                 nlayers: int, dropout: float = 0.5, kmer_size: int = 5):
+    def __init__(self, ntoken: int, d_model: int, nhead: int, d_ff: int,
+                 d_kmer_embedding: int, d_signal_embedding: int, d_spectrogram_embedding: int, d_bq_embedding: int,
+                 nlayers: int, dropout: float = 0.1, kmer_size: int = 5, signal_size: int = 5, spectrogram_size: int = 20,
+                 t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1) -> None:
         super().__init__()
 
         ## Embedding Initialization
-        self.kmer_embedding = KmerEmbedding(kmer_size=kmer_size, dropout=dropout, d_embedding=d_kmer_embedding)
-        self.signal_embedding = Conv1DModel(d_model=d_signal_embedding, dropout=dropout,)
-        self.spectrogram_embedding = Conv2DModel(d_model=d_spectrogram_embedding, dropout=dropout)
-        self.bq_embedding = nn.Linear(1, d_model)
+        self.kmer_embedding = nn.Embedding(4**kmer_size, d_kmer_embedding)
+        self.signal_embedding = nn.Linear(signal_size, d_signal_embedding)
+        self.spectrogram_embedding = nn.Linear(spectrogram_size, d_spectrogram_embedding)
+        self.bq_embedding = nn.Linear(1, d_bq_embedding)
+
 
         ## Encoder Initialization
         self.d_model = d_model
         self.model_type = 'Transformer'
-        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, d_ff, dropout = dropout, activation = t_act)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, nlayers)
 
-        self.linear = nn.Linear(d_model, ntoken)
+        self.final_linear = self.build_linear(d_model, lin_act, lin_depth)
 
         self.init_weights()
+
+    def build_linear(self, d_model, lin_act, lin_depth):
+        if lin_act == 'relu':
+            activation = nn.ReLU()
+        elif lin_act == 'gelu':
+            activation = nn.GELU()
+        elif lin_act == 'tanh':
+            activation = nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {lin_act} not supported")
+        layers = []
+        for i in range(lin_depth):
+            layers.append(nn.Linear(d_model, d_model))
+            layers.append(activation)
+        layers.append(nn.Linear(d_model, 1))
+        layers.append(nn.Sigmoid())
+        layers = nn.Sequential(*layers)
+        return layers
 
     def init_weights(self) -> None:
         initrange = 0.1
@@ -36,7 +54,8 @@ class TransformerModel(nn.Module):
         self.linear.bias.data.zero_()
         self.linear.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor, src_mask: Tensor = None) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor,
+                src_pad_mask: Tensor = None, target_mask: Tensor = None) -> Tensor:
         """
         Arguments:
             src: Tensor, shape ``[seq_len, batch_size]``
@@ -49,44 +68,10 @@ class TransformerModel(nn.Module):
         signal_embedding = self.signal_embedding(src_signal)
         spectrogram_embedding = self.spectrogram_embedding(src_spectrogram)
         bq_embedding = self.bq_embedding(src_bq)
+        final_embedding = torch.cat([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding], dim=2)
 
-        final_embedding = kmer_embedding + signal_embedding + spectrogram_embedding + bq_embedding
-
-
-
-
-        if src_mask is None:
-            """Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
-            """
-            src_mask = nn.Transformer.generate_square_subsequent_mask(len(src)).to(device)
-        output = self.transformer_encoder(src, src_mask)
+        output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        if target_mask is not None:
+            output = output * target_mask
         output = self.linear(output)
         return output
-
-class KmerEmbedding(nn.Module):
-    ## Get batches of RNA sequence, which are kmer list.
-    ## Convert into kmer embedding.
-
-    def __init__(self, kmer_size: int = 5, dropout: float = 0.1, max_len: int = 5000, d_embedding: int = 128):
-        super().__init__()
-        self.kmer_size = kmer_size
-        self.max_len = max_len
-        self.dropout = nn.Dropout(p=dropout)
-        self.embedding = nn.Embedding(4**kmer_size, d_embedding)
-        self.init_weights()
-
-    def init_weights(self) -> None:
-        initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-
-
-    def forward(self, x: Tensor) -> Tensor:
-        """
-        Arguments:
-            x: Tensor, shape ``[seq_len, batch_size]``
-        """
-        x = self.embedding(x)
-        x = self.dropout(x)
-        return x
-
