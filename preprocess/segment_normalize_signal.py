@@ -103,27 +103,19 @@ def segment_signal(signal, move):
     return signal_segmented
 
 
-def segment_spectrogram(signal, move, min_freq=0, max_freq=3000, step_size=10):
-    f, t, sxx = scipy.signal.spectrogram(signal, fs=1, window="hann", nperseg=100, noverlap=50, mode="magnitude")
-    ## refit sxx into min_freq ~ max_freq with step_size
-    spectrogram = []
-    for freq in range(min_freq, max_freq + step_size, step_size):
-        idx = np.where((f >= freq) & (f < freq + step_size))[0]
-        if len(idx) > 0:
-            sxx_freq = np.sum(sxx[idx, :], axis=0)
-            spectrogram.append(sxx_freq)
-        else:
-            spectrogram.append(np.zeros(len(t)))
-    spectrogram = np.stack(spectrogram, axis=0)
-    spectrogram = spectrogram.T
-
+def segment_spectrogram(signal, move, filter, sampling = 4000, nperseg = 40, stride = 5):
+    signal = scipy.signal.sosfilt(filter, signal)
+    f, t, sxx = scipy.signal.spectrogram(signal, fs=sampling, nperseg=nperseg, noverlap=nperseg-stride,
+                                         mode="magnitude", window="hann")
+    sxx = sxx.T
     stride = move[0]
     move = move[1:]
+    move=np.array(move, dtype=int)
     move_idx = np.where(move == 1)[0][1:] * stride
     move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0)
-    signal_segmented = np.array_split(spectrogram, move_idx, axis=0)
-    return signal_segmented
+    move_idx = np.flip(move_idx, axis=0) // 5
+    sxx = np.array_split(sxx, move_idx, axis=0)
+    return sxx
 
 
 def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df, pid_arr):
@@ -140,7 +132,8 @@ def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df,
         signal_df["signal"] = signal_df.apply(lambda x: (x["signal"] + x["offset"]) * x["scale"], axis=1)
         signal_df["signal"] = signal_df.apply(lambda x: (x["signal"] - x["sm"]) / x["sd"], axis=1)
         signal_df["signal_seg"] = signal_df.apply(lambda x: segment_signal(x["signal"], x["mv"]), axis=1)
-        signal_df["signal_fft"] = signal_df.apply(lambda x: segment_spectrogram(x["signal"], x["mv"]), axis=1)
+        filter = scipy.signal.butter(4, 100, btype="highpass", fs=4000, output="sos")
+        signal_df["signal_fft"] = signal_df.apply(lambda x: segment_spectrogram(x["signal"], x["mv"], filter), axis=1)
         signal_df = signal_df[["id", "signal_seg", "signal_fft"]]
         signal_df.to_pickle(f"{seg_df_path}/segment/signal_segment_{pid}.pkl")
 
