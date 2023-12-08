@@ -1,5 +1,5 @@
-import os, sys, argparse
-from utils import printmessage
+import os, argparse
+from utils.utils import printmessage
 
 def parse_args():
     parser = argparse.ArgumentParser()
