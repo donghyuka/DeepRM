@@ -1,6 +1,7 @@
-import argparse
+import argparse, os
 
 
+## These fixed paths will be refactored.
 LABEL_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip_reformatted.tsv",
@@ -10,9 +11,10 @@ IMAGE_PATH = "/extdata4/baeklab/Hyeonseo/exp_MRNA/{EXP}/index/image_11mer_messy_
 OUT_PATH = "/extdata3/baeklab/Jungmin/RNAmod/exp_MRNA/{EXP}/{EXP}/save_path/image_label_comp_messy_{crit}.tsv"
 A_POS_PKL_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/A_pos/ref_A_pos.nrnm.pkl"
 DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0086/ON0086/save_path/dorado.sorted.depth.txt"
+
+
 import pandas as pd
 import numpy as np
-import glob, os , tqdm
 import multiprocessing as mp
 
 def get_image_id(nmid,pos):
