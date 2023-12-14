@@ -1,33 +1,46 @@
 import numpy as np
 from pyspark.sql import SparkSession
-from pyspark.sql.types import IntegerType
+from pyspark.sql.types import IntegerType, StringType
 
-from petastorm.codecs import ScalarCodec, CompressedImageCodec, NdarrayCodec
+from petastorm.codecs import ScalarCodec, NdarrayCodec
 from petastorm.etl.dataset_metadata import materialize_dataset
 from petastorm.unischema import dict_to_spark_row, Unischema, UnischemaField
 
-def define_schema():
+def define_schema(signal_len,spectrogram_len):
     # The schema defines how the dataset schema looks like
     schema = Unischema('NanoporeDataSchema', [
-        UnischemaField('id', np.int32, (), ScalarCodec(IntegerType()), False),
-        UnischemaField('image1', np.uint8, (128, 256, 3), CompressedImageCodec('png'), False),
-        UnischemaField('array_4d', np.uint8, (None, 128, 30, None), NdarrayCodec(), False),
+        UnischemaField('id', str, (), ScalarCodec(StringType()), False),
+        UnischemaField('label', np.uint8, (), ScalarCodec(IntegerType()), False),
+        UnischemaField('array_seq', np.uint16, (None,), NdarrayCodec(), False),
+        UnischemaField('array_bq', np.uint8, (None,), NdarrayCodec(), False),
+        UnischemaField('array_signal', np.float16, (None,signal_len), NdarrayCodec(), False),
+        UnischemaField('array_spectrogram', np.float16, (None,spectrogram_len), NdarrayCodec(), False),
     ])
     return schema
 
 
-def row_generator(x):
+def row_generator(pandas_row):
     """Returns a single entry in the generated dataset. Return a bunch of random values as an example."""
-    return {'id': x,
-            'image1': np.random.randint(0, 255, dtype=np.uint8, size=(128, 256, 3)),
-            'array_4d': np.random.randint(0, 255, dtype=np.uint8, size=(4, 128, 30, 3))}
+    petastorm_dict = pandas_row.to_dict()
+    return petastorm_dict
 
 
-def generate_petastorm_dataset(output_url='file:///tmp/hello_world_dataset'):
+def generate_petastorm_dataset(output_url, signal_len, spectrogram_len):
     rowgroup_size_mb = 256
-    schema = define_schema()
+    schema = define_schema(signal_len,spectrogram_len)
 
-    spark = SparkSession.builder.config('spark.driver.memory', '2g').master('local[2]').getOrCreate()
+    spark = SparkSession.builder
+    spark = spark.config("spark.driver.maxResultSize", "{YOUR-VALUE}")
+    spark = spark.config("spark.driver.memory", "{YOUR-VALUE}")
+    spark = spark.config("spark.sql.broadcastTimeout", "{YOUR-VALUE}")
+    spark = spark.config("spark.sql.debug.maxToStringFields", "{YOUR-VALUE}")
+    spark = spark.config("spark.network.timeout", "{YOUR-VALUE}")
+    spark = spark.config("spark.executor.heartbeatInterval", "{YOUR-VALUE}")
+    spark = spark.config("spark.executor.extraJavaOptions",
+                          "-XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+G1SummarizeConcMark \
+                          -XX:InitiatingHeapOccupancyPercent=35 -verbose:gc -XX:+PrintGCDetails \
+                          -XX:+PrintGCDateStamps -XX:OnOutOfMemoryError='kill -9 %p'")
+    spark = spark.master('local[2]').getOrCreate()
     sc = spark.sparkContext
 
     # Wrap dataset materialization portion. Will take care of setting up spark environment variables as

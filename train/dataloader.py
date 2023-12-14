@@ -11,7 +11,6 @@ def read_petastorm_dataset(path, schema, batch_size=16, shuffle=True, num_worker
         for batch in dataloader:
             yield batch
 
-
 class SortishDataset(Dataset):
     def __init__(self, examples, batch_size=16, orderish=True, mega_size=30):
         n = len(examples)
