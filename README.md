@@ -8,7 +8,7 @@ BERMUDA is a transformer-based model for RNA modification detection using Nanopo
 This repository contains the source code for training and evaluating BERMUDA.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
+See the [LICENSE](LICENSE.md) file for details.
 
 ## Authors
 * **Hyeonseo Hwang** - Laboratory of Computational Biology, Seoul National University
