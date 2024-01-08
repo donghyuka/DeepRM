@@ -1,0 +1,109 @@
+## Open a bam file
+## Get the stats of read
+## 1. Read length distribution
+## 2. Quality score distribution
+
+import argparse
+import pickle
+import os
+import numpy as np
+import pysam
+from matplotlib import pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+from utils.utils import mean_phred, printmessage
+
+
+def parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument("--in", dest="bam_path", type=str, required=True, help="Input bam file")
+    args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
+    args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
+    args.add_argument("--bq", dest="bq_thres", type=int, default=7, help="Base quality threshold")
+    args = args.parse_args()
+    return args
+
+def plot_read_len(read_len_arr, out_path):
+    ## plot read length KDE
+    fig, ax = plt.subplots(figsize=(10,10))
+    ## cut at 99.9 percentile
+    read_len_arr = read_len_arr[read_len_arr <= np.percentile(read_len_arr, 99.9)]
+    sns.histplot(read_len_arr, ax=ax, color="royalblue", label=f"Read Length (n={len(read_len_arr):,})", binwidth=100)
+    ax.set_title(f"Passed Read Length Distribution (n={len(read_len_arr):,})")
+    ax.set_xlabel("Read Length")
+    ax.set_ylabel("Count")
+    ## Vline at Q1, Q3, median
+    ax.axvline(np.percentile(read_len_arr, 25), color="black", linestyle="--")
+    ax.axvline(np.percentile(read_len_arr, 50), color="black", linestyle="--")
+    ax.axvline(np.percentile(read_len_arr, 75), color="black", linestyle="--")
+    ax.text(np.percentile(read_len_arr, 25), 0.9 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 25):.0f}", color="black")
+    ax.text(np.percentile(read_len_arr, 50), 0.8 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 50):.0f}", color="black")
+    ax.text(np.percentile(read_len_arr, 75), 0.7 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 75):.0f}", color="black")
+    fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
+    plt.close(fig)
+    return None
+
+
+def plot_qual(mean_qual_arr, out_path, bq_thres = 7):
+    ## plot mean quality score KDE with histogram
+    fig, ax = plt.subplots(figsize=(10,10))
+    pass_arr = mean_qual_arr[mean_qual_arr >= bq_thres]
+    fail_arr = mean_qual_arr[mean_qual_arr < bq_thres]
+    ax.set_title(f"Read Mean Base Quality Distribution (n={len(mean_qual_arr):,})")
+    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, 18))
+    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, 18))
+    ## vline at median
+    ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
+    ax.legend()
+    ax.set_xlim(0, 18)
+    fig.savefig(f"{out_path}/mean_qual_hist.png", dpi=300)
+    plt.close(fig)
+    return None
+
+
+def main():
+    args = parse_args()
+
+    if os.path.exists(args.out_path):
+        printmessage("Output directory already exists. Attempting to load pickle")
+        try:
+            with open(f"{args.out_path}/read_len.pkl", "rb") as f:
+                read_len_arr = pickle.load(f)
+            with open(f"{args.out_path}/mean_qual.pkl", "rb") as f:
+                mean_qual_arr = pickle.load(f)
+        except:
+            printmessage("Pickle loading failed. Re-run with a different output directory")
+            return None
+
+    else:
+        os.makedirs(args.out_path, exist_ok=True)
+
+        bam_file = pysam.AlignmentFile(args.bam_path, "rb", check_sq=False, threads=args.cpu)
+        read_len_arr = []
+        qual_arr = []
+
+        printmessage("Reading bam file")
+        for read in tqdm(bam_file, total=bam_file.count()):
+            read_len_arr.append(read.query_length)
+            qual_arr.append(np.array(read.query_qualities, dtype=int))
+
+        read_len_arr = np.array(read_len_arr)
+        mean_qual_arr = np.array([mean_phred(x) for x in qual_arr])
+
+        printmessage("Saving pickle")
+        ## save pickle
+        with open(f"{args.out_path}/read_len.pkl", "wb") as f:
+            pickle.dump(read_len_arr, f)
+        with open(f"{args.out_path}/mean_qual.pkl", "wb") as f:
+            pickle.dump(mean_qual_arr, f)
+
+    printmessage("Plotting")
+    read_len_arr = read_len_arr[mean_qual_arr >= args.bq_thres]
+    plot_read_len(read_len_arr, args.out_path)
+    plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
+
+    return None
+
+
+if __name__ == "__main__":
+    main()
