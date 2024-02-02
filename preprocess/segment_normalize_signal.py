@@ -27,10 +27,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict):
                 offset_list.append(offset)
                 scale_list.append(scale)
                 signal_list.append(signal_arr)
-                id_list.append(record.read_id)
+                id_list.append(str(record.read_id))
         gc.collect()
     df = pd.DataFrame({"signal": signal_list, "id": id_list, "offset": offset_list, "scale": scale_list})
-    df["id"] = df["id"].astype(str)
     df.to_pickle(f"{signal_df_path}/{pid}.pkl")
     index_dict[pid] = id_list
     return None
@@ -71,7 +70,7 @@ def extract_move(bam_path):
 
 def preprocess_pod5(pod5_path, save_path, ncpu):
     # Export pod5 to csv
-    pod5_path_list = glob.glob(pod5_path + "*.pod5")
+    pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
     pod5_path_list_split = np.array_split(pod5_path_list, ncpu)
 
@@ -122,8 +121,6 @@ def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df,
     for pid in tqdm.tqdm(pid_arr):
         signal_df = pd.read_pickle(f"{signal_df_path}/{pid}.pkl")
         signal_df = signal_df.merge(move_df, on="id", how="inner")
-        gc.collect()
-
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["signal_len"] = signal_df["signal"].apply(lambda x: len(x))
         signal_df = signal_df[signal_df["signal_len"] > signal_df["ts"]]
@@ -177,9 +174,9 @@ def main():
     intermediate_path = f"{args.output}/intermediates/"
     os.makedirs(intermediate_path, exist_ok=True)
 
+    move_path = f"{intermediate_path}/move_df.pkl"
     move_df = extract_move(args.bam)
-    print(move_df)
-    move_df.to_pickle(f"{intermediate_path}/move_df.pkl")
+    move_df.to_pickle(move_path)
 
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     os.makedirs(signal_raw_path, exist_ok=True)
@@ -193,14 +190,14 @@ def main():
 
     proc_list = []
     thread_reduction_factor = 8  ## Not to blow up memory. It is a temporary fix and will be removed in the future.
-    pid_arr_split = np.array_split(list(range(args.cpu)), min(1, args.cpu // thread_reduction_factor))
+    pid_arr_split = np.array_split(list(range(args.cpu)), max(1, args.cpu // thread_reduction_factor))
     move_df_proc_list = []
     block_df_proc_list = []
 
     for pid_arr in pid_arr_split:
         id_list = []
         for pid in pid_arr:
-            id_list += index_dict[pid]
+            id_list += [str(x) for x in index_dict[pid]]
         move_df_proc = move_df[move_df["id"].isin(id_list)]
         move_df_proc_list.append(move_df_proc)
         block_df_proc = block_df[block_df["id"].isin(id_list)]

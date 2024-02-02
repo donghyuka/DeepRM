@@ -54,14 +54,13 @@ def parse_args():
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu*0.9), help="Number of threads")
     parser.add_argument("--signal", "-s", type=str, required=True, help="Signal directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--block", "-b", type=str, required=True, help="Block dataframe")
     args = parser.parse_args()
     if not os.path.exists(args.signal):
         raise FileNotFoundError(f"Signal directory {args.signal} does not exist")
     if not os.path.exists(args.block):
         raise FileNotFoundError(f"Block dataframe {args.block} does not exist")
-    if os.path.exists(args.output):
-        raise FileExistsError(f"Output directory {args.output} already exists")
-    os.makedirs(args.output)
+    os.makedirs(args.output, exist_ok=True)
     return args
 
 
