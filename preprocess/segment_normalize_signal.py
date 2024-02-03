@@ -35,9 +35,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict):
     return None
 
 
-def extract_move(bam_path):
+def extract_move(bam_path,ncpu):
     ## Extract mv tag from bam and save to separate file
-    bam_file = pysam.AlignmentFile(bam_path, "rb", check_sq=False)
+    bam_file = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu)
     mv_list = []
     id_list = []
     sm_list = []
@@ -112,7 +112,7 @@ def segment_spectrogram(signal, move, filter, sampling = 4000, nperseg = 40, str
     move=np.array(move, dtype=int)
     move_idx = np.where(move == 1)[0][1:] * stride
     move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0) // 5
+    move_idx = np.flip(move_idx, axis=0) // stride
     sxx = np.array_split(sxx, move_idx, axis=0)
     return sxx
 
@@ -132,7 +132,7 @@ def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df,
         filter = scipy.signal.butter(4, 100, btype="highpass", fs=4000, output="sos")
         signal_df["signal_fft"] = signal_df.apply(lambda x: segment_spectrogram(x["signal"], x["mv"], filter), axis=1)
         signal_df = signal_df[["id", "signal_seg", "signal_fft"]]
-        signal_df.to_pickle(f"{seg_df_path}/segment/signal_segment_{pid}.pkl")
+        # signal_df.to_pickle(f"{seg_df_path}/segment/signal_segment_{pid}.pkl")
 
         block_df_proc = block_df.merge(signal_df, left_on="id", right_on="id", how="inner")
         block_df_proc["signal_seg"] = block_df_proc.apply(
@@ -175,7 +175,7 @@ def main():
     os.makedirs(intermediate_path, exist_ok=True)
 
     move_path = f"{intermediate_path}/move_df.pkl"
-    move_df = extract_move(args.bam)
+    move_df = extract_move(args.bam, args.cpu)
     move_df.to_pickle(move_path)
 
     signal_raw_path = f"{intermediate_path}/signal_raw/"
