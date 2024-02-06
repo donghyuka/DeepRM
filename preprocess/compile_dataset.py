@@ -2,34 +2,37 @@
 ## Keep Pos:Neg ratio of 1:1
 ## Keep uniform distribution of 256 5-mer motifs.
 ## Sample engineering dataset
+##
 ## Output structure:
-## /main
-##     /train
-##         /pos
-##         /neg
-##     /val
-##         /pos
-##         /neg
-##     /test
-##         /pos
-##         /neg
-## /engineering
-##     /train
-##         /pos
-##         /neg
-##     /val
-##         /pos
-##         /neg
-##     /test
-##         /pos
-##         /neg
+##  |---/main
+##  |   |---/train
+##  |   |   |---/pos
+##  |   |   |---/neg
+##  |   |---/val
+##  |   |   |---/pos
+##  |   |   |---/neg
+##  |   |---/test
+##  |       |---/pos
+##  |       |---/neg
+##  |
+##  |---/engineering
+##      |---/train
+##      |   |---/pos
+##      |   |---/neg
+##      |---/val
+##      |   |---/pos
+##      |   |---/neg
+##      |---/test
+##          |---/pos
+##          |---/neg
+##
+
+
 
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
-import argparse
-from collections import defaultdict
 
 from utils.utils import printmessage
 
@@ -40,6 +43,7 @@ def parse_args():
     args.add_argument("--neg", dest="neg_path", type=str, required=True, nargs="+", help="Negative token files")
     args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
     args.add_argument("--sam", dest="sampling", type=float, default=0.01, help="Sampling rate")
+    args.add_argument("--max", dest="max_token_len", type=int, default=1000, help="Maximum token length")
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args = args.parse_args()
     os.makedirs(args.out_path, exist_ok=True)
@@ -49,11 +53,12 @@ def get_motif_df_worker(df_path_list, return_list, kmer_size, cb_size):
     for df_path in df_path_list:
         df = pd.read_pickle(df_path)
         df["kmer"] = df["motif"].apply(lambda x: x[cb_size//2-kmer_size//2:cb_size//2+kmer_size//2+1])
-        return_list.append(df[["block_id", "kmer"]])
+        df["token_len"] = df["signal_token"].apply(lambda x: len(x))
+        return_list.append(df[["block_id", "kmer", "token_len"]])
     return None
 
 
-def get_motif_df(path_list, ncpu, kmer_size=5, cb_size=17):
+def get_motif_df(path_list, ncpu, max_token_len, kmer_size=5, cb_size=17):
     file_list = [y for x in path_list for y in glob.glob(f"{x}/*.pkl")]
     file_list = np.array_split(file_list, ncpu)
     manager = mp.Manager()
@@ -68,6 +73,9 @@ def get_motif_df(path_list, ncpu, kmer_size=5, cb_size=17):
     return_list = list(return_list)
     manager.shutdown()
     return_list = pd.concat(return_list)
+    print(return_list["token_len"].describe())
+    return_list = return_list[return_list["token_len"] <= max_token_len].reset_index(drop=True).copy()
+    gc.collect()
     return return_list
 
 
@@ -89,6 +97,9 @@ def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, save_row
         df = pd.read_pickle(df_path)
         for id_set, out_path in tqdm.tqdm(zip(id_set_list, out_path_list), total=len(id_set_list)):
             sample_df = df[df["block_id"].isin(id_set)]
+            sample_df["token_len"] = sample_df["signal_token"].apply(lambda x: len(x))
+            sample_df.sort_values("token_len", inplace=True)
+            sample_df.reset_index(drop=True, inplace=True)
             for row_idx in range(0, len(sample_df), save_rows):
                 save_df = sample_df[row_idx:min(row_idx+save_rows, len(sample_df))]
                 save_df.to_pickle(out_path + df_path.split("/")[-1])
@@ -129,8 +140,8 @@ def sample_dataset_kmer_balanced(kmer_df, sample_ratio = 0.01, seed = 42):
 def main(seed = 42):
     args = parse_args()
     os.makedirs(args.out_path, exist_ok=True)
-    pos_cnt_kmer_df = get_motif_df(args.pos_path, args.cpu)
-    neg_cnt_kmer_df = get_motif_df(args.neg_path, args.cpu)
+    pos_cnt_kmer_df = get_motif_df(args.pos_path, args.cpu, args.max_token_len)
+    neg_cnt_kmer_df = get_motif_df(args.neg_path, args.cpu, args.max_token_len)
     pos_cnt = len(pos_cnt_kmer_df)
     neg_cnt = len(neg_cnt_kmer_df)
     if pos_cnt > neg_cnt:
