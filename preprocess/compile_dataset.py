@@ -1,70 +1,210 @@
+## Train / Validation / Test split
+## Keep Pos:Neg ratio of 1:1
+## Keep uniform distribution of 256 5-mer motifs.
+## Sample engineering dataset
+## Output structure:
+## /main
+##     /train
+##         /pos
+##         /neg
+##     /val
+##         /pos
+##         /neg
+##     /test
+##         /pos
+##         /neg
+## /engineering
+##     /train
+##         /pos
+##         /neg
+##     /val
+##         /pos
+##         /neg
+##     /test
+##         /pos
+##         /neg
+
 import numpy as np
-from pyspark.sql import SparkSession
-from pyspark.sql.types import IntegerType, StringType
+import pandas as pd
+import multiprocessing as mp
+import os, argparse, tqdm, gc, glob
+import argparse
+from collections import defaultdict
 
-from petastorm.codecs import ScalarCodec, NdarrayCodec
-from petastorm.etl.dataset_metadata import materialize_dataset
-from petastorm.unischema import dict_to_spark_row, Unischema, UnischemaField
-
-def define_schema(signal_len,spectrogram_len):
-    # The schema defines how the dataset schema looks like
-    schema = Unischema('NanoporeDataSchema', [
-        UnischemaField('id', str, (), ScalarCodec(StringType()), False),
-        UnischemaField('label', np.uint8, (), ScalarCodec(IntegerType()), False),
-        UnischemaField('array_seq', np.uint16, (None,), NdarrayCodec(), False),
-        UnischemaField('array_bq', np.uint8, (None,), NdarrayCodec(), False),
-        UnischemaField('array_signal', np.float16, (None,signal_len), NdarrayCodec(), False),
-        UnischemaField('array_spectrogram', np.float16, (None,spectrogram_len), NdarrayCodec(), False),
-    ])
-    return schema
+from utils.utils import printmessage
 
 
-def row_generator(pandas_row):
-    """Returns a single entry in the generated dataset. Return a bunch of random values as an example."""
-    petastorm_dict = pandas_row.to_dict()
-    return petastorm_dict
+def parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument("--pos", dest="pos_path", type=str, required=True, nargs="+", help="Positive token files")
+    args.add_argument("--neg", dest="neg_path", type=str, required=True, nargs="+", help="Negative token files")
+    args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
+    args.add_argument("--sam", dest="sampling", type=float, default=0.01, help="Sampling rate")
+    args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
+    args = args.parse_args()
+    os.makedirs(args.out_path, exist_ok=True)
+    return args
+
+def get_motif_df_worker(df_path_list, return_list, kmer_size, cb_size):
+    for df_path in df_path_list:
+        df = pd.read_pickle(df_path)
+        df["kmer"] = df["motif"].apply(lambda x: x[cb_size//2-kmer_size//2:cb_size//2+kmer_size//2+1])
+        return_list.append(df[["block_id", "kmer"]])
+    return None
 
 
-def generate_petastorm_dataset(output_url, signal_len, spectrogram_len):
-    rowgroup_size_mb = 256
-    schema = define_schema(signal_len,spectrogram_len)
+def get_motif_df(path_list, ncpu, kmer_size=5, cb_size=17):
+    file_list = [y for x in path_list for y in glob.glob(f"{x}/*.pkl")]
+    file_list = np.array_split(file_list, ncpu)
+    manager = mp.Manager()
+    return_list = manager.list()
+    proc_list = []
+    for files in file_list:
+        proc = mp.Process(target=get_motif_df_worker, args=(files, return_list, kmer_size, cb_size))
+        proc_list.append(proc)
+        proc.start()
+    for proc in proc_list:
+        proc.join()
+    return_list = list(return_list)
+    manager.shutdown()
+    return_list = pd.concat(return_list)
+    return return_list
 
-    spark = SparkSession.builder
-    spark = spark.config("spark.driver.maxResultSize", "{YOUR-VALUE}")
-    spark = spark.config("spark.driver.memory", "{YOUR-VALUE}")
-    spark = spark.config("spark.sql.broadcastTimeout", "{YOUR-VALUE}")
-    spark = spark.config("spark.sql.debug.maxToStringFields", "{YOUR-VALUE}")
-    spark = spark.config("spark.network.timeout", "{YOUR-VALUE}")
-    spark = spark.config("spark.executor.heartbeatInterval", "{YOUR-VALUE}")
-    spark = spark.config("spark.executor.extraJavaOptions",
-                          "-XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+G1SummarizeConcMark \
-                          -XX:InitiatingHeapOccupancyPercent=35 -verbose:gc -XX:+PrintGCDetails \
-                          -XX:+PrintGCDateStamps -XX:OnOutOfMemoryError='kill -9 %p'")
-    spark = spark.master('local[2]').getOrCreate()
-    sc = spark.sparkContext
 
-    # Wrap dataset materialization portion. Will take care of setting up spark environment variables as
-    # well as saving petastorm specific metadata
-    rows_count = 10
-    with materialize_dataset(spark, output_url, schema, rowgroup_size_mb):
+def sample_and_save_df(id_set_list, out_path_list, in_path_list, ncpu, save_rows = 10000):
+    in_file_list = [*glob.glob(f"{in_path_list}/*.pkl")]
+    in_file_list = np.array_split(in_file_list, ncpu)
+    proc_list = []
+    for pid in range(ncpu):
+        proc = mp.Process(target=sample_and_save_df_worker, args=(id_set_list, out_path_list, in_file_list[pid], save_rows))
+        proc_list.append(proc)
+        proc.start()
+    for proc in proc_list:
+        proc.join()
+    return None
 
-        rows_rdd = sc.parallelize(range(rows_count)) \
-            .map(row_generator) \
-            .map(lambda x: dict_to_spark_row(schema, x))
 
-        spark.createDataFrame(rows_rdd, schema.as_spark_schema()) \
-            .coalesce(10) \
-            .write \
-            .mode('overwrite') \
-            .parquet(output_url)
+def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, save_rows):
+    for df_path in in_path_list:
+        df = pd.read_pickle(df_path)
+        for id_set, out_path in tqdm.tqdm(zip(id_set_list, out_path_list), total=len(id_set_list)):
+            sample_df = df[df["block_id"].isin(id_set)]
+            for row_idx in range(0, len(sample_df), save_rows):
+                save_df = sample_df[row_idx:min(row_idx+save_rows, len(sample_df))]
+                save_df.to_pickle(out_path + df_path.split("/")[-1])
+                gc.collect()
+    return None
+        
+
+def split_dataset_kmer_balanced(kmer_df, split_ratio = [0.8, 0.1, 0.1], seed = 42):
+    split_ratio = np.array(split_ratio) / np.sum(split_ratio)
+    split_df_dict = {i:[] for i in range(len(split_ratio))}
+    kmer_list = kmer_df["kmer"].unique()
+    for kmer in kmer_list:
+        kmer_sub_df = kmer_df[kmer_df["kmer"] == kmer]
+        kmer_sub_df = kmer_sub_df.sample(frac=1, random_state=seed).reset_index(drop=True)
+        kmer_sub_df = np.array_split(kmer_sub_df, np.cumsum(split_ratio[:-1]*len(kmer_sub_df)).astype(int))
+        for i in range(len(split_ratio)):
+            split_df_dict[i].append(kmer_sub_df[i])
+    for i in range(len(split_ratio)):
+        split_df_dict[i] = pd.concat(split_df_dict[i])
+    return split_df_dict
+
+
+def sample_dataset_kmer_balanced(kmer_df, sample_ratio = 0.01, seed = 42):
+    sample_list = []
+    kmer_list = kmer_df["kmer"].unique()
+
+    for kmer in kmer_list:
+        kmer_sub_df = kmer_df[kmer_df["kmer"] == kmer]
+        if sample_ratio > 1:
+            kmer_sub_df = kmer_sub_df.sample(sample_ratio, random_state=seed)
+        else:
+            kmer_sub_df = kmer_sub_df.sample(frac=sample_ratio, random_state=seed)
+        sample_list.append(kmer_sub_df)
+    sample_df = pd.concat(sample_list)
+    return sample_df
+
+
+def main(seed = 42):
+    args = parse_args()
+    os.makedirs(args.out_path, exist_ok=True)
+    pos_cnt_kmer_df = get_motif_df(args.pos_path, args.cpu)
+    neg_cnt_kmer_df = get_motif_df(args.neg_path, args.cpu)
+    pos_cnt = len(pos_cnt_kmer_df)
+    neg_cnt = len(neg_cnt_kmer_df)
+    if pos_cnt > neg_cnt:
+        pos_cnt_kmer_df = sample_dataset_kmer_balanced(pos_cnt_kmer_df, sample_ratio = neg_cnt , seed = seed)
+    elif pos_cnt < neg_cnt:
+        neg_cnt_kmer_df = sample_dataset_kmer_balanced(neg_cnt_kmer_df, sample_ratio = pos_cnt , seed = seed)
+    else:
+        pass
+    pos_cnt_kmer_df_split = split_dataset_kmer_balanced(pos_cnt_kmer_df, seed = seed)
+    neg_cnt_kmer_df_split = split_dataset_kmer_balanced(neg_cnt_kmer_df, seed = seed)
+
+    pos_train = pos_cnt_kmer_df_split[0]
+    pos_val = pos_cnt_kmer_df_split[1]
+    pos_test = pos_cnt_kmer_df_split[2]
+    neg_train = neg_cnt_kmer_df_split[0]
+    neg_val = neg_cnt_kmer_df_split[1]
+    neg_test = neg_cnt_kmer_df_split[2]
+    
+    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = args.sampling, seed = seed)
+    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = args.sampling, seed = seed)
+    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = args.sampling, seed = seed)
+    neg_train_eng = sample_dataset_kmer_balanced(neg_train, sample_ratio = args.sampling, seed = seed)
+    neg_val_eng = sample_dataset_kmer_balanced(neg_val, sample_ratio = args.sampling, seed = seed)
+    neg_test_eng = sample_dataset_kmer_balanced(neg_test, sample_ratio = args.sampling, seed = seed)
+
+    pos_df_list = [pos_train, pos_val, pos_test, pos_train_eng, pos_val_eng, pos_test_eng]
+    neg_df_list = [neg_train, neg_val, neg_test, neg_train_eng, neg_val_eng, neg_test_eng]
+
+    pos_df_list = [set(df["block_id"]) for df in pos_df_list]
+    neg_df_list = [set(df["block_id"]) for df in neg_df_list]
+
+    pos_path_list = [f"{args.out_path}/main/train/pos/", f"{args.out_path}/main/val/pos/", f"{args.out_path}/main/test/pos/",
+                        f"{args.out_path}/engineering/train/pos/", f"{args.out_path}/engineering/val/pos/", f"{args.out_path}/engineering/test/pos/"]
+    neg_path_list = [f"{args.out_path}/main/train/neg/", f"{args.out_path}/main/val/neg/", f"{args.out_path}/main/test/neg/",
+                        f"{args.out_path}/engineering/train/neg/", f"{args.out_path}/engineering/val/neg/", f"{args.out_path}/engineering/test/neg/"]
+
+    sample_and_save_df(pos_df_list, pos_path_list, args.pos_path, args.cpu)
+    sample_and_save_df(neg_df_list, neg_path_list, args.neg_path, args.cpu)
 
     return None
 
 
-def main():
-    generate_petastorm_dataset()
+
+def main_pos(seed = 42):
+    args = parse_args()
+    os.makedirs(args.out_path, exist_ok=True)
+    printmessage("Loading tokenized data")
+    pos_cnt_kmer_df = get_motif_df(args.pos_path, args.cpu)
+    pos_cnt = len(pos_cnt_kmer_df)
+    printmessage(f"Positive data points: {pos_cnt}")
+    printmessage("Splitting dataset")
+    pos_cnt_kmer_df_split = split_dataset_kmer_balanced(pos_cnt_kmer_df, seed = seed)
+
+    pos_train = pos_cnt_kmer_df_split[0]
+    pos_val = pos_cnt_kmer_df_split[1]
+    pos_test = pos_cnt_kmer_df_split[2]
+
+    printmessage("Sampling engineering dataset")
+    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = args.sampling, seed = seed)
+    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = args.sampling, seed = seed)
+    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = args.sampling, seed = seed)
+
+    pos_df_list = [pos_train, pos_val, pos_test, pos_train_eng, pos_val_eng, pos_test_eng]
+    pos_df_list = [set(df["block_id"]) for df in pos_df_list]
+    pos_path_list = [f"{args.out_path}/main/train/pos/", f"{args.out_path}/main/val/pos/", f"{args.out_path}/main/test/pos/",
+                        f"{args.out_path}/engineering/train/pos/", f"{args.out_path}/engineering/val/pos/", f"{args.out_path}/engineering/test/pos/"]
+
+    printmessage("Saving dataset")
+    sample_and_save_df(pos_df_list, pos_path_list, args.pos_path, args.cpu)
+
     return None
 
 
 if __name__ == "__main__":
-    main()
+    main_pos()
+
+

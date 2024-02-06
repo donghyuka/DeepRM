@@ -29,7 +29,7 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict):
                 signal_list.append(signal_arr)
                 id_list.append(str(record.read_id))
         gc.collect()
-    df = pd.DataFrame({"signal": signal_list, "id": id_list, "offset": offset_list, "scale": scale_list})
+    df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
     df.to_pickle(f"{signal_df_path}/{pid}.pkl")
     index_dict[pid] = id_list
     return None
@@ -59,8 +59,8 @@ def extract_move(bam_path,ncpu):
         sl_list.append(sequence_length)
 
     move_df = pd.DataFrame(
-        {"mv": mv_list, "id": id_list, "qs": qs_list, "sm": sm_list, "sd": sd_list, "ts": ts_list, "sl": sl_list})
-    move_df["id"] = move_df["id"].astype(str)
+        {"mv": mv_list, "read_id": id_list, "qs": qs_list, "sm": sm_list, "sd": sd_list, "ts": ts_list, "sl": sl_list})
+    move_df["read_id"] = move_df["read_id"].astype(str)
 
     del mv_list, id_list
     gc.collect()
@@ -72,6 +72,7 @@ def preprocess_pod5(pod5_path, save_path, ncpu):
     # Export pod5 to csv
     pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
+    np.random.shuffle(pod5_path_list)
     pod5_path_list_split = np.array_split(pod5_path_list, ncpu)
 
     man = mp.Manager()
@@ -120,7 +121,7 @@ def segment_spectrogram(signal, move, filter, sampling = 4000, nperseg = 40, str
 def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df, pid_arr):
     for pid in tqdm.tqdm(pid_arr):
         signal_df = pd.read_pickle(f"{signal_df_path}/{pid}.pkl")
-        signal_df = signal_df.merge(move_df, on="id", how="inner")
+        signal_df = signal_df.merge(move_df, on="read_id", how="inner")
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["signal_len"] = signal_df["signal"].apply(lambda x: len(x))
         signal_df = signal_df[signal_df["signal_len"] > signal_df["ts"]]
@@ -131,10 +132,10 @@ def segment_normalize_fft_signal(signal_df_path, seg_df_path, move_df, block_df,
         signal_df["signal_seg"] = signal_df.apply(lambda x: segment_signal(x["signal"], x["mv"]), axis=1)
         filter = scipy.signal.butter(4, 100, btype="highpass", fs=4000, output="sos")
         signal_df["signal_fft"] = signal_df.apply(lambda x: segment_spectrogram(x["signal"], x["mv"], filter), axis=1)
-        signal_df = signal_df[["id", "signal_seg", "signal_fft"]]
+        signal_df = signal_df[["read_id", "signal_seg", "signal_fft"]]
         # signal_df.to_pickle(f"{seg_df_path}/segment/signal_segment_{pid}.pkl")
 
-        block_df_proc = block_df.merge(signal_df, left_on="id", right_on="id", how="inner")
+        block_df_proc = block_df.merge(signal_df, left_on="read_id", right_on="read_id", how="inner")
         block_df_proc["signal_seg"] = block_df_proc.apply(
             lambda row: row["signal_seg"][row["start_pos"]:row["end_pos"]], axis=1)
         block_df_proc["signal_fft"] = block_df_proc.apply(
@@ -164,9 +165,24 @@ def parse_args():
     if os.path.exists(args.output):
         raise FileExistsError(f"Output directory {args.output} already exists")
     os.makedirs(args.output)
-    os.makedirs(f"{args.output}/segment/")
     os.makedirs(f"{args.output}/block/")
     return args
+
+
+def assign_block_id(block_df):
+    index = 0
+    read_id_prev = ""
+    block_id = []
+    for read_id in block_df["read_id"]:
+        if read_id != read_id_prev:
+            index = 0
+        else:
+            index += 1
+        block_id.append(index)
+        read_id_prev = read_id
+    block_df["block_id"] = block_id
+    return block_df
+
 
 
 def main():
@@ -187,10 +203,13 @@ def main():
         pickle.dump(index_dict, outfile)
 
     block_df = pd.read_pickle(args.block)
+    block_df = assign_block_id(block_df)
 
     proc_list = []
     thread_reduction_factor = 8  ## Not to blow up memory. It is a temporary fix and will be removed in the future.
-    pid_arr_split = np.array_split(list(range(args.cpu)), max(1, args.cpu // thread_reduction_factor))
+    pid_arr_split = np.arange(args.cpu)
+    np.random.shuffle(pid_arr_split)
+    pid_arr_split = np.array_split(pid_arr_split, max(1, args.cpu // thread_reduction_factor))
     move_df_proc_list = []
     block_df_proc_list = []
 
@@ -198,9 +217,9 @@ def main():
         id_list = []
         for pid in pid_arr:
             id_list += [str(x) for x in index_dict[pid]]
-        move_df_proc = move_df[move_df["id"].isin(id_list)]
+        move_df_proc = move_df[move_df["read_id"].isin(id_list)]
         move_df_proc_list.append(move_df_proc)
-        block_df_proc = block_df[block_df["id"].isin(id_list)]
+        block_df_proc = block_df[block_df["read_id"].isin(id_list)]
         block_df_proc_list.append(block_df_proc)
 
     del move_df

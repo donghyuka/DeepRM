@@ -5,8 +5,10 @@ import itertools as it
 import json
 import multiprocessing as mp
 import os
+import glob
 import time
 from collections import defaultdict
+import psutil
 
 import networkx as nx
 import numpy as np
@@ -213,12 +215,12 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
 
 def dag_longest_path(edge_list):
     node_list = list(set([x[0] for x in edge_list] + [x[1] for x in edge_list]))
+
     dag = nx.DiGraph()
     dag.add_nodes_from(node_list)
     dag.add_weighted_edges_from(edge_list)
     longest_path = nx.dag_longest_path(dag, weight='weight')
-    # del dag
-    # gc.collect()
+
     return longest_path
 
 
@@ -228,17 +230,30 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
                                             cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
                                             anchor_list, spacer_list, spacer_size, bb_size, flush_path, pid,
                                             flush_interval,
-                                            score_converting_func, cb_size, min_ideal_displacement_dict):
+                                            score_converting_func, cb_size, min_ideal_displacement_dict, resume):
     len_record = len(record_list)
     block_df_list = []
     flush_file_list = []
+    last_flush_idx = 0
 
-    for read_idx, record in tqdm(enumerate(record_list), total=len_record):
+    if resume is not None:
+        ## search for last flush file
+        flush_file_list = glob.glob(f"{resume}/df_{pid}_*.pkl")
+        if len(flush_file_list) > 0:
+            flush_idx = [int(x.split("_")[-1].split(".")[0]) for x in flush_file_list]
+            last_flush_idx = max(flush_idx)
+            record_list = record_list[last_flush_idx:]
+            gc.collect()
+            printmessage(f"[Process-{pid}] Resuming from {last_flush_idx}th read. {len(record_list)} reads remaining.")
+        else:
+            printmessage(f"[Process-{pid}] No flush file found. Starting from the beginning.")
 
+    for read_idx, record in tqdm(enumerate(record_list), total=len(record_list)):
+        oom_killer()
+        read_idx += last_flush_idx
         read_id = record[0]
-        seq = record[1]
-        phred = np.array(record[2])
-        seq = str(seq.replace("T", "U"))
+        seq = record[1].replace("T", "U")
+        phred = record[2]
 
         cb_info_dict, dag_list, dag_dict = find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict,
                                                                  skip_size_tolerance, cb_pad,
@@ -318,7 +333,8 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
                                   skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
                                   spacer_mismatch_tolerance, max_read_length,
                                   spacer_mismatch_penalty, anchor_list, spacer_list, spacer_size, cb_pad,
-                                  cb_per_bb, read_bq_cutoff, cb_bq_cutoff, flush_path, flush_interval, ncpu, **kwargs):
+                                  cb_per_bb, read_bq_cutoff, cb_bq_cutoff, flush_path, flush_interval, ncpu,
+                                  resume, **kwargs):
     spacer_list = [x.replace("T", "U") for x in spacer_list]
     anchor_list = [x.replace("T", "U") for x in anchor_list]
     indel_dict = get_integer_partition(indel_tolerance, cb_size_tolerance)
@@ -338,7 +354,8 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
             if qscore >= read_bq_cutoff :
                 read_length = record.query_length
                 if read_length <= max_read_length:
-                    record_tuple = (record.query_name, record.query_sequence, record.query_qualities, read_length)
+                    record_tuple = (str(record.query_name), str(record.query_sequence),
+                                    np.array(record.query_qualities), int(read_length))
                     record_list.append(record_tuple)
     record_list.sort(key=lambda x: x[3], reverse=True)
     record_cnt = len(record_list)
@@ -360,7 +377,7 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
                                 cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
                                 anchor_list, spacer_list, spacer_size, bb_size,
                                 flush_path, pid, flush_interval, score_converting_func, cb_size,
-                                min_ideal_displacement_dict))
+                                min_ideal_displacement_dict, resume))
         proc_list.append(proc)
         proc.start()
 
@@ -426,6 +443,7 @@ def parse_args():
     parser.add_argument("--ml", dest="max_read_length", type=int, default=1000)
 
     parser.add_argument("--cfg", dest="config", type=str, default=None)
+    parser.add_argument("--resume", dest="resume", type=str, default=None, help="Continue from previous run. Provide the path to the previous output.")
 
     args = parser.parse_args()
 
@@ -440,8 +458,20 @@ def parse_args():
     assert len(args.spacer_list) == args.cb_per_bb + 1
     assert args.skip_size_tolerance >= args.cb_size_tolerance
 
+    if args.resume is not None:
+        if not os.path.exists(args.resume):
+            raise FileNotFoundError(f"ERROR! {args.resume} does not exist.")
+
     return args
 
+
+def oom_killer():
+    mem_total = psutil.virtual_memory().total
+    mem_threshold = 0.98 * mem_total
+    if psutil.virtual_memory().available < mem_threshold:
+        printmessage("[dag_extract_cb.py] Memory usage is too high. Killing the program.")
+        os.system("pkill -9 -f dag_extract_cb.py")
+    return None
 
 def main():
     args = parse_args()
@@ -452,14 +482,18 @@ def main():
         raise FileExistsError(f"ERROR! {args.output} already exists.")
 
     base_path = os.path.dirname(args.output)
-    flush_path = f"{base_path}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
-    os.makedirs(flush_path, exist_ok=True)
-    atexit.register(os.system, f"rm -r {flush_path}")
+    if args.resume is not None:
+        flush_path = args.resume
+
+    else:
+        flush_path = f"{base_path}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
+        os.makedirs(flush_path, exist_ok=True)
+        # atexit.register(os.system, f"rm -r {flush_path}")
 
     args_dict = vars(args)
-
     extract_blocks_from_read_list(**args_dict, flush_path=flush_path)
 
+    # os.system(f"rm -r {flush_path}")
     return None
 
 

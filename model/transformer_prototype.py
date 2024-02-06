@@ -8,6 +8,7 @@ class TransformerModel(nn.Module):
 
     def __init__(self, ntoken: int, d_model: int, nhead: int, d_ff: int,
                  d_kmer_embedding: int, d_signal_embedding: int, d_spectrogram_embedding: int, d_bq_embedding: int,
+                 d_pos_embedding: int,
                  nlayers: int, dropout: float = 0.1, kmer_size: int = 5, signal_size: int = 5, spectrogram_size: int = 20,
                  t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1) -> None:
         super().__init__()
@@ -28,6 +29,15 @@ class TransformerModel(nn.Module):
         self.final_linear = self.build_linear(d_model, lin_act, lin_depth)
 
         self.init_weights()
+
+
+    def cosine_pos_encoder(self, d_pos_embedding, d_model):
+        encoder = torch.zeros(1000, d_model)
+        position = torch.arange(0, 1000).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_pos_embedding, 2) * -(math.log(10000.0) / d_pos_embedding))
+        encoder[:, 0::2] = torch.sin(position * div_term)
+        encoder[:, 1::2] = torch.cos(position * div_term)
+        return encoder
 
     def build_linear(self, d_model, lin_act, lin_depth):
         if lin_act == 'relu':

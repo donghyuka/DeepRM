@@ -1,6 +1,5 @@
-import torch
 from torch.utils.data.dataset import Dataset
-from preprocess.compile_dataset import define_schema
+from archived.compile_dataset import define_schema
 from petastorm import make_batch_reader
 from petastorm.pytorch import DataLoader
 

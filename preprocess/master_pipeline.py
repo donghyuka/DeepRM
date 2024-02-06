@@ -112,26 +112,27 @@ def main():
     # printmessage(cmd)
     # os.system(cmd)
 
-    ## step 2. Run dag_extract_cb.py
-    printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
+    # ## step 2. Run dag_extract_cb.py
+    # printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
     block_df_path = f"{wdir}/block_df.pkl"
-    cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
+    # cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
+    # printmessage(cmd)
+    # os.system(cmd)
+
+    # Step 3. Run segment_normalize_signal.py
+    printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
+    signal_path = f"{wdir}/normalized_segment_signal/"
+    cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"
     printmessage(cmd)
     os.system(cmd)
 
-    # ## Step 3. Run segment_normalize_signal.py
-    # printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
-    # signal_path = f"{wdir}/normalized_segment_signal/"
-    # cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"
-    # printmessage(cmd)
-    # os.system(cmd)
-    #
-    # ## step 4. run tokenizer.py
-    # printmessage(f"[Step 4/4] Running Tokenization")
-    # signal_path = f"{signal_path}/block"
-    # cmd = f"python -m preprocess.tokenizer --cpu {args.cpu} --signal {signal_path} --block {block_df_path} --output {args.output}"
-    # printmessage(cmd)
-    # os.system(cmd)
+    ## step 4. run tokenizer.py
+    printmessage(f"[Step 4/4] Running Tokenization")
+    signal_path = f"{signal_path}/block"
+    token_path = f"{args.output}/token"
+    cmd = f"python -m preprocess.tokenizer --cpu {args.cpu} --signal {signal_path} --output {token_path}"
+    printmessage(cmd)
+    os.system(cmd)
 
     pass
 
