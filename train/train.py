@@ -83,15 +83,14 @@ class Trainer:
         ## END of __init__
 
 
-    def _run_batch(self, source, target):
-        self.optimizer.zero_grad()
-        batch_start_time = time.time()
+    def _feed_model(self, source, target):
         src_kmer = source["kmer_token"]
         src_signal = source["signal_token"]
         src_spectrogram = source["spectrogram_token"]
         src_bq = source["bq_token"]
         src_pad_mask = (src_kmer == 0).transpose(0,1)
         src_target_mask = source["target_mask"]
+        src_move = source["move_token"]
 
         src_kmer = src_kmer.to(self.gpu_id)
         src_signal = src_signal.to(self.gpu_id)
@@ -99,9 +98,16 @@ class Trainer:
         src_bq = src_bq.to(self.gpu_id)
         src_pad_mask = src_pad_mask.to(self.gpu_id)
         src_target_mask = src_target_mask.to(self.gpu_id)
+        src_move = src_move.to(self.gpu_id)
         target = target.to(self.gpu_id)
+        output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+        return output, target
 
-        output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_pad_mask, src_target_mask)
+
+    def _run_batch(self, source, target):
+        self.optimizer.zero_grad()
+        batch_start_time = time.time()
+        output, target = self._feed_model(source, target)
         loss = self.loss_func(output, target)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -147,23 +153,7 @@ class Trainer:
         targets = []
         with torch.no_grad():
             for source, target in self.val_loader:
-
-                src_kmer = source["kmer_token"]
-                src_signal = source["signal_token"]
-                src_spectrogram = source["spectrogram_token"]
-                src_bq = source["bq_token"]
-                src_pad_mask = (src_kmer == 0).transpose(0,1)
-                src_target_mask = source["target_mask"]
-
-                src_kmer = src_kmer.to(self.gpu_id)
-                src_signal = src_signal.to(self.gpu_id)
-                src_spectrogram = src_spectrogram.to(self.gpu_id)
-                src_bq = src_bq.to(self.gpu_id)
-                src_pad_mask = src_pad_mask.to(self.gpu_id)
-                src_target_mask = src_target_mask.to(self.gpu_id)
-                target = target.to(self.gpu_id)
-
-                output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_pad_mask, src_target_mask)
+                output, target = self._feed_model(source, target)
                 loss = self.loss_func(output, target)
                 total_loss += loss.item()
                 outputs.append(output)
@@ -257,7 +247,7 @@ def main_worker(rank, args_dict):
     setup_ddp(rank, args_dict["gpu"])
     model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, n_layers = 6,
                              encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 25, spectrogram_size = 21,
-                             t_act = 'gelu', lin_act = 'relu', lin_depth = 3)
+                             t_act = 'gelu', lin_act = 'relu', lin_depth = 3, block_len = 17)
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"])
     scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000,
                                                                                 num_training_steps = 10000)

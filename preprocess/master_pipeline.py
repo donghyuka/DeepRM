@@ -3,7 +3,6 @@ from utils.utils import printmessage
 
 
 def restructure_directory(args, dir_keyword = "raw"):
-    ## TODO: This function is not working properly. It should be fixed.
     ## Check if pod5 files exist
     pod5_list = os.listdir(args.input)
     pod5_list = [i for i in pod5_list if i.endswith(".pod5")]
@@ -22,42 +21,44 @@ def restructure_directory(args, dir_keyword = "raw"):
         args.input = rename_path
 
         ## check if input directory has a single subdirectory
-        subdir_list = os.listdir(args.input)
+        subdir_list = os.listdir(args.input_path)
         if len(subdir_list) != 1:
             raise ValueError(f"Input directory {args.input} contains multiple subdirectories.")
 
-        subdir_path = subdir_list[0]
-        rename_path = os.path.join(args.input, args.rename)
-        os.rename(subdir_path, rename_path)
-        args.input = rename_path
-
+        subdir_path = os.path.join(args.input_path, subdir_list[0])
         ## check if input directory has a single subdirectory
-        subdir_list = os.listdir(args.input)
+        subdir_list = os.listdir(subdir_path)
         if len(subdir_list) != 1:
-            raise ValueError(f"Input directory {args.input} contains multiple subdirectories.")
+            raise ValueError(f"Input directory {subdir_path} contains multiple subdirectories.")
 
-        subdir_path = subdir_list[0]
+        subsubdir_path = os.path.join(subdir_path, subdir_list[0])
         rename_path = os.path.join(args.input, dir_keyword)
-        os.rename(subdir_path, rename_path)
+        os.rename(subsubdir_path, rename_path)
+        os.rmdir(subdir_path)
         args.input = rename_path
 
         ## check if input directory has "pod5_pass", "pod5_fail" subdirectories
         subdir_list = os.listdir(args.input)
         if "pod5_pass" not in subdir_list or "pod5_fail" not in subdir_list:
-            raise ValueError(f"Input directory {args.input} does not contain pod5_pass and pod5_fail subdirectories.")
-        os.makedirs(f"{args.input}/pod5", exist_ok=True)
+            if "pod5" in subdir_list:
+                pass
+            else:
+                raise ValueError(f"Input directory {args.input} does not contain pod5_pass and pod5_fail subdirectories.")
 
-        ## move pod5 files to pod5 directory
-        for subdir in ["pod5_pass", "pod5_fail"]:
-            subdir_path = os.path.join(args.input, subdir)
-            cmd = f"mv {subdir_path}/*.pod5 {args.input}/pod5/"
-            os.system(cmd)
+        else:
+            os.makedirs(f"{args.input}/pod5", exist_ok=True)
 
-        ## check if empty directories remain
-        for subdir in ["pod5_pass", "pod5_fail"]:
-            subdir_path = os.path.join(args.input, subdir)
-            if len(os.listdir(subdir_path)) == 0:
-                os.rmdir(subdir_path)
+            ## move pod5 files to pod5 directory
+            for subdir in ["pod5_pass", "pod5_fail"]:
+                subdir_path = os.path.join(args.input, subdir)
+                cmd = f"mv {subdir_path}/*.pod5 {args.input}/pod5/"
+                os.system(cmd)
+
+            ## check if empty directories remain
+            for subdir in ["pod5_pass", "pod5_fail"]:
+                subdir_path = os.path.join(args.input, subdir)
+                if len(os.listdir(subdir_path)) == 0:
+                    os.rmdir(subdir_path)
 
         ## set input directory to pod5 directory
         args.input = f"{args.input}/pod5"

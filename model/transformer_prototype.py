@@ -9,7 +9,7 @@ class TransformerModel(nn.Module):
 
     def __init__(self, d_model: int, n_heads: int, d_ff: int,
                  n_layers: int, encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
-                 kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40,
+                 kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40, block_len = 17,
                  t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1) -> None:
         super().__init__()
         self.model_type = 'Transformer'
@@ -20,7 +20,7 @@ class TransformerModel(nn.Module):
         self.spectrogram_embedding = nn.Linear(spectrogram_size, d_model)
         self.bq_embedding = nn.Embedding(max_bq, d_model)
         self.pos_encoding = PositionalEncoding(d_model, encoder_dropout)
-        ## TODO: use move token.
+        self.move_embedding = nn.Embedding(block_len, d_model)
 
         ## Encoder Initialization
         self.d_model = d_model
@@ -40,12 +40,13 @@ class TransformerModel(nn.Module):
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
         self.spectrogram_embedding.weight.data.uniform_(-initrange, initrange)
         self.bq_embedding.weight.data.uniform_(-initrange, initrange)
+        self.move_embedding.weight.data.uniform_(-initrange, initrange)
         self.regerssion_head.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         return None
 
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor,
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor, src_move: Tensor,
                 src_pad_mask: Tensor, target_mask: Tensor) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
@@ -53,10 +54,11 @@ class TransformerModel(nn.Module):
         spectrogram_embedding = self.spectrogram_embedding(src_spectrogram)
         bq_embedding = self.bq_embedding(src_bq)
         pos_encoding = self.pos_encoding(torch.zeros_like(kmer_embedding))
+        move_embedding = self.move_embedding(src_move)
 
         ## add all embeddings
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding, pos_encoding], dim = 0).sum(dim = 0)
-
+        final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding,
+                                       pos_encoding, move_embedding], dim = 0).sum(dim = 0)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
         if target_mask is not None:
             output = output * target_mask
