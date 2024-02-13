@@ -1,8 +1,11 @@
+import os
 import re
+import sys
 import time
 from datetime import datetime
 import numpy as np
 import pandas as pd
+import psutil
 from colorama import Fore, Style
 from scipy import stats
 
@@ -11,6 +14,7 @@ from scipy import stats
 ## The functions are not organized or documented.
 ## Maybe I will organize them later.
 ## Which almost certainly means never.
+## But who knows? Maybe after the release of Half-Life 3 and Python 4.0.
 
 
 def seq_to_onehot(seq:str):
@@ -37,21 +41,9 @@ def comp_RNA(seq):
     return "".join([basemap[i] for i in seq])
 
 
-def d2r(seq):
-    basemap = dict(zip("ATCG", "AUCG"))
+def comp_DNA(seq):
+    basemap = dict(zip("ATCG", "TAGC"))
     return "".join([basemap[i] for i in seq])
-
-
-def get_image_id(nmid, pos):
-    ## The format for image_id is "XX:AAAAAAAAA:NNNNNN"
-    ## XX is NMID prefix
-    ## AAAAAAAAA is NMID suffix
-    ## NNNNNN is position
-    nmid_prefix = nmid[:2]
-    nmid_suffix = nmid.split(".")[0][3:]
-    nmid_suffix = "0" * (9 - len(nmid_suffix)) + nmid_suffix
-    image_id = f"{nmid_prefix}:{nmid_suffix}:{pos:06d}"
-    return image_id
 
 
 def ncid_to_chr(ncid):
@@ -65,7 +57,6 @@ def ncid_to_chr(ncid):
     else:
         chr = "chrUnk"
     return chr
-
 
 
 def parse_refflat(refflat_path="/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.gtf.refflat.txt"):
@@ -174,10 +165,11 @@ def printmessage(*string, color=None, color_time="green", end='\n'):
 
 
 def print_in_box(msg, indent=1, width=None, title=None, color=None):
+    ## Print message-box with optional title.
+    ## Based on: https://stackoverflow.com/questions/39969064/how-to-print-a-message-box-in-python
+
     COLOR_FORE_DICT = {'red': Fore.RED, 'green': Fore.GREEN, 'yellow': Fore.YELLOW,
                        'blue': Fore.BLUE, 'magenta': Fore.MAGENTA, 'cyan': Fore.CYAN, 'white': Fore.WHITE}
-
-    """Print message-box with optional title."""
     lines = msg.split('\n')
     space = " " * indent
     if not width:
@@ -198,6 +190,7 @@ def print_in_box(msg, indent=1, width=None, title=None, color=None):
             print(f'Warning: color {color} not supported')
 
     print(box)
+    return None
 
 
 class Timeit(object):
@@ -217,5 +210,25 @@ class Timeit(object):
 
 
 def mean_phred(phred):
+    ## When averaging PHRED scores, note that the PHRED score is logarithmically scaled.
     return -10 * np.log10(np.mean(10 ** (-np.array(phred) / 10)))
+
+
+def oom_killer(program_name=None, margin=0.01):
+    if program_name is None:
+        program_name = os.path.basename(sys.argv[0])
+    mem_total = psutil.virtual_memory().total
+    mem_threshold = mem_total * margin
+    if psutil.virtual_memory().available < mem_threshold:
+        printmessage(f"[{program_name}] Memory usage is too high. Killing the program.")
+        ## check if in subprocess
+        if os.getppid() == 1:
+            printmessage(f"[{program_name}] Parent process is init. Killing the program.")
+            sys.exit(1)
+        else:
+            printmessage(f"[{program_name}] Parent process is not init. Killing the parent process.")
+            os.kill(os.getppid(), 9)
+            sys.exit(1)
+
+    return None
 

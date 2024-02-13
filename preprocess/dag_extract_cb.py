@@ -17,7 +17,7 @@ import polyleven as pl
 import pysam
 from tqdm import tqdm
 
-from utils.utils import mean_phred, printmessage
+from utils.utils import mean_phred, printmessage, oom_killer
 
 
 ## Step 1: Index all k-mers from the read.
@@ -249,7 +249,7 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
             printmessage(f"[Process-{pid}] No flush file found. Starting from the beginning.")
 
     for read_idx, record in tqdm(enumerate(record_list), total=len(record_list)):
-        oom_killer()
+        oom_killer(os.path.basename(__file__))
         read_idx += last_flush_idx
         read_id = record[0]
         seq = record[1].replace("T", "U")
@@ -465,14 +465,6 @@ def parse_args():
     return args
 
 
-def oom_killer():
-    mem_total = psutil.virtual_memory().total
-    mem_threshold = 0.98 * mem_total
-    if psutil.virtual_memory().available < mem_threshold:
-        printmessage("[dag_extract_cb.py] Memory usage is too high. Killing the program.")
-        os.system("pkill -9 -f dag_extract_cb.py")
-    return None
-
 def main():
     args = parse_args()
 
@@ -493,7 +485,7 @@ def main():
     args_dict = vars(args)
     extract_blocks_from_read_list(**args_dict, flush_path=flush_path)
 
-    # os.system(f"rm -r {flush_path}")
+    os.system(f"rm -r {flush_path}")
     return None
 
 

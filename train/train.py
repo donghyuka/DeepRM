@@ -29,16 +29,8 @@ def parse_args():
     parser.add_argument("--es_patience", type=int, default="10")
     parser.add_argument("--es_start", type=int, default="1")
     parser.add_argument("--disk_shard_size", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
-
-
-def setup_ddp(rank,world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
-    return None
 
 
 class Trainer:
@@ -130,8 +122,9 @@ class Trainer:
 
         return None
 
+
     def _run_epoch(self):
-        batch_size = len(next(iter(self.train_loader))[0])
+        batch_size = len(next(iter(self.train_loader))[0]["kmer_token"])
         print(f"[GPU{self.gpu_id}] Epoch {self.current_epoch} | Batchsize: {batch_size} | Steps: {len(self.train_loader)}")
         self.train_loader.set_epoch(self.current_epoch)
         self.val_loader.set_epoch(self.current_epoch)
@@ -235,14 +228,21 @@ class Trainer:
     ## END of Class NanoporeTrainer
 
 
+def setup_ddp(rank,world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+    return None
+
 
 def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replicas, seed):
 
     batch_size = batch_size
-    train_pos_data_path = f"{data_path}/engineering/train/pos"
-    train_neg_data_path = f"{data_path}/engineering/train/neg"
-    val_pos_data_path = f"{data_path}/engineering/val/pos"
-    val_neg_data_path = f"{data_path}/engineering/val/neg"
+    train_pos_data_path = f"{data_path}/engineeringv2/train/pos"
+    train_neg_data_path = f"{data_path}/engineeringv2/train/neg"
+    val_pos_data_path = f"{data_path}/engineeringv2/val/pos"
+    val_neg_data_path = f"{data_path}/engineeringv2/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size,
                                 disk_shard_size, rank, num_replicas, seed = seed, shuffle = True, drop_last = True)
@@ -252,42 +252,39 @@ def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replica
     return train_loader, val_loader
 
 
-
 def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
-    printmessage(f"[GPU {rank}] DDP Setup Complete.")
-    model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, d_kmer_embedding = 128, d_signal_embedding = 128,
-                             d_spectrogram_embedding = 128, d_bq_embedding = 128, d_pos_encoding = 128, n_layers = 6,
-                             encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 5, spectrogram_size = 20,
-                             t_act = 'gelu', lin_act = 'relu', lin_depth = 1)
-    printmessage(f"[GPU {rank}] Model Setup Complete.")
-    optimizer = transformers.AdamW(model.parameters(), lr = args_dict["lr"])
+    model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, n_layers = 6,
+                             encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 25, spectrogram_size = 21,
+                             t_act = 'gelu', lin_act = 'relu', lin_depth = 3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"])
     scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000,
                                                                                 num_training_steps = 10000)
     loss_func = torch.nn.MSELoss()
     metric_func_dict = {"acc": cm.BinaryAccuracy, "auc": cm.BinaryAUROC, "f1": cm.BinaryF1Score}
-    printmessage(f"[GPU {rank}] Optimizer and Scheduler Setup Complete.")
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["disk_shard_size"],
                                                   rank, args_dict["gpu"], args_dict["seed"])
-    printmessage(f"[GPU {rank}] Dataloader Setup Complete.")
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, 1.0, metric_func_dict,
                         100, args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                         args_dict["es_delta"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
-    printmessage(f"[GPU {rank}] Training Complete.")
+    printmessage(f"[GPU {rank}] Training Loop Complete.")
     dist.destroy_process_group()
     return None
 
 
 def main_master():
     args = parse_args()
+    if args.seed is None:
+        args.seed = np.random.randint(0, 1000000 )
+    printmessage(f"Seed: {args.seed}")
     printmessage("Training Program Started.")
     printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
     mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
-    printmessage(f"Training Complete.")
+    printmessage(f"Training Program Complete.")
     return None
 
 

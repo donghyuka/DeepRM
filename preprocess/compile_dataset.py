@@ -246,6 +246,8 @@ def main(seed = 42):
     args = parse_args()
     os.makedirs(args.out_path, exist_ok=True)
     os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
+    os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
+
     pos_metadata_df = get_metadata_df(args.pos_path, args.cpu)
     neg_metadata_df = get_metadata_df(args.neg_path, args.cpu)
     pos_cnt = len(pos_metadata_df)
@@ -324,43 +326,8 @@ def main(seed = 42):
 
     return None
 
-def main2(seed = 42):
-    args = parse_args()
-    os.makedirs(args.out_path, exist_ok=True)
-    os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
-    os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
-
-    pos_train_eng = pd.read_pickle(f"{args.out_path}/metadata/pos_train_eng.pkl")
-    pos_val_eng   = pd.read_pickle(f"{args.out_path}/metadata/pos_val_eng.pkl")
-    pos_test_eng  = pd.read_pickle(f"{args.out_path}/metadata/pos_test_eng.pkl")
-    neg_train_eng = pd.read_pickle(f"{args.out_path}/metadata/neg_train_eng.pkl")
-    neg_val_eng   = pd.read_pickle(f"{args.out_path}/metadata/neg_val_eng.pkl")
-    neg_test_eng  = pd.read_pickle(f"{args.out_path}/metadata/neg_test_eng.pkl")
-
-    pos_df_list = [pos_train_eng, pos_val_eng, pos_test_eng]
-    neg_df_list = [neg_train_eng, neg_val_eng, neg_test_eng]
-
-    pos_df_list = [set(df["block_id"]) for df in pos_df_list]
-    neg_df_list = [set(df["block_id"]) for df in neg_df_list]
-
-    pos_path_list = [f"{args.out_path}/engineeringv2/train/pos/", f"{args.out_path}/engineeringv2/val/pos/", f"{args.out_path}/engineeringv2/test/pos/"]
-    neg_path_list = [f"{args.out_path}/engineeringv2/train/neg/", f"{args.out_path}/engineeringv2/val/neg/", f"{args.out_path}/engineeringv2/test/neg/"]
-    pos_metadata_path_list = [f"{args.out_path}/metadata_path/pos_train_eng.pkl", f"{args.out_path}/metadata_path/pos_val_eng.pkl", f"{args.out_path}/metadata_path/pos_test_eng.pkl"]
-    neg_metadata_path_list = [f"{args.out_path}/metadata_path/neg_train_eng.pkl", f"{args.out_path}/metadata_path/neg_val_eng.pkl", f"{args.out_path}/metadata_path/neg_test_eng.pkl"]
-    pos_original_metadata_path_list = [f"{args.out_path}/metadata/pos_train_eng.pkl", f"{args.out_path}/metadata/pos_val_eng.pkl", f"{args.out_path}/metadata/pos_test_eng.pkl"]
-    neg_original_metadata_path_list = [f"{args.out_path}/metadata/neg_train_eng.pkl", f"{args.out_path}/metadata/neg_val_eng.pkl", f"{args.out_path}/metadata/neg_test_eng.pkl"]
-
-    for path in pos_path_list:
-        os.makedirs(path, exist_ok=True)
-    for path in neg_path_list:
-        os.makedirs(path, exist_ok=True)
-    sample_and_save_df(pos_df_list, pos_path_list, pos_original_metadata_path_list, pos_metadata_path_list, args.pos_path, args.cpu, label = 0, chunk = args.chunk)
-    sample_and_save_df(neg_df_list, neg_path_list, neg_original_metadata_path_list, neg_metadata_path_list, args.neg_path, args.cpu, label = 1, chunk = args.chunk)
-
-    return None
-
 
 if __name__ == "__main__":
-    main2()
+    main()
 
 

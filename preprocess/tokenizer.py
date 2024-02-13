@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
+from utils.utils import oom_killer
 
 def sequence_to_kmer_token(seq, kmer):
     ## 1. change string to array of int - 0, 1, 2, 3
@@ -53,7 +54,10 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
     signal_segmented = np.concatenate(signal_segmented)
     signal_segmented = np.stack(np.split(signal_segmented, len(signal_segmented) // sampling), axis=0)
     signal_segmented = np.array([np.concatenate(signal_segmented[i:i+sig_window]) for i in range(len(signal_segmented)-sig_window+1)])
-    signal_segmented = signal_segmented[l_skip:-r_skip]
+    if r_skip > 0:
+        signal_segmented = signal_segmented[l_skip:-r_skip]
+    else:
+        signal_segmented = signal_segmented[l_skip:]
     return signal_segmented
 
 
@@ -66,6 +70,7 @@ def create_target_mask(segment_len_arr, lr_pad):
     binary_mask[lr_pad] = 1
     binary_mask = np.repeat(binary_mask, segment_len_arr)
     return binary_mask
+
 
 def parse_args():
     ## Usage: "python tokenizer.py --cpu {args.thread} --signal {signal_path} --output {args.output}"
@@ -88,6 +93,7 @@ def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_l
     trim = kmer//2
 
     for file_id, signal_df_path in tqdm.tqdm(zip(file_id_arr, signal_df_path_arr), total=len(file_id_arr)):
+        oom_killer()
         signal_df = pd.read_pickle(f"{signal_df_path}")
         signal_df = signal_df[signal_df["penalty"] <= max_penalty]
         signal_df["block_id"] = signal_df["read_id"] + "-" + signal_df["block_id"].astype(str)
@@ -95,23 +101,20 @@ def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_l
         signal_df["signal_fft"] = signal_df["signal_fft"].apply(lambda x: x[trim:-trim])
         signal_df["bq"] = signal_df["bq"].apply(lambda x: x[trim:-trim])
         signal_df["segment_len_arr"] = signal_df["signal_seg"].apply(lambda x: create_segment_len_arr(x, sampling))
+        signal_df["signal_token"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal_seg"], x["segment_len_arr"],
+                                                                                        kmer, sampling, sig_window), axis=1)
         signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x[trim:-trim])
         signal_df["kmer_token"] = signal_df["motif"].apply(lambda x: sequence_to_kmer_token(x, kmer))
         signal_df["kmer_token"] = signal_df.apply(lambda x: expand_token_to_segment(x["kmer_token"], x["segment_len_arr"]), axis=1)
         signal_df["bq_token"] = signal_df.apply(lambda x: expand_token_to_segment(x["bq"], x["segment_len_arr"]), axis=1)
         signal_df["position_token"] = signal_df["segment_len_arr"].apply(lambda x: create_positional_token(np.sum(x)))
         signal_df["move_token"] = signal_df["segment_len_arr"].apply(lambda x: create_move_token(x))
-        signal_df["signal_token"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal_seg"], x["segment_len_arr"],
-                                                                                        kmer, sampling, sig_window), axis=1)
         signal_df["spectrogram_token"] = signal_df["signal_fft"].apply(lambda x: segmented_fft_to_block(x, fft_scale))
         signal_df["target_mask"] = signal_df["segment_len_arr"].apply(lambda x: create_target_mask(x, cb_lr_pad))
         signal_df = signal_df[["block_id", "motif", "block_score", "kmer_token", "bq_token", "position_token", "signal_token",
                                "spectrogram_token", "move_token", "target_mask"]].copy()
         gc.collect()
 
-        # signal_df.to_pickle(f"{output_dir}/tokenized_{file_id}.pkl")
-        # del signal_df
-        # gc.collect()
 
         for chunk_idx in range(0, len(signal_df) // chunk + 1):
             chunk_df = signal_df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(signal_df))].copy()

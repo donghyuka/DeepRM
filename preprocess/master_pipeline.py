@@ -3,6 +3,7 @@ from utils.utils import printmessage
 
 
 def restructure_directory(args, dir_keyword = "raw"):
+    ## TODO: This function is not working properly. It should be fixed.
     ## Check if pod5 files exist
     pod5_list = os.listdir(args.input)
     pod5_list = [i for i in pod5_list if i.endswith(".pod5")]
@@ -96,30 +97,30 @@ def main():
     wdir = f"{args.output}/intermediates/"
     os.makedirs(wdir, exist_ok=True)
 
-    # ## step 1. Run Dorado Basecaller and SAMtools
-    # printmessage(f"[Step 1/4] Running Dorado Basecaller and SAMtools")
+    ## step 1. Run Dorado Basecaller and SAMtools
+    printmessage(f"[Step 1/4] Running Dorado Basecaller and SAMtools")
     dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v3.0.1"
     bam_path = f"{wdir}/dorado_output.bam"
     pod5_path = args.input
-    # cmd = f"{args.dorado}/bin/dorado basecaller -x {args.gpu} -b {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
-    # printmessage(cmd)
-    # os.system(cmd)
-    #
-    # cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"
-    # printmessage(cmd)
-    # os.system(cmd)
-    # cmd = f"samtools index -@ {args.cpu} {bam_path}"
-    # printmessage(cmd)
-    # os.system(cmd)
+    cmd = f"{args.dorado}/bin/dorado basecaller -x {args.gpu} -b {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
+    printmessage(cmd)
+    os.system(cmd)
 
-    # ## step 2. Run dag_extract_cb.py
-    # printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
+    cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"
+    printmessage(cmd)
+    os.system(cmd)
+    cmd = f"samtools index -@ {args.cpu} {bam_path}"
+    printmessage(cmd)
+    os.system(cmd)
+
+    ## step 2. Run dag_extract_cb.py
+    printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
     block_df_path = f"{wdir}/block_df.pkl"
-    # cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
-    # printmessage(cmd)
-    # os.system(cmd)
+    cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
+    printmessage(cmd)
+    os.system(cmd)
 
-    # Step 3. Run segment_normalize_signal.py
+    ## Step 3. Run segment_normalize_signal.py
     printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
     signal_path = f"{wdir}/normalized_segment_signal/"
     cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"

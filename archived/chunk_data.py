@@ -3,7 +3,6 @@ import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
 import numpy as np
 
-
 def worker(out_path, path_list, chunk = 10000):
     for path in tqdm.tqdm(path_list):
         df = pd.read_pickle(path)
@@ -14,6 +13,7 @@ def worker(out_path, path_list, chunk = 10000):
         del df, signal_df
         gc.collect()
     return None
+
 
 def main():
     path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0093/ON0093/result/dorado/intermediates/normalized_segment_signal/block"

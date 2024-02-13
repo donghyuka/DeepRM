@@ -3,8 +3,8 @@ import math
 from torch.utils.data.dataset import Dataset, IterableDataset
 from torch.utils.data import DataLoader
 import pandas as pd
-import numpy as np
 import glob
+from utils.utils import printmessage
 
 ## Based on https://discuss.pytorch.org/t/an-iterabledataset-implementation-for-chunked-data/124437 by Majid Hajiheidari
 ## Load Nanopore Dataset from Pickled Pandas DataFrame
@@ -193,9 +193,11 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
 
 
 class NanoporeDataLoader(DataLoader):
-    def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, shuffle, sampler):
+    def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn):
+        shuffle = False
+        sampler = None
         super().__init__(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory,
-                                           drop_last=drop_last, shuffle=shuffle, sampler=sampler)
+                         drop_last=drop_last, shuffle=shuffle, sampler=sampler, collate_fn=collate_fn)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -218,7 +220,41 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
     dataset = NanoporeDataset(pos_data_path, neg_data_path, batch_size,
                                 disk_shard_size, rank, num_replicas, seed, shuffle, drop_last)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=8, pin_memory=True, drop_last=True,
-                            shuffle = False, sampler = None)
+                                    collate_fn = pad_collate)
     return dataloader
 
 
+def pad_collate(batch):
+    ## Collate function for DataLoader
+    ## Based on NanoporeDataset
+    ## Transform into Batch First
+
+    kmer_token = [item[0]["kmer_token"] for item in batch]
+    printmessage([item.shape for item in kmer_token])
+    bq_token = [item[0]["bq_token"] for item in batch]
+    position_token = [item[0]["position_token"] for item in batch]
+    signal_token = [item[0]["signal_token"] for item in batch]
+    spectrogram_token = [item[0]["spectrogram_token"] for item in batch]
+    move_token = [item[0]["move_token"] for item in batch]
+    target_mask = [item[0]["target_mask"] for item in batch]
+    label = [item[1] for item in batch]
+
+    ## Zero pad the followings: kmer_token, bq_token, position_token, signal_token, spectrogram_token, move_token
+    kmer_token = torch.nn.utils.rnn.pad_sequence(kmer_token, batch_first=True, padding_value=0)
+    bq_token = torch.nn.utils.rnn.pad_sequence(bq_token, batch_first=True, padding_value=0)
+    position_token = torch.nn.utils.rnn.pad_sequence(position_token, batch_first=True, padding_value=0)
+    signal_token = torch.nn.utils.rnn.pad_sequence(signal_token, batch_first=True, padding_value=0)
+    spectrogram_token = torch.nn.utils.rnn.pad_sequence(spectrogram_token, batch_first=True, padding_value=0)
+    move_token = torch.nn.utils.rnn.pad_sequence(move_token, batch_first=True, padding_value=0)
+    target_mask = torch.nn.utils.rnn.pad_sequence(target_mask, batch_first=True, padding_value=0)
+
+    ## clip bq at 40
+    bq_token = torch.clamp(bq_token, 0, 40)
+
+    target = torch.stack(label, dim=0)
+
+    source = {"kmer_token": kmer_token, "bq_token": bq_token, "position_token": position_token,
+                "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
+                "target_mask": target_mask}
+
+    return source, target
