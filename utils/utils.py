@@ -13,6 +13,15 @@ from scipy import stats
 ## Which almost certainly means never.
 
 
+def seq_to_onehot(seq:str):
+    seq = seq.upper()
+    seq = seq.replace('T', 'U')
+    mapping = dict(zip("ACGU", range(4)))
+    mapped = [mapping[i] for i in seq]
+    result = np.eye(4)[mapped].astype(float)
+    return result
+
+
 def revcomp_RNA(seq):
     basemap = dict(zip("AUTCG", "UAAGC"))
     return "".join([basemap[i] for i in seq[::-1]])
@@ -56,6 +65,7 @@ def ncid_to_chr(ncid):
     else:
         chr = "chrUnk"
     return chr
+
 
 
 def parse_refflat(refflat_path="/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.gtf.refflat.txt"):

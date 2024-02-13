@@ -1,189 +1,296 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from dataloader import load_dataset
+from train.dataloader import load_dataset, NanoporeDataset, NanoporeDataLoader
 from model.transformer_prototype import TransformerModel
 from torch.utils.tensorboard import SummaryWriter
-import torchmetrics.ClassificationMetric as cm
-import GPUtil
+import torch.multiprocessing as mp
+import torchmetrics.classification as cm
 import transformers
 import argparse
 import os
 import time
 import tqdm
 import math
-
+import numpy as np
 from utils.utils import printmessage
-
-
-## To Include:
-# 1. Distributed Data Parallel
-# 2. Learning Rate Scheduler (transformers.get_cosine_with_hard_restarts_schedule_with_warmup)
-## Default optimizer is AdamW. (Use gradient clipping)
 
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
-    parser.add_argument("--cpu", type=int, default=4)
-    parser.add_argument("--gpu", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--gpu", type=int, default = 4)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--train_path", type=str, default="train")
-    parser.add_argument("--val_path", type=str, default="val")
-    parser.add_argument("--test_path", type=str, default="test")
-    parser.add_argument("--output", type=str, default="output")
-    parser.add_argument("--tb_path", type=str, default="tb")
-    parser.add_argument("--es_delta", type=str, default="es_delta")
-    parser.add_argument("--es_patience", type=str, default="es_patience")
-    parser.add_argument("--es_start", type=str, default="es_start")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver020724/")
+    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
+    parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
+    parser.add_argument("--es_delta", type=float, default=1e-4)
+    parser.add_argument("--es_patience", type=int, default="10")
+    parser.add_argument("--es_start", type=int, default="1")
+    parser.add_argument("--disk_shard_size", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
-
-def setup_device(args):
-    if args.gpu > 0:
-        device = torch.device('cuda')
-        GPUtil.showUtilization()
-    else:
-        device = torch.device('cpu')
-    return device
 
 
 def setup_ddp(rank,world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
     return None
 
 
-def train_step(model, train_loader, optimizer, scheduler, criterion, device, tb_writer,
-               epoch_num, metric_func_dict, grad_clip = 0.5, log_interval = 10):
+class Trainer:
+    def __init__(
+            self,
+            gpu_id: int,
+            model: torch.nn.Module,
+            train_loader: NanoporeDataLoader,
+            val_loader: NanoporeDataLoader,
+            optimizer: torch.optim.Optimizer,
+            scheduler: torch.optim.lr_scheduler,
+            loss_func: torch.nn.Module,
+            grad_clip: float,
+            metric_func_dict: dict,
+            log_interval: int,
+            checkpoint_path: str,
+            tb_path: str,
+            es_start: int,
+            es_patience: int,
+            es_delta: float
+    ) -> None:
 
-    model.train()
-    total_loss = 0.
-    start_time = time.time()
+        self.gpu_id = gpu_id
+        self.model = model.to(gpu_id)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.optimizer = optimizer
+        self.model = DDP(model, device_ids=[gpu_id])
+        self.loss_func = loss_func
+        self.grad_clip = grad_clip
+        self.scheduler = scheduler
+        self.log_interval = log_interval
+        self.tb_writer = SummaryWriter(tb_path)
+        self.metric_func_dict = metric_func_dict
+        self.checkpoint_path = checkpoint_path
+        self.es_start = es_start
+        self.es_patience = es_patience
+        self.es_delta = es_delta
+        self.continue_training = 1
+        self.best_val_loss = np.inf
+        self.best_val_loss_epoch = 0
+        self.current_val_loss = 0
+        self.current_val_metric_dict = {}
+        self.current_epoch = 0
+        self.current_batch = 0
+        self.current_log_interval_loss = 0
+        self.current_batch_loss = 0
+        self.pbar = None
 
-    with tqdm.tqdm(enumerate(train_loader), total=len(train_loader)) as pbar:
-        for batch in train_loader:
-            optimizer.zero_grad()
-            src_kmer, src_signal, src_spectrogram, src_bq, target = batch
-            src_kmer = src_kmer.to(device)
-            src_signal = src_signal.to(device)
-            src_spectrogram = src_spectrogram.to(device)
-            src_bq = src_bq.to(device)
-            target = target.to(device)
-            output = model(src_kmer, src_signal, src_spectrogram, src_bq)
-            loss = criterion(output, target)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            optimizer.step()
-            scheduler.step()
-
-            total_loss += loss.item()
-            if batch % log_interval == 0 and batch > 0:
-                lr = scheduler.get_last_lr()[0]
-                batch_time = (time.time() - start_time)  / log_interval
-                cur_loss = total_loss / log_interval
-                ppl = math.exp(cur_loss)
-                total_loss = 0
-                start_time = time.time()
-                pbar.set_description(f"Epoch {epoch_num}")
-                pbar.update(log_interval)
-                pbar.set_postfix_str(f"Batch {batch} | Loss {cur_loss:.2f} | PPL {ppl:.2f} | LR {lr:.2f} | {batch_time:.2f}s")
-
-
-    tb_writer.add_scalar("Loss", total_loss/len(train_loader))
-    tb_writer.add_scalar("Learning_Rate", optimizer.param_groups[0]['lr'])
-    tb_writer.flush()
-
-    return None
-
-
-def eval_step(model, val_loader, criterion, device, tb_writer, epoch_num, metric_func_dict):
-    model.eval()
-    total_loss = 0.
-    outputs = []
-    targets = []
-    with torch.no_grad():
-        for batch in val_loader:
-            src_kmer, src_signal, src_spectrogram, src_bq, target = batch
-            src_kmer = src_kmer.to(device)
-            src_signal = src_signal.to(device)
-            src_spectrogram = src_spectrogram.to(device)
-            src_bq = src_bq.to(device)
-            target = target.to(device)
-            output = model(src_kmer, src_signal, src_spectrogram, src_bq)
-            loss = criterion(output, target)
-            total_loss += loss.item()
-            outputs.append(output)
-            targets.append(target)
-
-    total_loss /= len(val_loader)
-    outputs = torch.cat(outputs, dim=0)
-    targets = torch.cat(targets, dim=0)
-    metric_dict = {}
-
-    for metric_name, metric_func in metric_func_dict.items():
-        metric_dict[metric_name] = metric_func(outputs, targets)
-        tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name])
-    tb_writer.add_scalar("Val_Loss", total_loss)
-    tb_writer.flush()
-
-    evaltext = f"Epoch {epoch_num} | Val Loss {total_loss:.2f} | "
-    evaltext += " | ".join([f"{k} {v:.2f}" for k,v in metric_dict.items()])
-    printmessage(evaltext)
-
-    return total_loss, metric_dict
+        ## END of __init__
 
 
-def main():
-    args = parse_args()
-    device = setup_device(args)
-    setup_ddp(0, args.gpu)
-    train_loader = load_dataset(args.train_path, args.batch_size)
-    val_loader = load_dataset(args.val_path, args.batch_size)
-    model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, d_kmer_embedding = 128, d_signal_embedding = 128,
-                                d_spectrogram_embedding = 128, d_bq_embedding = 128, d_pos_encoding = 128, n_layers = 6,
-                                encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 5, spectrogram_size = 20,
-                                t_act = 'gelu', lin_act = 'relu', lin_depth = 1)
-    model = model.to(device)
-    model = DDP(model, device_ids = [0], output_device = 0)
-    optimizer = transformers.AdamW(model.parameters(), lr = args.lr)
-    scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000, num_training_steps = 10000)
-    criterion = torch.nn.MSELoss()
-    tb_writer = SummaryWriter(args.tb_path)
-    metric_func_dict = {"acc": cm.Accuracy(), "auc": cm.AUROC(), "f1": cm.F1()}
-    best_val_loss = float('inf')
-    best_val_loss_epoch = 0
-    epoch = 0
-    wall_clock = time.time()
+    def _run_batch(self, source, target):
+        self.optimizer.zero_grad()
+        batch_start_time = time.time()
+        src_kmer = source["kmer_token"]
+        src_signal = source["signal_token"]
+        src_spectrogram = source["spectrogram_token"]
+        src_bq = source["bq_token"]
+        src_pad_mask = (src_kmer == 0).transpose(0,1)
+        src_target_mask = source["target_mask"]
 
-    for epoch in range(args.epochs):
-        train_step(model, train_loader, optimizer, scheduler, criterion, device, tb_writer, epoch, metric_func_dict)
-        val_loss, metric_dict = eval_step(model, val_loader, criterion, device, tb_writer, epoch, metric_func_dict)
-        if val_loss < best_val_loss:
+        src_kmer = src_kmer.to(self.gpu_id)
+        src_signal = src_signal.to(self.gpu_id)
+        src_spectrogram = src_spectrogram.to(self.gpu_id)
+        src_bq = src_bq.to(self.gpu_id)
+        src_pad_mask = src_pad_mask.to(self.gpu_id)
+        src_target_mask = src_target_mask.to(self.gpu_id)
+        target = target.to(self.gpu_id)
+
+        output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_pad_mask, src_target_mask)
+        loss = self.loss_func(output, target)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+        self.optimizer.step()
+        self.scheduler.step()
+
+        self.current_log_interval_loss += loss.item()
+        self.current_batch_loss = loss.item()
+
+        if self.current_batch % self.log_interval == 0 and self.current_batch > 0:
+            lr = self.scheduler.get_last_lr()[0]
+            batch_time = (time.time() - batch_start_time)  / self.log_interval
+            cur_loss = self.current_log_interval_loss / self.log_interval
+            ppl = math.exp(cur_loss)
+            self.current_log_interval_loss = 0
+            self.pbar.update(self.log_interval)
+            self.pbar.set_postfix_str(f"Batch {self.current_batch} | Loss {cur_loss:.2f} | PPL {ppl:.2f} | LR {lr:.2f} | {batch_time:.2f}s")
+
+        return None
+
+    def _run_epoch(self):
+        batch_size = len(next(iter(self.train_loader))[0])
+        print(f"[GPU{self.gpu_id}] Epoch {self.current_epoch} | Batchsize: {batch_size} | Steps: {len(self.train_loader)}")
+        self.train_loader.set_epoch(self.current_epoch)
+        self.val_loader.set_epoch(self.current_epoch)
+        self.current_batch_loss = 0
+        self.current_log_interval_loss = 0
+        self.model.train()
+        with tqdm.tqdm(total=len(self.train_loader), desc=f"Epoch {self.current_epoch}") as self.pbar:
+            for source, targets in self.train_loader:
+                self._run_batch(source, targets)
+            self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader))
+            self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'])
+            self.tb_writer.flush()
+        return None
+
+
+    def _run_eval(self):
+        self.model.eval()
+        total_loss = 0.
+        outputs = []
+        targets = []
+        with torch.no_grad():
+            for source, target in self.val_loader:
+
+                src_kmer = source["kmer_token"]
+                src_signal = source["signal_token"]
+                src_spectrogram = source["spectrogram_token"]
+                src_bq = source["bq_token"]
+                src_pad_mask = (src_kmer == 0).transpose(0,1)
+                src_target_mask = source["target_mask"]
+
+                src_kmer = src_kmer.to(self.gpu_id)
+                src_signal = src_signal.to(self.gpu_id)
+                src_spectrogram = src_spectrogram.to(self.gpu_id)
+                src_bq = src_bq.to(self.gpu_id)
+                src_pad_mask = src_pad_mask.to(self.gpu_id)
+                src_target_mask = src_target_mask.to(self.gpu_id)
+                target = target.to(self.gpu_id)
+
+                output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_pad_mask, src_target_mask)
+                loss = self.loss_func(output, target)
+                total_loss += loss.item()
+                outputs.append(output)
+                targets.append(target)
+
+        total_loss /= len(self.val_loader)
+        outputs = torch.cat(outputs, dim=0)
+        targets = torch.cat(targets, dim=0)
+        metric_dict = {}
+
+        for metric_name, metric_func in self.metric_func_dict.items():
+            metric_dict[metric_name] = metric_func(outputs, targets)
+            self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name])
+        self.tb_writer.add_scalar("Val_Loss", total_loss)
+        self.tb_writer.flush()
+
+        evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2f} | "
+        evaltext += " | ".join([f"{k} {v:.2f}" for k,v in metric_dict.items()])
+        printmessage(evaltext)
+
+        self.current_val_loss = total_loss
+        self.current_val_metric_dict = metric_dict
+
+        return None
+
+
+    def _save_checkpoint(self):
+        if self.best_val_loss - self.current_val_loss > self.es_delta:
             ## Save Model if Improved
-            best_val_loss = val_loss
-            best_val_loss_epoch = epoch
-            torch.save({'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
-                        'scheduler_state_dict': scheduler.state_dict(), 'val_loss': val_loss, 'metric_dict': metric_dict,
-                        }, f"{args.output}/best_model.pt")
+            self.best_val_loss = self.current_val_loss
+            self.best_val_loss_epoch = self.current_epoch
+            torch.save({'model_state_dict': self.model.module.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.scheduler.state_dict(),
+                        'val_loss': self.current_val_loss,
+                        'metric_dict': self.current_val_metric_dict,
+                        }, self.checkpoint_path)
+            printmessage(f"Model Saved at Epoch {self.current_epoch} | Val Loss: {self.current_val_loss:.2f}")
+            self.continue_training = 1
+
+        elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
+            printmessage(f"Early Stopping at Epoch {self.current_epoch}")
+            self.continue_training = 0
+
         else:
-            if epoch > args.es_start and epoch - best_val_loss_epoch > args.es_patience:
-                print(f"Early Stopping at Epoch {epoch}")
+            self.continue_training = 1
+
+        return None
+
+
+    def train(self, max_epochs: int):
+        for epoch in range(max_epochs):
+            self.current_epoch = epoch
+            self._run_epoch()
+            self._run_eval()
+            self._save_checkpoint()
+            if self.continue_training == 0:
                 break
 
-    print("\n==========================================================")
-    printmessage(f"Training Complete.")
-    wall_clock = time.time() - wall_clock
-    print(f"Total Time: {time.strftime('%H:%M:%S', time.gmtime(wall_clock))}")
-    print(f"Total Epochs: {epoch+1}")
-    print(f"Best Val Loss: {best_val_loss:.2f} at Epoch {best_val_loss_epoch}")
-    print(f"Best Model Saved at: {args.output}/best_model.pt")
-    print("==========================================================\n")
+        return None
 
+    ## END of Class NanoporeTrainer
+
+
+
+def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replicas, seed):
+
+    batch_size = batch_size
+    train_pos_data_path = f"{data_path}/engineering/train/pos"
+    train_neg_data_path = f"{data_path}/engineering/train/neg"
+    val_pos_data_path = f"{data_path}/engineering/val/pos"
+    val_neg_data_path = f"{data_path}/engineering/val/neg"
+
+    train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size,
+                                disk_shard_size, rank, num_replicas, seed = seed, shuffle = True, drop_last = True)
+    val_loader = load_dataset(val_pos_data_path, val_neg_data_path, batch_size,
+                              disk_shard_size, rank, num_replicas, seed = seed, shuffle = False, drop_last = True)
+
+    return train_loader, val_loader
+
+
+
+def main_worker(rank, args_dict):
+    printmessage(f"[GPU {rank}] Worker Process Started.")
+    setup_ddp(rank, args_dict["gpu"])
+    printmessage(f"[GPU {rank}] DDP Setup Complete.")
+    model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, d_kmer_embedding = 128, d_signal_embedding = 128,
+                             d_spectrogram_embedding = 128, d_bq_embedding = 128, d_pos_encoding = 128, n_layers = 6,
+                             encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 5, spectrogram_size = 20,
+                             t_act = 'gelu', lin_act = 'relu', lin_depth = 1)
+    printmessage(f"[GPU {rank}] Model Setup Complete.")
+    optimizer = transformers.AdamW(model.parameters(), lr = args_dict["lr"])
+    scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000,
+                                                                                num_training_steps = 10000)
+    loss_func = torch.nn.MSELoss()
+    metric_func_dict = {"acc": cm.BinaryAccuracy, "auc": cm.BinaryAUROC, "f1": cm.BinaryF1Score}
+    printmessage(f"[GPU {rank}] Optimizer and Scheduler Setup Complete.")
+    train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["disk_shard_size"],
+                                                  rank, args_dict["gpu"], args_dict["seed"])
+    printmessage(f"[GPU {rank}] Dataloader Setup Complete.")
+    trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, 1.0, metric_func_dict,
+                        100, args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                        args_dict["es_delta"])
+    printmessage(f"[GPU {rank}] Trainer Setup Complete.")
+    trainer.train(args_dict["epochs"])
+    printmessage(f"[GPU {rank}] Training Complete.")
+    dist.destroy_process_group()
+    return None
+
+
+def main_master():
+    args = parse_args()
+    printmessage("Training Program Started.")
+    printmessage(f"Using {args.gpu} GPUs.")
+    args_dict = vars(args)
+    mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
+    printmessage(f"Training Complete.")
     return None
 
 
 if __name__ == "__main__":
-    main()
+    main_master()
 

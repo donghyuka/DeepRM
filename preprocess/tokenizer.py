@@ -67,8 +67,7 @@ def create_target_mask(segment_len_arr, lr_pad):
     binary_mask = np.repeat(binary_mask, segment_len_arr)
     return binary_mask
 
-def parse_args(thread_reduction_factor = 4):
-    ## thread_reduction_factor: Not to blow up memory. It is a temporary fix and will be removed in the future.
+def parse_args():
     ## Usage: "python tokenizer.py --cpu {args.thread} --signal {signal_path} --output {args.output}"
     parser = argparse.ArgumentParser("Tokenize Signal")
     num_cpu = os.cpu_count()
@@ -76,7 +75,6 @@ def parse_args(thread_reduction_factor = 4):
     parser.add_argument("--signal", "-s", type=str, required=True, help="Signal directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     args = parser.parse_args()
-    args.cpu = args.cpu // thread_reduction_factor
     if not os.path.exists(args.signal):
         raise FileNotFoundError(f"Signal directory {args.signal} does not exist")
     os.makedirs(args.output, exist_ok=True)
@@ -84,7 +82,7 @@ def parse_args(thread_reduction_factor = 4):
 
 
 def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_len = 21, sampling = 5, sig_window = 5,
-                     fft_scale = 0.01, max_penalty = 10):
+                     fft_scale = 0.01, max_penalty = 10, chunk = 10000):
 
     cb_lr_pad = (cb_len-kmer)//2
     trim = kmer//2
@@ -92,6 +90,7 @@ def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_l
     for file_id, signal_df_path in tqdm.tqdm(zip(file_id_arr, signal_df_path_arr), total=len(file_id_arr)):
         signal_df = pd.read_pickle(f"{signal_df_path}")
         signal_df = signal_df[signal_df["penalty"] <= max_penalty]
+        signal_df["block_id"] = signal_df["read_id"] + "-" + signal_df["block_id"].astype(str)
         signal_df["block_score"] = signal_df["penalty"].apply(lambda x: 1-(x/max_penalty))
         signal_df["signal_fft"] = signal_df["signal_fft"].apply(lambda x: x[trim:-trim])
         signal_df["bq"] = signal_df["bq"].apply(lambda x: x[trim:-trim])
@@ -107,10 +106,20 @@ def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_l
         signal_df["spectrogram_token"] = signal_df["signal_fft"].apply(lambda x: segmented_fft_to_block(x, fft_scale))
         signal_df["target_mask"] = signal_df["segment_len_arr"].apply(lambda x: create_target_mask(x, cb_lr_pad))
         signal_df = signal_df[["block_id", "motif", "block_score", "kmer_token", "bq_token", "position_token", "signal_token",
-                               "spectrogram_token", "move_token", "target_mask"]]
+                               "spectrogram_token", "move_token", "target_mask"]].copy()
+        gc.collect()
 
-        signal_df.to_pickle(f"{output_dir}/tokenized_{file_id}.pkl")
-        del signal_df
+        # signal_df.to_pickle(f"{output_dir}/tokenized_{file_id}.pkl")
+        # del signal_df
+        # gc.collect()
+
+        for chunk_idx in range(0, len(signal_df) // chunk + 1):
+            chunk_df = signal_df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(signal_df))].copy()
+            save_path = f"{output_dir}/tokenized_{file_id}-{chunk_idx}.pkl"
+            chunk_df.to_pickle(save_path)
+
+        del signal_df, chunk_df
+
         gc.collect()
 
     return None

@@ -3,6 +3,7 @@ import os
 from typing import Tuple
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
 
 class TransformerModel(nn.Module):
 
@@ -28,7 +29,7 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regerssion_head = self.RegressionHead(d_model, lin_act, lin_depth, lin_dropout)
+        self.regerssion_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout)
 
         ## Weight Initialization
         self.init_weights()
@@ -44,14 +45,7 @@ class TransformerModel(nn.Module):
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor,
                 src_pad_mask: Tensor = None, target_mask: Tensor = None) -> Tensor:
-        """
-        Arguments:
-            src: Tensor, shape ``[seq_len, batch_size]``
-            src_mask: Tensor, shape ``[seq_len, seq_len]``
 
-        Returns:
-            output Tensor of shape ``[seq_len, batch_size, ntoken]``
-        """
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
         spectrogram_embedding = self.spectrogram_embedding(src_spectrogram)
@@ -96,7 +90,7 @@ class RegressionHead(nn.Module):
     def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float):
         super().__init__()
         self.lin_layers = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(lin_depth)])
-        self.activation = getattr(nn, lin_act)
+        self.activation = self._get_activation_fn(lin_act)
         self.dropout = nn.Dropout(lin_dropout)
         self.batch_norm = nn.BatchNorm1d(d_model)
         self.final_layer = nn.Linear(d_model, 1)
@@ -116,6 +110,14 @@ class RegressionHead(nn.Module):
             layer.bias.data.zero_()
         self.final_layer.weight.data.uniform_(-initrange, initrange)
         self.final_layer.bias.data.zero_()
+
+    def _get_activation_fn(self, activation: str):
+        if activation == "relu":
+            return F.relu
+        elif activation == "gelu":
+            return F.gelu
+
+        raise RuntimeError(f"activation should be relu/gelu, not {activation}")
 
     ## END OF RegressionHead
 
