@@ -219,7 +219,7 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
     ## Use DataLoader to load the dataset
     dataset = NanoporeDataset(pos_data_path, neg_data_path, batch_size,
                                 disk_shard_size, rank, num_replicas, seed, shuffle, drop_last)
-    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=8, pin_memory=True, drop_last=True,
+    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=False, drop_last=True,
                                     collate_fn = pad_collate)
     return dataloader
 
@@ -230,7 +230,6 @@ def pad_collate(batch):
     ## Transform into Batch First
 
     kmer_token = [item[0]["kmer_token"] for item in batch]
-    printmessage([item.shape for item in kmer_token])
     bq_token = [item[0]["bq_token"] for item in batch]
     position_token = [item[0]["position_token"] for item in batch]
     signal_token = [item[0]["signal_token"] for item in batch]

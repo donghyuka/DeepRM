@@ -18,9 +18,9 @@ class TransformerModel(nn.Module):
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
         self.spectrogram_embedding = nn.Linear(spectrogram_size, d_model)
-        self.bq_embedding = nn.Embedding(max_bq, d_model)
+        self.bq_embedding = nn.Embedding(max_bq+1, d_model)
         self.pos_encoding = PositionalEncoding(d_model, encoder_dropout)
-        self.move_embedding = nn.Embedding(block_len, d_model)
+        self.move_embedding = nn.Embedding(block_len+1, d_model)
 
         ## Encoder Initialization
         self.d_model = d_model
@@ -30,7 +30,8 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regerssion_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout)
+        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout)
+        self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
 
         ## Weight Initialization
         self.init_weights()
@@ -41,7 +42,7 @@ class TransformerModel(nn.Module):
         self.spectrogram_embedding.weight.data.uniform_(-initrange, initrange)
         self.bq_embedding.weight.data.uniform_(-initrange, initrange)
         self.move_embedding.weight.data.uniform_(-initrange, initrange)
-        self.regerssion_head.init_weights(initrange)
+        self.regression_head.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         return None
 
@@ -60,10 +61,15 @@ class TransformerModel(nn.Module):
         final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding,
                                        pos_encoding, move_embedding], dim = 0).sum(dim = 0)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+
         if target_mask is not None:
+            ## match target_mask (l) to model output shape (l,d) by repeating the mask
+            target_mask = target_mask.unsqueeze(-1).repeat(1,1,self.d_model)
             output = output * target_mask
 
-        output = self.regerssion_head(output)
+        ## apply regression head to each token:
+        output = self.regression_head(output)
+        output = output.mean(dim = 1).squeeze(-1)
 
         return output
 
@@ -100,7 +106,8 @@ class RegressionHead(nn.Module):
         self.activation = self._get_activation_fn(lin_act)
         self.dropout = nn.Dropout(lin_dropout)
         self.batch_norm = nn.BatchNorm1d(d_model)
-        self.final_layer = nn.Linear(d_model, 1)
+        self.semi_final_layer = nn.Linear(d_model, d_model//4)
+        self.final_layer = nn.Linear(d_model//4, 1)
 
     def forward(self, x: Tensor) -> Tensor:
         for layer in self.lin_layers:
@@ -108,6 +115,8 @@ class RegressionHead(nn.Module):
             x = self.batch_norm(x)
             x = self.activation(x)
             x = self.dropout(x)
+        x = self.semi_final_layer(x)
+        x = self.activation(x)
         x = self.final_layer(x)
         return x
 

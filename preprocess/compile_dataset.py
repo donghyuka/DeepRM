@@ -47,7 +47,8 @@ def parse_args():
     args.add_argument("--sam", dest="sampling", type=float, default=0.01, help="Sampling rate")
     args.add_argument("--max", dest="max_token_len", type=int, default=200, help="Maximum token length")
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--chk", dest="chunk", type=int, default=100, help="Chunk size")
+    args.add_argument("--chk", dest="chunk", type=int, default=1000, help="Chunk size")
+    args.add_argument("--seed", dest="seed", type=int, default=42, help="Random seed")
     args = args.parse_args()
     os.makedirs(args.out_path, exist_ok=True)
     return args
@@ -158,13 +159,13 @@ def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, pid_str,
 
         for id_set, out_path in zip(id_set_list, out_path_list):
             sample_df = df[df["block_id"].isin(id_set)].copy()
-            sample_df.sort_values("token_len", inplace=True)
-            sample_df.reset_index(drop=True, inplace=True)
 
             if buffer_dict[out_path] is not None:
                 sample_df = pd.concat([buffer_dict[out_path], sample_df])
                 buffer_dict[out_path] = None
                 gc.collect()
+
+            sample_df.reset_index(drop=True, inplace=True)
 
             for chunk_idx in range(0, len(sample_df) // chunk + 1):
                 out_df_id += 1
@@ -175,6 +176,9 @@ def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, pid_str,
                     chunk_df.to_pickle(save_path)
                     path_df = pd.DataFrame({"file_name": file_name, "block_id": chunk_df["block_id"]})
                     path_df_dict[out_path].append(path_df)
+                    del chunk_df
+                    gc.collect()
+
                 else:
                     ## should happen only once per iteration
                     buffer_dict[out_path] = chunk_df
@@ -190,7 +194,8 @@ def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, pid_str,
     gc.collect()
 
     for out_path, path_df_list in path_df_dict.items():
-        path_df_dict_shared[out_path].append(pd.concat(path_df_list))
+        if len(path_df_list) > 0:
+            path_df_dict_shared[out_path].append(pd.concat(path_df_list))
     del path_df_dict
     gc.collect()
 
@@ -242,8 +247,11 @@ def sample_dataset_kmer_balanced(kmer_df, sample_ratio = 0.01, seed = 42):
     return sample_df
 
 
-def main(seed = 42):
+def main():
     args = parse_args()
+    if args.seed is None:
+        args.seed = np.random.randint(0, 1000000)
+
     os.makedirs(args.out_path, exist_ok=True)
     os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
     os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
@@ -263,13 +271,13 @@ def main(seed = 42):
     neg_metadata_df = neg_metadata_df[neg_metadata_df["token_len"] <= args.max_token_len].reset_index(drop=True).copy()
 
     if pos_cnt > neg_cnt:
-        pos_metadata_df = sample_dataset_kmer_balanced(pos_metadata_df, sample_ratio = neg_cnt , seed = seed)
+        pos_metadata_df = sample_dataset_kmer_balanced(pos_metadata_df, sample_ratio = neg_cnt , seed = args.seed)
     elif pos_cnt < neg_cnt:
-        neg_metadata_df = sample_dataset_kmer_balanced(neg_metadata_df, sample_ratio = pos_cnt , seed = seed)
+        neg_metadata_df = sample_dataset_kmer_balanced(neg_metadata_df, sample_ratio = pos_cnt , seed = args.seed)
     else:
         pass
-    pos_metadata_df_split = split_dataset_kmer_balanced(pos_metadata_df, seed = seed)
-    neg_metadata_df_split = split_dataset_kmer_balanced(neg_metadata_df, seed = seed)
+    pos_metadata_df_split = split_dataset_kmer_balanced(pos_metadata_df, seed = args.seed)
+    neg_metadata_df_split = split_dataset_kmer_balanced(neg_metadata_df, seed = args.seed)
 
     pos_train = pos_metadata_df_split[0]
     pos_val = pos_metadata_df_split[1]
@@ -278,12 +286,12 @@ def main(seed = 42):
     neg_val = neg_metadata_df_split[1]
     neg_test = neg_metadata_df_split[2]
     
-    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = args.sampling, seed = seed)
-    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = args.sampling, seed = seed)
-    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = args.sampling, seed = seed)
-    neg_train_eng = sample_dataset_kmer_balanced(neg_train, sample_ratio = args.sampling, seed = seed)
-    neg_val_eng = sample_dataset_kmer_balanced(neg_val, sample_ratio = args.sampling, seed = seed)
-    neg_test_eng = sample_dataset_kmer_balanced(neg_test, sample_ratio = args.sampling, seed = seed)
+    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = args.sampling, seed = args.seed)
+    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = args.sampling, seed = args.seed)
+    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = args.sampling, seed = args.seed)
+    neg_train_eng = sample_dataset_kmer_balanced(neg_train, sample_ratio = args.sampling, seed = args.seed)
+    neg_val_eng = sample_dataset_kmer_balanced(neg_val, sample_ratio = args.sampling, seed = args.seed)
+    neg_test_eng = sample_dataset_kmer_balanced(neg_test, sample_ratio = args.sampling, seed = args.seed)
 
     pos_df_list = [pos_train, pos_val, pos_test, pos_train_eng, pos_val_eng, pos_test_eng]
     neg_df_list = [neg_train, neg_val, neg_test, neg_train_eng, neg_val_eng, neg_test_eng]
@@ -326,8 +334,76 @@ def main(seed = 42):
 
     return None
 
+def main_pos():
+    args = parse_args()
+    if args.seed is None:
+        args.seed = np.random.randint(0, 1000000)
+
+    os.makedirs(args.out_path, exist_ok=True)
+    os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
+    os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
+
+    pos_train = pd.read_pickle(f"{args.out_path}/metadata/pos_train.pkl")
+    pos_val = pd.read_pickle(f"{args.out_path}/metadata/pos_val.pkl")
+    pos_test = pd.read_pickle(f"{args.out_path}/metadata/pos_test.pkl")
+    pos_train_eng = pd.read_pickle(f"{args.out_path}/metadata/pos_train_eng.pkl")
+    pos_val_eng = pd.read_pickle(f"{args.out_path}/metadata/pos_val_eng.pkl")
+    pos_test_eng = pd.read_pickle(f"{args.out_path}/metadata/pos_test_eng.pkl")
+
+    pos_df_list = [pos_train, pos_val, pos_test, pos_train_eng, pos_val_eng, pos_test_eng]
+
+    pos_df_list = [set(df["block_id"]) for df in pos_df_list]
+
+    pos_path_list = [f"{args.out_path}/main/train/pos/", f"{args.out_path}/main/val/pos/", f"{args.out_path}/main/test/pos/",
+                        f"{args.out_path}/engineering/train/pos/", f"{args.out_path}/engineering/val/pos/", f"{args.out_path}/engineering/test/pos/"]
+    pos_metadata_path_list = [f"{args.out_path}/metadata_path/pos_train.pkl", f"{args.out_path}/metadata_path/pos_val.pkl", f"{args.out_path}/metadata_path/pos_test.pkl",
+                        f"{args.out_path}/metadata_path/pos_train_eng.pkl", f"{args.out_path}/metadata_path/pos_val_eng.pkl", f"{args.out_path}/metadata_path/pos_test_eng.pkl"]
+    pos_original_metadata_path_list = [f"{args.out_path}/metadata/pos_train.pkl", f"{args.out_path}/metadata/pos_val.pkl", f"{args.out_path}/metadata/pos_test.pkl",
+                        f"{args.out_path}/metadata/pos_train_eng.pkl", f"{args.out_path}/metadata/pos_val_eng.pkl", f"{args.out_path}/metadata/pos_test_eng.pkl"]
+
+    for path in pos_path_list:
+        os.makedirs(path, exist_ok=True)
+
+    sample_and_save_df(pos_df_list, pos_path_list, pos_original_metadata_path_list, pos_metadata_path_list, args.pos_path, args.cpu, label = 0, chunk = args.chunk)
+
+    return None
+
+def main_neg():
+    args = parse_args()
+    if args.seed is None:
+        args.seed = np.random.randint(0, 1000000)
+
+    os.makedirs(args.out_path, exist_ok=True)
+    os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
+    os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
+
+    neg_train = pd.read_pickle(f"{args.out_path}/metadata/neg_train.pkl")
+    neg_val = pd.read_pickle(f"{args.out_path}/metadata/neg_val.pkl")
+    neg_test = pd.read_pickle(f"{args.out_path}/metadata/neg_test.pkl")
+    neg_train_eng = pd.read_pickle(f"{args.out_path}/metadata/neg_train_eng.pkl")
+    neg_val_eng = pd.read_pickle(f"{args.out_path}/metadata/neg_val_eng.pkl")
+    neg_test_eng = pd.read_pickle(f"{args.out_path}/metadata/neg_test_eng.pkl")
+
+    neg_df_list = [neg_train, neg_val, neg_test, neg_train_eng, neg_val_eng, neg_test_eng]
+
+    neg_df_list = [set(df["block_id"]) for df in neg_df_list]
+
+    neg_path_list = [f"{args.out_path}/main/train/neg/", f"{args.out_path}/main/val/neg/", f"{args.out_path}/main/test/neg/",
+                        f"{args.out_path}/engineering/train/neg/", f"{args.out_path}/engineering/val/neg/", f"{args.out_path}/engineering/test/neg/"]
+    neg_metadata_path_list = [f"{args.out_path}/metadata_path/neg_train.pkl", f"{args.out_path}/metadata_path/neg_val.pkl", f"{args.out_path}/metadata_path/neg_test.pkl",
+                        f"{args.out_path}/metadata_path/neg_train_eng.pkl", f"{args.out_path}/metadata_path/neg_val_eng.pkl", f"{args.out_path}/metadata_path/neg_test_eng.pkl"]
+    neg_original_metadata_path_list = [f"{args.out_path}/metadata/neg_train.pkl", f"{args.out_path}/metadata/neg_val.pkl", f"{args.out_path}/metadata/neg_test.pkl",
+                        f"{args.out_path}/metadata/neg_train_eng.pkl", f"{args.out_path}/metadata/neg_val_eng.pkl", f"{args.out_path}/metadata/neg_test_eng.pkl"]
+
+    for path in neg_path_list:
+        os.makedirs(path, exist_ok=True)
+
+    sample_and_save_df(neg_df_list, neg_path_list, neg_original_metadata_path_list, neg_metadata_path_list, args.neg_path, args.cpu, label = 1, chunk = args.chunk)
+
+    return None
+
 
 if __name__ == "__main__":
-    main()
+    main_neg()
 
 

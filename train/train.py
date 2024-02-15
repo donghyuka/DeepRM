@@ -19,10 +19,10 @@ from utils.utils import printmessage
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver020724/")
+    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
     parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
     parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
     parser.add_argument("--es_delta", type=float, default=1e-4)
@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument("--es_start", type=int, default="1")
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
+    strfttime = time.strftime("%Y%m%d-%H%M%S")
+    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v1-{strfttime}")
     return parser.parse_args()
 
 
@@ -50,15 +52,16 @@ class Trainer:
             tb_path: str,
             es_start: int,
             es_patience: int,
-            es_delta: float
+            es_delta: float,
+            model_name: str,
+            num_gpu: int,
     ) -> None:
 
         self.gpu_id = gpu_id
-        self.model = model.to(gpu_id)
+        self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = optimizer
-        self.model = DDP(model, device_ids=[gpu_id])
         self.loss_func = loss_func
         self.grad_clip = grad_clip
         self.scheduler = scheduler
@@ -79,6 +82,9 @@ class Trainer:
         self.current_log_interval_loss = 0
         self.current_batch_loss = 0
         self.pbar = None
+        self.model_name = model_name
+        self.num_gpu = num_gpu
+
 
         ## END of __init__
 
@@ -88,7 +94,7 @@ class Trainer:
         src_signal = source["signal_token"]
         src_spectrogram = source["spectrogram_token"]
         src_bq = source["bq_token"]
-        src_pad_mask = (src_kmer == 0).transpose(0,1)
+        src_pad_mask = (src_kmer == 0)
         src_target_mask = source["target_mask"]
         src_move = source["move_token"]
 
@@ -99,12 +105,14 @@ class Trainer:
         src_pad_mask = src_pad_mask.to(self.gpu_id)
         src_target_mask = src_target_mask.to(self.gpu_id)
         src_move = src_move.to(self.gpu_id)
+        target = target.to(torch.float32)
         target = target.to(self.gpu_id)
         output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
         return output, target
 
 
     def _run_batch(self, source, target):
+        self.current_batch += 1
         self.optimizer.zero_grad()
         batch_start_time = time.time()
         output, target = self._feed_model(source, target)
@@ -130,14 +138,14 @@ class Trainer:
 
 
     def _run_epoch(self):
-        batch_size = len(next(iter(self.train_loader))[0]["kmer_token"])
-        print(f"[GPU{self.gpu_id}] Epoch {self.current_epoch} | Batchsize: {batch_size} | Steps: {len(self.train_loader)}")
         self.train_loader.set_epoch(self.current_epoch)
         self.val_loader.set_epoch(self.current_epoch)
         self.current_batch_loss = 0
         self.current_log_interval_loss = 0
+        self.current_batch = 0
         self.model.train()
-        with tqdm.tqdm(total=len(self.train_loader), desc=f"Epoch {self.current_epoch}") as self.pbar:
+        with tqdm.tqdm(total=len(self.train_loader)//self.num_gpu , desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
+                       position=self.gpu_id) as self.pbar:
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
             self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader))
@@ -172,7 +180,8 @@ class Trainer:
 
         evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2f} | "
         evaltext += " | ".join([f"{k} {v:.2f}" for k,v in metric_dict.items()])
-        printmessage(evaltext)
+        if self.gpu_id == 0:
+            printmessage(evaltext)
 
         self.current_val_loss = total_loss
         self.current_val_metric_dict = metric_dict
@@ -190,7 +199,7 @@ class Trainer:
                         'scheduler_state_dict': self.scheduler.state_dict(),
                         'val_loss': self.current_val_loss,
                         'metric_dict': self.current_val_metric_dict,
-                        }, self.checkpoint_path)
+                        }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}.pt")
             printmessage(f"Model Saved at Epoch {self.current_epoch} | Val Loss: {self.current_val_loss:.2f}")
             self.continue_training = 1
 
@@ -209,7 +218,8 @@ class Trainer:
             self.current_epoch = epoch
             self._run_epoch()
             self._run_eval()
-            self._save_checkpoint()
+            if self.gpu_id == 0:
+                self._save_checkpoint()
             if self.continue_training == 0:
                 break
 
@@ -229,10 +239,10 @@ def setup_ddp(rank,world_size):
 def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replicas, seed):
 
     batch_size = batch_size
-    train_pos_data_path = f"{data_path}/engineeringv2/train/pos"
-    train_neg_data_path = f"{data_path}/engineeringv2/train/neg"
-    val_pos_data_path = f"{data_path}/engineeringv2/val/pos"
-    val_neg_data_path = f"{data_path}/engineeringv2/val/neg"
+    train_pos_data_path = f"{data_path}/train/pos"
+    train_neg_data_path = f"{data_path}/train/neg"
+    val_pos_data_path = f"{data_path}/val/pos"
+    val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size,
                                 disk_shard_size, rank, num_replicas, seed = seed, shuffle = True, drop_last = True)
@@ -248,16 +258,21 @@ def main_worker(rank, args_dict):
     model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, n_layers = 6,
                              encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 25, spectrogram_size = 21,
                              t_act = 'gelu', lin_act = 'relu', lin_depth = 3, block_len = 17)
+    model = model.to(rank)
+    model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"])
     scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000,
                                                                                 num_training_steps = 10000)
     loss_func = torch.nn.MSELoss()
-    metric_func_dict = {"acc": cm.BinaryAccuracy, "auc": cm.BinaryAUROC, "f1": cm.BinaryF1Score}
+    metric_func_dict = {"acc": cm.BinaryAccuracy().to(rank),
+                        "auc": cm.BinaryAUROC().to(rank),
+                        "f1": cm.BinaryF1Score().to(rank),}
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["disk_shard_size"],
                                                   rank, args_dict["gpu"], args_dict["seed"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, 1.0, metric_func_dict,
-                        100, args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                        args_dict["es_delta"])
+                        10, args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")
@@ -267,8 +282,12 @@ def main_worker(rank, args_dict):
 
 def main_master():
     args = parse_args()
+    os.makedirs(os.path.join(args.output, args.name), exist_ok=True)
+    os.makedirs(os.path.join(args.tb, args.name), exist_ok=True)
+    args.output = os.path.join(args.output, args.name)
+    args.tb = os.path.join(args.tb, args.name)
     if args.seed is None:
-        args.seed = np.random.randint(0, 1000000 )
+        args.seed = np.random.randint(0, 10000000)
     printmessage(f"Seed: {args.seed}")
     printmessage("Training Program Started.")
     printmessage(f"Using {args.gpu} GPUs.")
