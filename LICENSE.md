@@ -1,5 +1,5 @@
-## LICENSE
 MIT License
+## LICENSE
 
 Copyright (c) 2023 Laboratory of Computational Biology, Seoul National University
 
