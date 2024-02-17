@@ -1,3 +1,5 @@
+import functools
+
 import torch
 import math
 from torch.utils.data.dataset import Dataset, IterableDataset
@@ -33,10 +35,11 @@ class BinaryClassDatasetIterator:
                 if self.current_pos_df_index == len(self.pos_paths) - 1:
                     raise StopIteration
                 self.current_pos_df_index += 1
+                df = pd.read_pickle(self.pos_paths[self.current_pos_df_index])
                 if self.shuffle:
-                    self.current_pos_iterator = pd.read_pickle(self.pos_paths[self.current_pos_df_index]).sample(frac=1).iterrows()
+                    self.current_pos_iterator = df.sample(frac=1).iterrows()
                 else:
-                    self.current_pos_iterator = pd.read_pickle(self.pos_paths[self.current_pos_df_index]).iterrows()
+                    self.current_pos_iterator = df.iterrows()
 
             try:
                 result = next(self.current_pos_iterator)[1]
@@ -45,10 +48,11 @@ class BinaryClassDatasetIterator:
                     raise StopIteration
                 else:
                     self.current_pos_df_index += 1
+                    df = pd.read_pickle(self.pos_paths[self.current_pos_df_index])
                     if self.shuffle:
-                        self.current_pos_iterator = pd.read_pickle(self.pos_paths[self.current_pos_df_index]).sample(frac=1).iterrows()
+                        self.current_pos_iterator = df.sample(frac=1).iterrows()
                     else:
-                        self.current_pos_iterator = pd.read_pickle(self.pos_paths[self.current_pos_df_index]).iterrows()
+                        self.current_pos_iterator = df.iterrows()
                     result = next(self.current_pos_iterator)[1]
             self.current_pos_or_neg = 0
 
@@ -59,10 +63,11 @@ class BinaryClassDatasetIterator:
                 if self.current_neg_df_index == len(self.neg_paths) - 1:
                     raise StopIteration
                 self.current_neg_df_index += 1
+                df = pd.read_pickle(self.neg_paths[self.current_neg_df_index])
                 if self.shuffle:
-                    self.current_neg_iterator = pd.read_pickle(self.neg_paths[self.current_neg_df_index]).sample(frac=1).iterrows()
+                    self.current_neg_iterator = df.sample(frac=1).iterrows()
                 else:
-                    self.current_neg_iterator = pd.read_pickle(self.neg_paths[self.current_neg_df_index]).iterrows()
+                    self.current_neg_iterator = df.iterrows()
 
             try:
                 result = next(self.current_neg_iterator)[1]
@@ -70,11 +75,12 @@ class BinaryClassDatasetIterator:
                 if self.current_neg_df_index == len(self.neg_paths) - 1:
                     raise StopIteration
                 else:
+                    df = pd.read_pickle(self.neg_paths[self.current_neg_df_index])
                     self.current_neg_df_index += 1
                     if self.shuffle:
-                        self.current_neg_iterator = pd.read_pickle(self.neg_paths[self.current_neg_df_index]).sample(frac=1).iterrows()
+                        self.current_neg_iterator = df.sample(frac=1).iterrows()
                     else:
-                        self.current_neg_iterator = pd.read_pickle(self.neg_paths[self.current_neg_df_index]).iterrows()
+                        self.current_neg_iterator = df.iterrows()
                     result = next(self.current_neg_iterator)[1]
             self.current_pos_or_neg = 1
 
@@ -193,11 +199,12 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
 
 
 class NanoporeDataLoader(DataLoader):
-    def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn):
+    def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
         shuffle = False
         sampler = None
         super().__init__(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory,
-                         drop_last=drop_last, shuffle=shuffle, sampler=sampler, collate_fn=collate_fn)
+                         drop_last=drop_last, shuffle=shuffle, sampler=sampler, collate_fn=collate_fn,
+                         prefetch_factor=prefetch_factor)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -215,45 +222,45 @@ class NanoporeDataLoader(DataLoader):
 
 
 def load_dataset(pos_data_path, neg_data_path, batch_size,
-                 disk_shard_size, rank, num_replicas, seed = 0, shuffle = True, drop_last = True):
+                 disk_shard_size, rank, num_replicas, seed = 0, shuffle = True, drop_last = True,
+                 pad_to = 200, bq_clip = 40):
+    pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
     dataset = NanoporeDataset(pos_data_path, neg_data_path, batch_size,
                                 disk_shard_size, rank, num_replicas, seed, shuffle, drop_last)
-    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=False, drop_last=True,
-                                    collate_fn = pad_collate)
+    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=True,
+                                    collate_fn = pad_collate_func, prefetch_factor=4)
     return dataloader
 
 
-def pad_collate(batch):
+def pad_collate(batch, pad_to, bq_clip):
     ## Collate function for DataLoader
     ## Based on NanoporeDataset
     ## Transform into Batch First
 
-    kmer_token = [item[0]["kmer_token"] for item in batch]
-    bq_token = [item[0]["bq_token"] for item in batch]
-    position_token = [item[0]["position_token"] for item in batch]
-    signal_token = [item[0]["signal_token"] for item in batch]
-    spectrogram_token = [item[0]["spectrogram_token"] for item in batch]
-    move_token = [item[0]["move_token"] for item in batch]
-    target_mask = [item[0]["target_mask"] for item in batch]
     label = [item[1] for item in batch]
-
-    ## Zero pad the followings: kmer_token, bq_token, position_token, signal_token, spectrogram_token, move_token
-    kmer_token = torch.nn.utils.rnn.pad_sequence(kmer_token, batch_first=True, padding_value=0)
-    bq_token = torch.nn.utils.rnn.pad_sequence(bq_token, batch_first=True, padding_value=0)
-    position_token = torch.nn.utils.rnn.pad_sequence(position_token, batch_first=True, padding_value=0)
-    signal_token = torch.nn.utils.rnn.pad_sequence(signal_token, batch_first=True, padding_value=0)
-    spectrogram_token = torch.nn.utils.rnn.pad_sequence(spectrogram_token, batch_first=True, padding_value=0)
-    move_token = torch.nn.utils.rnn.pad_sequence(move_token, batch_first=True, padding_value=0)
-    target_mask = torch.nn.utils.rnn.pad_sequence(target_mask, batch_first=True, padding_value=0)
-
-    ## clip bq at 40
-    bq_token = torch.clamp(bq_token, 0, 40)
-
     target = torch.stack(label, dim=0)
 
-    source = {"kmer_token": kmer_token, "bq_token": bq_token, "position_token": position_token,
-                "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
-                "target_mask": target_mask}
+    token_name_list = ["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token",
+                       "move_token", "target_mask"]
+
+    source = {}
+
+    ## Zero pad the followings: kmer_token, bq_token, position_token, signal_token, spectrogram_token, move_token
+    for token_name in token_name_list:
+        token = [item[0][token_name] for item in batch]
+        token = torch.nn.utils.rnn.pad_sequence(token, batch_first=True, padding_value=0)
+        if pad_to is not None:
+            if token.shape[1] < pad_to:
+                add_shape = list(token.shape)
+                add_shape[1] = pad_to - token.shape[1]
+                token = torch.cat((token, torch.zeros(add_shape, dtype=token.dtype)), dim=1)
+            else:
+                token = token[:, :pad_to]
+
+        source[token_name] = token
+
+    ## clip bq
+    source["bq_token"] = torch.clamp(source["bq_token"], 0, bq_clip)
 
     return source, target

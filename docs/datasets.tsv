@@ -1,2 +1,2 @@
-version	description	positive	negative	size
-ver020624	trial dataset	ON0093	ON0092
+version	description	positive	negative	total_count	disk_size
+ver021324	prototype dataset	ON0093	ON0092	59,407,000	2.2TB

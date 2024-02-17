@@ -249,7 +249,7 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
             printmessage(f"[Process-{pid}] No flush file found. Starting from the beginning.")
 
     for read_idx, record in tqdm(enumerate(record_list), total=len(record_list)):
-        oom_killer(os.path.basename(__file__))
+        oom_killer()
         read_idx += last_flush_idx
         read_id = record[0]
         seq = record[1].replace("T", "U")
@@ -334,7 +334,7 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
                                   spacer_mismatch_tolerance, max_read_length,
                                   spacer_mismatch_penalty, anchor_list, spacer_list, spacer_size, cb_pad,
                                   cb_per_bb, read_bq_cutoff, cb_bq_cutoff, flush_path, flush_interval, ncpu,
-                                  resume, **kwargs):
+                                  resume, sample, **kwargs):
     spacer_list = [x.replace("T", "U") for x in spacer_list]
     anchor_list = [x.replace("T", "U") for x in anchor_list]
     indel_dict = get_integer_partition(indel_tolerance, cb_size_tolerance)
@@ -347,16 +347,24 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
     bb_size = cb_size * cb_per_bb + spacer_size
     min_ideal_displacement_dict = get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size)
 
+
     record_list = []
     with pysam.AlignmentFile(input, "rb", check_sq=False, threads=ncpu) as input_bam:
-        for record in tqdm(input_bam, total=input_bam.count()):
-            qscore = mean_phred(np.array(record.query_qualities, dtype=int))
-            if qscore >= read_bq_cutoff :
-                read_length = record.query_length
-                if read_length <= max_read_length:
-                    record_tuple = (str(record.query_name), str(record.query_sequence),
-                                    np.array(record.query_qualities), int(read_length))
+        with tqdm(total=input_bam.mapped) as pbar:
+            for idx, record in enumerate(input_bam):
+                qscore = mean_phred(np.array(record.query_qualities, dtype=int))
+                if qscore >= read_bq_cutoff :
+                    read_length = record.query_length
+                    if read_length <= max_read_length and read_length >= kwargs["min_read_length"]:
+                        record_tuple = (str(record.query_name), str(record.query_sequence),
+                                        np.array(record.query_qualities), int(read_length))
                     record_list.append(record_tuple)
+                pbar.update(1)
+
+    if sample is not None:
+        sample_idx = np.random.choice(len(record_list), sample, replace=False)
+        record_list = [record_list[i] for i in sample_idx]
+
     record_list.sort(key=lambda x: x[3], reverse=True)
     record_cnt = len(record_list)
 
@@ -440,7 +448,9 @@ def parse_args():
     parser.add_argument("--rbq", dest="read_bq_cutoff", type=int, default=7)
     parser.add_argument("--cbq", dest="cb_bq_cutoff", type=int, default=0)
     parser.add_argument("--fi", dest="flush_interval", type=int, default=1000) # smaller->faster, larger->less memory
-    parser.add_argument("--ml", dest="max_read_length", type=int, default=1000)
+    parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
+    parser.add_argument("--min", dest="min_read_length", type=int, default=0)
+    parser.add_argument("--sample", dest="sample", type=int, default=None)
 
     parser.add_argument("--cfg", dest="config", type=str, default=None)
     parser.add_argument("--resume", dest="resume", type=str, default=None, help="Continue from previous run. Provide the path to the previous output.")

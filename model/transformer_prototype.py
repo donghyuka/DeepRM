@@ -10,17 +10,17 @@ class TransformerModel(nn.Module):
     def __init__(self, d_model: int, n_heads: int, d_ff: int,
                  n_layers: int, encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40, block_len = 17,
-                 t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1) -> None:
+                 seq_len: int = 200, t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1) -> None:
         super().__init__()
-        self.model_type = 'Transformer'
 
         ## Embedding Initialization
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
         self.spectrogram_embedding = nn.Linear(spectrogram_size, d_model)
         self.bq_embedding = nn.Embedding(max_bq+1, d_model)
-        self.pos_encoding = PositionalEncoding(d_model, encoder_dropout)
+        self.pos_encoding = PositionalEncoding(d_model)
         self.move_embedding = nn.Embedding(block_len+1, d_model)
+        self.embedding_dropout = nn.Dropout(encoder_dropout)
 
         ## Encoder Initialization
         self.d_model = d_model
@@ -30,7 +30,7 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout)
+        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
         self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
 
         ## Weight Initialization
@@ -57,9 +57,11 @@ class TransformerModel(nn.Module):
         pos_encoding = self.pos_encoding(torch.zeros_like(kmer_embedding))
         move_embedding = self.move_embedding(src_move)
 
-        ## add all embeddings
+        ## add all embeddings and dropout
         final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding,
                                        pos_encoding, move_embedding], dim = 0).sum(dim = 0)
+        final_embedding = self.embedding_dropout(final_embedding)
+
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         if target_mask is not None:
@@ -100,12 +102,12 @@ class PositionalEncoding(nn.Module):
 
 
 class RegressionHead(nn.Module):
-    def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float):
+    def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
         super().__init__()
         self.lin_layers = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(lin_depth)])
         self.activation = self._get_activation_fn(lin_act)
         self.dropout = nn.Dropout(lin_dropout)
-        self.batch_norm = nn.BatchNorm1d(d_model)
+        self.batch_norm = nn.BatchNorm1d(seq_length)
         self.semi_final_layer = nn.Linear(d_model, d_model//4)
         self.final_layer = nn.Linear(d_model//4, 1)
 

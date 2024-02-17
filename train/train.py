@@ -19,15 +19,15 @@ from utils.utils import printmessage
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
     parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
     parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
-    parser.add_argument("--es_delta", type=float, default=1e-4)
-    parser.add_argument("--es_patience", type=int, default="10")
-    parser.add_argument("--es_start", type=int, default="1")
+    parser.add_argument("--es_delta", type=float, default=1e-5)
+    parser.add_argument("--es_patience", type=int, default=30)
+    parser.add_argument("--es_start", type=int, default=30)
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
@@ -112,28 +112,23 @@ class Trainer:
 
 
     def _run_batch(self, source, target):
-        self.current_batch += 1
         self.optimizer.zero_grad()
-        batch_start_time = time.time()
         output, target = self._feed_model(source, target)
         loss = self.loss_func(output, target)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
-        self.scheduler.step()
-
         self.current_log_interval_loss += loss.item()
         self.current_batch_loss = loss.item()
 
-        if self.current_batch % self.log_interval == 0 and self.current_batch > 0:
+        if self.current_batch % self.log_interval == 0:
             lr = self.scheduler.get_last_lr()[0]
-            batch_time = (time.time() - batch_start_time)  / self.log_interval
             cur_loss = self.current_log_interval_loss / self.log_interval
-            ppl = math.exp(cur_loss)
             self.current_log_interval_loss = 0
             self.pbar.update(self.log_interval)
-            self.pbar.set_postfix_str(f"Batch {self.current_batch} | Loss {cur_loss:.2f} | PPL {ppl:.2f} | LR {lr:.2f} | {batch_time:.2f}s")
+            self.pbar.set_postfix_str(f"Loss {cur_loss:.3E} | LR {lr:.3E}")
 
+        self.current_batch += 1
         return None
 
 
@@ -144,13 +139,14 @@ class Trainer:
         self.current_log_interval_loss = 0
         self.current_batch = 0
         self.model.train()
-        with tqdm.tqdm(total=len(self.train_loader)//self.num_gpu , desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
-                       position=self.gpu_id) as self.pbar:
+        colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
+        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
+                       position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)]) as self.pbar:
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
-            self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader))
-            self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'])
-            self.tb_writer.flush()
+        self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader))
+        self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'])
+        self.scheduler.step()
         return None
 
 
@@ -176,10 +172,9 @@ class Trainer:
             metric_dict[metric_name] = metric_func(outputs, targets)
             self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name])
         self.tb_writer.add_scalar("Val_Loss", total_loss)
-        self.tb_writer.flush()
 
-        evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2f} | "
-        evaltext += " | ".join([f"{k} {v:.2f}" for k,v in metric_dict.items()])
+        evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2E} | "
+        evaltext += " | ".join([f"{k} {v:.2E}" for k,v in metric_dict.items()])
         if self.gpu_id == 0:
             printmessage(evaltext)
 
@@ -200,7 +195,7 @@ class Trainer:
                         'val_loss': self.current_val_loss,
                         'metric_dict': self.current_val_metric_dict,
                         }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}.pt")
-            printmessage(f"Model Saved at Epoch {self.current_epoch} | Val Loss: {self.current_val_loss:.2f}")
+            printmessage(f"Model Saved at Epoch {self.current_epoch} | Val Loss: {self.current_val_loss:.2E}")
             self.continue_training = 1
 
         elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
@@ -222,7 +217,7 @@ class Trainer:
                 self._save_checkpoint()
             if self.continue_training == 0:
                 break
-
+        self.tb_writer.flush()
         return None
 
     ## END of Class NanoporeTrainer
@@ -255,15 +250,18 @@ def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replica
 def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
-    model = TransformerModel(d_model = 512, n_heads = 8, d_ff = 2048, n_layers = 6,
-                             encoder_dropout = 0.1, lin_dropout = 0.1, kmer_size = 5, signal_size = 25, spectrogram_size = 21,
-                             t_act = 'gelu', lin_act = 'relu', lin_depth = 3, block_len = 17)
-    model = model.to(rank)
-    model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"])
-    scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 1000,
-                                                                                num_training_steps = 10000)
+    model = TransformerModel(d_model = 512, n_heads = 16, d_ff = 2048, n_layers = 8,
+                             t_act = 'gelu', lin_act = 'relu', lin_depth = 5, encoder_dropout = 0.1, lin_dropout = 0.2,
+                             kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
+
+    model = model.to(rank)
+    model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = 0.1)
+    scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 10,
+                                                                                num_training_steps = args_dict["epochs"],
+                                                                                num_cycles = 5, last_epoch = -1)
     loss_func = torch.nn.MSELoss()
     metric_func_dict = {"acc": cm.BinaryAccuracy().to(rank),
                         "auc": cm.BinaryAUROC().to(rank),
@@ -282,14 +280,15 @@ def main_worker(rank, args_dict):
 
 def main_master():
     args = parse_args()
+    torch.multiprocessing.set_sharing_strategy('file_system')
     os.makedirs(os.path.join(args.output, args.name), exist_ok=True)
     os.makedirs(os.path.join(args.tb, args.name), exist_ok=True)
     args.output = os.path.join(args.output, args.name)
     args.tb = os.path.join(args.tb, args.name)
     if args.seed is None:
         args.seed = np.random.randint(0, 10000000)
-    printmessage(f"Seed: {args.seed}")
     printmessage("Training Program Started.")
+    printmessage(f"Seed: {args.seed}")
     printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
     mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
