@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from train.dataloader import load_dataset, NanoporeDataset, NanoporeDataLoader
-from model.transformer_prototype import TransformerModel
+from model.transformer_prototype_v2 import TransformerModel
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -19,7 +19,7 @@ from utils.utils import printmessage
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v1-{strfttime}")
+    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v2-{strfttime}")
     return parser.parse_args()
 
 
@@ -195,7 +195,7 @@ class Trainer:
                         'val_loss': self.current_val_loss,
                         'metric_dict': self.current_val_metric_dict,
                         }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}.pt")
-            printmessage(f"Model Saved at Epoch {self.current_epoch} | Val Loss: {self.current_val_loss:.2E}")
+            printmessage(f"Model Saved at Epoch {self.current_epoch}")
             self.continue_training = 1
 
         elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
@@ -203,6 +203,7 @@ class Trainer:
             self.continue_training = 0
 
         else:
+            printmessage(f"Skipping Model Save at Epoch {self.current_epoch}")
             self.continue_training = 1
 
         return None
@@ -251,8 +252,8 @@ def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
 
-    model = TransformerModel(d_model = 512, n_heads = 16, d_ff = 2048, n_layers = 8,
-                             t_act = 'gelu', lin_act = 'relu', lin_depth = 5, encoder_dropout = 0.1, lin_dropout = 0.2,
+    model = TransformerModel(d_model = 128*6, n_heads = 16, d_ff = 2048, n_layers = 12,
+                             t_act = 'gelu', lin_act = 'relu', lin_depth = 7, encoder_dropout = 0.1, lin_dropout = 0.2,
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
 
     model = model.to(rank)
