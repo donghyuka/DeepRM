@@ -7,37 +7,11 @@ import pickle
 
 import numpy as np
 import pandas as pd
-import pod5
-import pysam
 import scipy
 import tqdm
+import pysam
 
-
-def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk = 10000):
-    for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list)):
-        signal_list = []
-        offset_list = []
-        scale_list = []
-        id_list = []
-        with pod5.Reader(pod5_path) as reader:
-            for record in reader:
-                signal_arr = record.signal
-                offset = record.calibration.offset
-                scale = record.calibration.scale
-                offset_list.append(offset)
-                scale_list.append(scale)
-                signal_list.append(signal_arr)
-                id_list.append(str(record.read_id))
-        gc.collect()
-        df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
-        ## chunking
-        for chunk_idx in range(0, len(df) // chunk + 1):
-            signal_df = df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(df))].copy()
-            save_path = f"{signal_df_path}/{pid}-{pod5_idx}-{chunk_idx}.pkl"
-            signal_df.to_pickle(save_path)
-            index_dict[save_path] = id_list
-            gc.collect()
-    return None
+from preprocess.segment_normalize_signal import preprocess_pod5, segment_signal, segment_spectrogram
 
 
 def extract_move(bam_path,ncpu):
@@ -50,6 +24,7 @@ def extract_move(bam_path,ncpu):
     ts_list = []
     qs_list = []
     sl_list = []
+    sq_list = []
 
     for read in tqdm.tqdm(bam_file, total=bam_file.count()):
         if read.has_tag("pi"):
@@ -60,68 +35,19 @@ def extract_move(bam_path,ncpu):
         sd_list.append(read.get_tag("sd"))
         ts_list.append(read.get_tag("ts"))
         qs_list.append(read.get_tag("qs"))
-        sequence_length = len(read.query_sequence)
+        sq = read.query_sequence
+        sequence_length = len(sq)
         sl_list.append(sequence_length)
+        sq_list.append(sq)
 
     move_df = pd.DataFrame(
-        {"mv": mv_list, "read_id": id_list, "qs": qs_list, "sm": sm_list, "sd": sd_list, "ts": ts_list, "sl": sl_list})
+        {"mv": mv_list, "read_id": id_list, "qs": qs_list, "sm": sm_list, "sd": sd_list, "ts": ts_list, "sl": sl_list, "seq": sq_list})
     move_df["read_id"] = move_df["read_id"].astype(str)
 
     del mv_list, id_list
     gc.collect()
 
     return move_df
-
-
-def preprocess_pod5(pod5_path, save_path, ncpu):
-    # Export pod5 to csv
-    pod5_path_list = glob.glob(pod5_path + "/*.pod5")
-    proc_list = []
-    np.random.shuffle(pod5_path_list)
-    pod5_path_list_split = np.array_split(pod5_path_list, ncpu)
-
-    man = mp.Manager()
-    index_dict = man.dict()
-
-    for pid in range(ncpu):
-        proc = mp.Process(target=extract_signal_proc, args=(pod5_path_list_split[pid], save_path, pid, index_dict))
-        proc_list.append(proc)
-        proc.start()
-
-    for proc in proc_list:
-        proc.join()
-
-    index_dict = dict(index_dict)
-    man.shutdown()
-    gc.collect()
-
-    return index_dict
-
-
-def segment_signal(signal, move):
-    stride = move[0]
-    move = move[1:]
-    move_idx = np.where(move == 1)[0][1:] * stride
-    move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0)
-    signal_segmented = np.array_split(signal, move_idx)
-    return signal_segmented
-
-
-def segment_spectrogram(signal, move, filter, sampling = 4000, nperseg = 40, stride = 5):
-    signal = scipy.signal.sosfilt(filter, signal)
-    f, t, sxx = scipy.signal.spectrogram(signal, fs=sampling, nperseg=nperseg, noverlap=nperseg-stride,
-                                         mode="magnitude", window="hann")
-    sxx = sxx.T
-    stride = move[0]
-    move = move[1:]
-    move=np.array(move, dtype=int)
-    move_idx = np.where(move == 1)[0][1:] * stride
-    move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0) // stride
-    sxx = np.array_split(sxx, move_idx, axis=0)
-    return sxx
-
 
 def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
     for signal_path in tqdm.tqdm(signal_path_arr):
@@ -139,27 +65,36 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
         signal_df["signal"] = signal_df.apply(lambda x: (x["signal"] + x["offset"]) * x["scale"], axis=1)
         signal_df["signal"] = signal_df.apply(lambda x: (x["signal"] - x["sm"]) / x["sd"], axis=1)
 
-        # signal_df = signal_df[["read_id", "signal", "mv"]].copy()
-        # gc.collect()
-
         signal_df["signal_seg"] = signal_df.apply(lambda x: segment_signal(x["signal"], x["mv"]), axis=1)
         filter = scipy.signal.butter(4, 100, btype="highpass", fs=4000, output="sos")
         signal_df["signal_fft"] = signal_df.apply(lambda x: segment_spectrogram(x["signal"], x["mv"], filter), axis=1)
 
-        block_df = pd.read_pickle(f"{seg_df_path}/intermediates/block_df_split/{signal_path.split('/')[-1]}")
-        signal_df = block_df.merge(signal_df, on="read_id", how="inner")
-        # signal_df = signal_df[["read_id", "block_id", "penalty", "motif", "bq", "start_pos", "end_pos"]].copy()
-        del block_df
-        gc.collect()
-
         signal_df["signal_seg"] = signal_df.apply(lambda x: x["signal_seg"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["signal_fft"] = signal_df.apply(lambda x: x["signal_fft"][x["start_pos"]:x["end_pos"]], axis=1)
 
-        signal_df.to_pickle(f"{seg_df_path}/block/{signal_path.split('/')[-1]}")
+        ## TODO: IMPLEMENT HERE ##
+        signal_zip = zip(signal_df["read_id"], signal_df["signal_seg"], signal_df["signal_fft"], signal_df["motif"])
         del signal_df
         gc.collect()
+        df_list = [expand_row_to_blocks(read_id, signal_seg, signal_fft, seq) for read_id, signal_seg, signal_fft, seq in signal_zip]
+        block_df = pd.concat(df_list)
+        del df_list
+        gc.collect()
+        block_df.to_pickle(f"{seg_df_path}/block/{signal_path.split('/')[-1]}")
+
 
     return None
+
+
+def expand_row_to_blocks(read_id, signal_seg, signal_fft, seq, boi="A", pad = 8):
+    boi_pos_list = [i for i, x in enumerate(seq) if x == boi and i > pad and i < len(seq) - pad]
+    block_id_list = [f"{read_id}-{i}" for i in range(len(boi_pos_list))]
+    signal_seg_list = [signal_seg[i-pad:i+pad] for i in boi_pos_list]
+    signal_fft_list = [signal_fft[i-pad:i+pad] for i in boi_pos_list]
+    motif_list = [seq[i-pad:i+pad] for i in boi_pos_list]
+    df = pd.DataFrame({"read_id": block_id_list, "signal_seg": signal_seg_list,
+                       "signal_fft": signal_fft_list, "motif": motif_list})
+    return df
 
 
 def parse_args():
@@ -169,7 +104,6 @@ def parse_args():
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
-    parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
@@ -181,22 +115,6 @@ def parse_args():
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(f"{args.output}/block/", exist_ok=True)
     return args
-
-
-def assign_block_id(block_df):
-    index = 0
-    read_id_prev = ""
-    block_id = []
-    for read_id in block_df["read_id"]:
-        if read_id != read_id_prev:
-            index = 0
-        else:
-            index += 1
-        block_id.append(index)
-        read_id_prev = read_id
-    block_df["block_id"] = block_id
-    return block_df
-
 
 
 def main():
@@ -216,8 +134,6 @@ def main():
     with open(signal_index_path, "wb") as outfile:
         pickle.dump(index_dict, outfile)
 
-    block_df = pd.read_pickle(args.block)
-    block_df = assign_block_id(block_df)
 
     with open(signal_index_path, "rb") as infile:
         index_dict = pickle.load(infile)
@@ -227,17 +143,14 @@ def main():
 
 
     os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
 
     for signal_path_arr in signal_path_arr_split:
         for signal_path in signal_path_arr:
             id_list = index_dict[signal_path]
             move_df_proc = move_df[move_df["read_id"].isin(id_list)]
-            block_df_proc = block_df[block_df["read_id"].isin(id_list)]
             move_df_proc.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
-            block_df_proc.to_pickle(f"{intermediate_path}/block_df_split/{signal_path.split('/')[-1]}")
 
-    del move_df, block_df, index_dict, id_list
+    del move_df, index_dict, id_list
     gc.collect()
 
     proc_list = []

@@ -2,7 +2,6 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from train.dataloader import load_dataset, NanoporeDataset, NanoporeDataLoader
-from model.transformer_prototype_v2 import TransformerModel
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -14,24 +13,30 @@ import tqdm
 import math
 import numpy as np
 from utils.utils import printmessage
+import importlib
 
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
+    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/engineering/")
     parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
     parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
+    parser.add_argument("--model", type=str, default="transformer_prototype_v3")
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=30)
     parser.add_argument("--es_start", type=int, default=30)
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--head", type=int, default=16)
+    parser.add_argument("--enc_layer", type=int, default=8)
+    parser.add_argument("--lin_layer", type=int, default=5)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v2-{strfttime}")
+    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v3-{strfttime}")
     return parser.parse_args()
 
 
@@ -144,8 +149,8 @@ class Trainer:
                        position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)]) as self.pbar:
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
-        self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader))
-        self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'])
+        self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader), self.current_epoch)
+        self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'], self.current_epoch)
         self.scheduler.step()
         return None
 
@@ -170,8 +175,8 @@ class Trainer:
 
         for metric_name, metric_func in self.metric_func_dict.items():
             metric_dict[metric_name] = metric_func(outputs, targets)
-            self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name])
-        self.tb_writer.add_scalar("Val_Loss", total_loss)
+            self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name], self.current_epoch)
+        self.tb_writer.add_scalar("Val_Loss", total_loss, self.current_epoch)
 
         evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2E} | "
         evaltext += " | ".join([f"{k} {v:.2E}" for k,v in metric_dict.items()])
@@ -251,9 +256,10 @@ def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replica
 def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
-
-    model = TransformerModel(d_model = 128*6, n_heads = 16, d_ff = 2048, n_layers = 12,
-                             t_act = 'gelu', lin_act = 'relu', lin_depth = 7, encoder_dropout = 0.1, lin_dropout = 0.2,
+    TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
+    model = TransformerModel(d_model = args_dict["dim"], n_heads = args_dict["head"], d_ff = args_dict["dim"]*2,
+                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
+                             t_act = 'gelu', lin_act = 'relu', encoder_dropout = 0.1, lin_dropout = 0.2,
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
 
     model = model.to(rank)
