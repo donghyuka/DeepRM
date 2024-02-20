@@ -72,7 +72,6 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
         signal_df["signal_seg"] = signal_df.apply(lambda x: x["signal_seg"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["signal_fft"] = signal_df.apply(lambda x: x["signal_fft"][x["start_pos"]:x["end_pos"]], axis=1)
 
-        ## TODO: IMPLEMENT HERE ##
         signal_zip = zip(signal_df["read_id"], signal_df["signal_seg"], signal_df["signal_fft"], signal_df["motif"])
         del signal_df
         gc.collect()
@@ -80,7 +79,9 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
         block_df = pd.concat(df_list)
         del df_list
         gc.collect()
-        block_df.to_pickle(f"{seg_df_path}/block/{signal_path.split('/')[-1]}")
+        block_df.to_pickle(f"{seg_df_path}/{signal_path.split('/')[-1]}")
+        del block_df
+        gc.collect()
 
 
     return None
@@ -121,6 +122,8 @@ def main():
     args = parse_args()
     intermediate_path = f"{args.output}/intermediates/"
     os.makedirs(intermediate_path, exist_ok=True)
+    block_path = f"{args.output}/block/"
+    os.makedirs(block_path, exist_ok=True)
 
     move_path = f"{intermediate_path}/move_df.pkl"
     move_df = extract_move(args.bam, args.cpu)
@@ -156,7 +159,7 @@ def main():
     proc_list = []
     for signal_path_arr in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_fft_signal,
-                          args=(args.output, signal_path_arr))
+                          args=(block_path, signal_path_arr))
         proc_list.append(proc)
         proc.start()
 

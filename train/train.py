@@ -19,7 +19,7 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=384)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/engineering/")
@@ -35,6 +35,7 @@ def parse_args():
     parser.add_argument("--head", type=int, default=16)
     parser.add_argument("--enc_layer", type=int, default=8)
     parser.add_argument("--lin_layer", type=int, default=5)
+    parser.add_argument("--dropout", type=float, default=0.2)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v3-{strfttime}")
     return parser.parse_args()
@@ -257,9 +258,10 @@ def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
     TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
-    model = TransformerModel(d_model = args_dict["dim"], n_heads = args_dict["head"], d_ff = args_dict["dim"]*2,
+    model = TransformerModel(d_model = args_dict["dim"], n_heads = args_dict["head"], d_ff = args_dict["dim"]*4,
                              n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
-                             t_act = 'gelu', lin_act = 'relu', encoder_dropout = 0.1, lin_dropout = 0.2,
+                             t_act = 'gelu', lin_act = 'relu',
+                             encoder_dropout = args_dict["dropout"], lin_dropout = args_dict["dropout"],
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
 
     model = model.to(rank)
