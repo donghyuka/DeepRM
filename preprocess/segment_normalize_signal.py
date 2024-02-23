@@ -11,10 +11,12 @@ import pod5
 import pysam
 import scipy
 import tqdm
+from utils.utils import oom_killer
 
 
-def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk = 10000):
+def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk):
     for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list)):
+        oom_killer()
         signal_list = []
         offset_list = []
         scale_list = []
@@ -35,8 +37,10 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk =
             signal_df = df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(df))].copy()
             save_path = f"{signal_df_path}/{pid}-{pod5_idx}-{chunk_idx}.pkl"
             signal_df.to_pickle(save_path)
+            id_list = signal_df["read_id"].tolist()
             index_dict[save_path] = id_list
             gc.collect()
+
     return None
 
 
@@ -73,7 +77,7 @@ def extract_move(bam_path,ncpu):
     return move_df
 
 
-def preprocess_pod5(pod5_path, save_path, ncpu):
+def preprocess_pod5(pod5_path, save_path, ncpu, chunk = 10000):
     # Export pod5 to csv
     pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
@@ -84,7 +88,7 @@ def preprocess_pod5(pod5_path, save_path, ncpu):
     index_dict = man.dict()
 
     for pid in range(ncpu):
-        proc = mp.Process(target=extract_signal_proc, args=(pod5_path_list_split[pid], save_path, pid, index_dict))
+        proc = mp.Process(target=extract_signal_proc, args=(pod5_path_list_split[pid], save_path, pid, index_dict, chunk))
         proc_list.append(proc)
         proc.start()
 
@@ -254,6 +258,10 @@ def main():
         proc.join()
 
     return None
+
+
+## TODO: update this script using evaluate/segment_transcript.py
+## It contains several major performance improvements.
 
 
 if __name__ == "__main__":

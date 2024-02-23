@@ -19,25 +19,28 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=384)
+    parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/engineering/")
+    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
     parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
     parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
-    parser.add_argument("--model", type=str, default="transformer_prototype_v3")
+    parser.add_argument("--model", type=str, default="transformer_prototype_v7")
     parser.add_argument("--es_delta", type=float, default=1e-5)
-    parser.add_argument("--es_patience", type=int, default=30)
-    parser.add_argument("--es_start", type=int, default=30)
+    parser.add_argument("--es_patience", type=int, default=50)
+    parser.add_argument("--es_start", type=int, default=1000)
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--dim", type=int, default=512)
-    parser.add_argument("--head", type=int, default=16)
+    parser.add_argument("--enc_dim", type=int, default=512)
+    parser.add_argument("--lin_dim", type=int, default=2048)
+    parser.add_argument("--head", type=int, default=8)
     parser.add_argument("--enc_layer", type=int, default=8)
-    parser.add_argument("--lin_layer", type=int, default=5)
-    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--lin_layer", type=int, default=4)
+    parser.add_argument("--enc_dropout", type=float, default=0.2)
+    parser.add_argument("--lin_dropout", type=float, default=0.1)
+    parser.add_argument("--period", type=int, default=30)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v3-{strfttime}")
+    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v7-{strfttime}")
     return parser.parse_args()
 
 
@@ -85,8 +88,9 @@ class Trainer:
         self.current_val_metric_dict = {}
         self.current_epoch = 0
         self.current_batch = 0
-        self.current_log_interval_loss = 0
         self.current_batch_loss = 0
+        self.current_epoch_losses = []
+        self.current_lr = 0
         self.pbar = None
         self.model_name = model_name
         self.num_gpu = num_gpu
@@ -124,16 +128,11 @@ class Trainer:
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
-        self.current_log_interval_loss += loss.item()
         self.current_batch_loss = loss.item()
+        self.current_epoch_losses.append(self.current_batch_loss)
 
-        if self.current_batch % self.log_interval == 0:
-            lr = self.scheduler.get_last_lr()[0]
-            cur_loss = self.current_log_interval_loss / self.log_interval
-            self.current_log_interval_loss = 0
-            self.pbar.update(self.log_interval)
-            self.pbar.set_postfix_str(f"Loss {cur_loss:.3E} | LR {lr:.3E}")
-
+        self.pbar.update(1)
+        self.pbar.set_postfix_str(f"Loss {self.current_batch_loss:.3E} | LR {self.current_lr:.3E}")
         self.current_batch += 1
         return None
 
@@ -145,52 +144,69 @@ class Trainer:
         self.current_log_interval_loss = 0
         self.current_batch = 0
         self.model.train()
+        self.current_lr = self.optimizer.param_groups[0]['lr']
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
-        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
+        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu + 1, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
                        position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)]) as self.pbar:
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
-        self.tb_writer.add_scalar("Loss", self.current_batch_loss/len(self.train_loader), self.current_epoch)
-        self.tb_writer.add_scalar("Learning_Rate", self.optimizer.param_groups[0]['lr'], self.current_epoch)
+        current_epoch_loss = np.mean(self.current_epoch_losses)
+        self.current_epoch_losses = []
+        self.tb_writer.add_scalar("Loss", current_epoch_loss, self.current_epoch)
+        self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_epoch)
         self.scheduler.step()
         return None
 
 
     def _run_eval(self):
         self.model.eval()
-        total_loss = 0.
+        val_loss = []
         outputs = []
         targets = []
         with torch.no_grad():
             for source, target in self.val_loader:
                 output, target = self._feed_model(source, target)
                 loss = self.loss_func(output, target)
-                total_loss += loss.item()
+                val_loss.append(loss.item())
                 outputs.append(output)
                 targets.append(target)
 
-        total_loss /= len(self.val_loader)
+        val_loss = np.mean(val_loss)
         outputs = torch.cat(outputs, dim=0)
         targets = torch.cat(targets, dim=0)
+        targets = targets.to(torch.long)
         metric_dict = {}
 
         for metric_name, metric_func in self.metric_func_dict.items():
             metric_dict[metric_name] = metric_func(outputs, targets)
             self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name], self.current_epoch)
-        self.tb_writer.add_scalar("Val_Loss", total_loss, self.current_epoch)
+        self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_epoch)
 
-        evaltext = f"Epoch {self.current_epoch} | Val Loss {total_loss:.2E} | "
-        evaltext += " | ".join([f"{k} {v:.2E}" for k,v in metric_dict.items()])
-        if self.gpu_id == 0:
-            printmessage(evaltext)
-
-        self.current_val_loss = total_loss
+        self.current_val_loss = val_loss
         self.current_val_metric_dict = metric_dict
+
+        ## All-reduce self.current_val_loss and metrics
+        # dist.barrier()
+        # self.current_val_loss = torch.tensor(self.current_val_loss).to(self.gpu_id)
+        # gather_list = [torch.zeros_like(self.current_val_loss) for _ in range(self.num_gpu)]
+        # dist.all_gather(gather_list, self.current_val_loss)
+        # self.current_val_loss = torch.cat(gather_list, dim=0)
+        # self.current_val_loss = self.current_val_loss.mean().item()
+        # for key in self.current_val_metric_dict.keys():
+        #     self.current_val_metric_dict[key] = torch.tensor(self.current_val_metric_dict[key]).to(self.gpu_id)
+        #     dist.all_reduce(self.current_val_metric_dict[key], op=dist.ReduceOp.SUM)
+        #     self.current_val_metric_dict[key] = self.current_val_metric_dict[key].item() / self.num_gpu
+
+        if self.gpu_id == 0:
+            evaltext = f"Epoch {self.current_epoch} | Val Loss {self.current_val_loss:.3E} | "
+            evaltext += " | ".join([f"{k} {v:.2E}" for k,v in self.current_val_metric_dict.items()])
+            printmessage(evaltext)
 
         return None
 
 
     def _save_checkpoint(self):
+
         if self.best_val_loss - self.current_val_loss > self.es_delta:
             ## Save Model if Improved
             self.best_val_loss = self.current_val_loss
@@ -220,6 +236,7 @@ class Trainer:
             self.current_epoch = epoch
             self._run_epoch()
             self._run_eval()
+
             if self.gpu_id == 0:
                 self._save_checkpoint()
             if self.continue_training == 0:
@@ -258,10 +275,10 @@ def main_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
     TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
-    model = TransformerModel(d_model = args_dict["dim"], n_heads = args_dict["head"], d_ff = args_dict["dim"]*4,
+    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
                              n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
                              t_act = 'gelu', lin_act = 'relu',
-                             encoder_dropout = args_dict["dropout"], lin_dropout = args_dict["dropout"],
+                             encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
 
     model = model.to(rank)
@@ -270,11 +287,15 @@ def main_worker(rank, args_dict):
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = 0.1)
     scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 10,
                                                                                 num_training_steps = args_dict["epochs"],
-                                                                                num_cycles = 5, last_epoch = -1)
+                                                                                num_cycles =  args_dict["epochs"] // args_dict["period"],
+                                                                                last_epoch = -1)
     loss_func = torch.nn.MSELoss()
+
     metric_func_dict = {"acc": cm.BinaryAccuracy().to(rank),
-                        "auc": cm.BinaryAUROC().to(rank),
-                        "f1": cm.BinaryF1Score().to(rank),}
+                        "auroc": cm.BinaryAUROC().to(rank),
+                        "ap": cm.BinaryAveragePrecision().to(rank),
+                        "f-1": cm.BinaryF1Score().to(rank),}
+
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["disk_shard_size"],
                                                   rank, args_dict["gpu"], args_dict["seed"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, 1.0, metric_func_dict,
