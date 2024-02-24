@@ -39,16 +39,12 @@ def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, int
                 data["bq"].append(bq)
                 pbar.update(1)
 
-    total_len = 0
     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
         move_df = pd.DataFrame.from_dict(data, orient="columns")
         df_len = len(move_df)
-        total_len += df_len
         if df_len > 0:
             move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
         del move_df
-
-    print(f"Total Length: {total_len}")
 
     del data_dict
 
@@ -75,6 +71,7 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
         del move_df
         gc.collect()
 
+        signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["signal_len"] = signal_df["signal"].apply(lambda x: len(x))
         signal_df = signal_df[signal_df["signal_len"] > signal_df["ts"]]
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["ts"]:], axis=1)
@@ -110,13 +107,13 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
     return None
 
 
-def expand_row_to_blocks(read_id, signal_seg, signal_fft, seq, bq, boi="A", pad = 10):
-    boi_pos_list = [i for i, x in enumerate(seq) if x == boi and i > pad and i < len(seq) - pad]
-    block_id_list = [f"{read_id}-{i}" for i in range(len(boi_pos_list))]
-    signal_seg_list = [signal_seg[i-pad:i+pad] for i in boi_pos_list]
-    signal_fft_list = [signal_fft[i-pad:i+pad] for i in boi_pos_list]
-    motif_list = [seq[i-pad:i+pad] for i in boi_pos_list]
-    bq_list = [bq[i-pad:i+pad] for i in boi_pos_list]
+def expand_row_to_blocks(read_id, signal_seg, signal_fft, seq, bq, boi="A", pad = 10, zfill=6):
+    boi_pos_list = [i for i, x in enumerate(seq) if x == boi and i >= pad and i < len(seq) - pad]
+    block_id_list = [f"{read_id}:{str(i).zfill(zfill)}" for i in range(len(boi_pos_list))]
+    signal_seg_list = [signal_seg[i-pad:i+pad+1] for i in boi_pos_list]
+    signal_fft_list = [signal_fft[i-pad:i+pad+1] for i in boi_pos_list]
+    motif_list = [seq[i-pad:i+pad+1] for i in boi_pos_list]
+    bq_list = [bq[i-pad:i+pad+1] for i in boi_pos_list]
     df = pd.DataFrame({"read_id": block_id_list, "signal_seg": signal_seg_list,
                        "signal_fft": signal_fft_list, "motif": motif_list, "bq": bq_list})
     return df
@@ -131,6 +128,7 @@ def parse_args():
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="BQ cutoff")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--chunk", "-k", type=int, default=200, help="Chunk size")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -149,31 +147,34 @@ def main():
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
     os.makedirs(intermediate_path, exist_ok=True)
-
     os.makedirs(signal_raw_path, exist_ok=True)
-    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, chunk = 200)
-    # gc.collect()
-    #
-    # with open(signal_index_path, "wb") as outfile:
-    #     pickle.dump(index_dict, outfile)
-    # gc.collect()
-    #
-    with open(signal_index_path, "rb") as infile:
-        index_dict = pickle.load(infile)
+
+    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
     signal_path_arr = list(index_dict.keys())
-    #
-    # signal_path_dict = {}
-    # for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Signal Path Dictionary"):
-    #     for read_id in id_list:
-    #         signal_path_dict[read_id] = signal_path
-    #
+    gc.collect()
+
+    with open(signal_index_path, "wb") as outfile:
+        pickle.dump(index_dict, outfile)
+    gc.collect()
+
+    signal_path_dict = {}
+    for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Signal Path Dictionary"):
+        for read_id in id_list:
+            signal_path_dict[read_id] = signal_path
+
     del index_dict
     gc.collect()
-    #
-    #
-    # os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
-    #
+
+
+    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
+
+    del signal_path_dict
+    gc.collect()
+
+    # with open(signal_index_path, "rb") as infile:
+    #     signal_path_dict = pickle.load(infile)
+    # signal_path_arr = list(signal_path_dict.keys())
     # del signal_path_dict
     # gc.collect()
 

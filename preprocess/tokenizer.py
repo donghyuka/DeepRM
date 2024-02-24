@@ -49,8 +49,8 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
     lr_pad = (sig_window-1)//2
     l_skip = np.sum(segment_len_arr[:kmer_pad])-lr_pad
     r_skip = np.sum(segment_len_arr[-kmer_pad:])-lr_pad
-    assert l_skip >= 0, f"Left skip is negative: {l_skip}"
-    assert r_skip >= 0, f"Right skip is negative: {r_skip}"
+    assert l_skip >= 0, f"Left skip is negative: {l_skip}, segment_len_arr: {segment_len_arr}"
+    assert r_skip >= 0, f"Right skip is negative: {r_skip}, segment_len_arr: {segment_len_arr}"
     signal_segmented = np.concatenate(signal_segmented)
     signal_segmented = np.stack(np.split(signal_segmented, len(signal_segmented) // sampling), axis=0)
     signal_segmented = np.array([np.concatenate(signal_segmented[i:i+sig_window]) for i in range(len(signal_segmented)-sig_window+1)])

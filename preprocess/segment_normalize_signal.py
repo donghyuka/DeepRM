@@ -44,40 +44,39 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk):
     return None
 
 
-def extract_move(bam_path,ncpu):
+def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):
     ## Extract mv tag from bam and save to separate file
-    bam_file = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu)
-    mv_list = []
-    id_list = []
-    sm_list = []
-    sd_list = []
-    ts_list = []
-    qs_list = []
-    sl_list = []
+    data_dict = {x: {"mv": [], "read_id": [], "sm": [], "sd": [], "ts": []} for x in signal_path_arr}
 
-    for read in tqdm.tqdm(bam_file, total=bam_file.count()):
-        if read.has_tag("pi"):
-            continue
-        mv_list.append(read.get_tag("mv"))
-        id_list.append(read.query_name)
-        sm_list.append(read.get_tag("sm"))
-        sd_list.append(read.get_tag("sd"))
-        ts_list.append(read.get_tag("ts"))
-        qs_list.append(read.get_tag("qs"))
-        sequence_length = len(read.query_sequence)
-        sl_list.append(sequence_length)
+    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
+        with tqdm.tqdm(total=input_bam.mapped, desc="Parsing BAM File") as pbar:
+            for read in input_bam:
+                if read.has_tag("pi"):
+                    continue
+                read_id = str(read.query_name)
+                signal_path = signal_path_dict[read_id]
+                data = data_dict[signal_path]
+                data["read_id"].append(read_id)
+                data["mv"].append(read.get_tag("mv"))
+                data["sm"].append(read.get_tag("sm"))
+                data["sd"].append(read.get_tag("sd"))
+                data["ts"].append(read.get_tag("ts"))
+                pbar.update(1)
 
-    move_df = pd.DataFrame(
-        {"mv": mv_list, "read_id": id_list, "qs": qs_list, "sm": sm_list, "sd": sd_list, "ts": ts_list, "sl": sl_list})
-    move_df["read_id"] = move_df["read_id"].astype(str)
+    for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
+        move_df = pd.DataFrame.from_dict(data, orient="columns")
+        df_len = len(move_df)
+        if df_len > 0:
+            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
+        del move_df
 
-    del mv_list, id_list
+    del data_dict
+
     gc.collect()
+    return None
 
-    return move_df
 
-
-def preprocess_pod5(pod5_path, save_path, ncpu, chunk = 10000):
+def preprocess_pod5(pod5_path, save_path, ncpu, chunk):
     # Export pod5 to csv
     pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
@@ -175,6 +174,7 @@ def parse_args():
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--chunk", "-k", type=int, default=200, help="Chunk size")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -206,52 +206,55 @@ def assign_block_id(block_df):
 def main():
     args = parse_args()
     intermediate_path = f"{args.output}/intermediates/"
-    os.makedirs(intermediate_path, exist_ok=True)
-
-    move_path = f"{intermediate_path}/move_df.pkl"
-    move_df = extract_move(args.bam, args.cpu)
-    move_df.to_pickle(move_path)
-
     signal_raw_path = f"{intermediate_path}/signal_raw/"
-    os.makedirs(signal_raw_path, exist_ok=True)
-    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu)
-
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
+    move_path = f"{intermediate_path}/move_df.pkl"
+    os.makedirs(intermediate_path, exist_ok=True)
+    os.makedirs(signal_raw_path, exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
+
+    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
+    signal_path_arr = list(index_dict.keys())
+    gc.collect()
+
     with open(signal_index_path, "wb") as outfile:
         pickle.dump(index_dict, outfile)
 
     block_df = pd.read_pickle(args.block)
     block_df = assign_block_id(block_df)
+    for signal_path in signal_path_arr:
+        id_list = index_dict[signal_path]
+        block_df_proc = block_df[block_df["read_id"].isin(id_list)]
+        block_df_proc.to_pickle(f"{intermediate_path}/block_df_split/{signal_path.split('/')[-1]}")
 
-    with open(signal_index_path, "rb") as infile:
-        index_dict = pickle.load(infile)
-    signal_path_arr_split = list(index_dict.keys())
-    np.random.shuffle(signal_path_arr_split)
-    signal_path_arr_split = np.array_split(signal_path_arr_split, max(1, args.cpu))
-
-
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
-
-    for signal_path_arr in signal_path_arr_split:
-        for signal_path in signal_path_arr:
-            id_list = index_dict[signal_path]
-            move_df_proc = move_df[move_df["read_id"].isin(id_list)]
-            block_df_proc = block_df[block_df["read_id"].isin(id_list)]
-            move_df_proc.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
-            block_df_proc.to_pickle(f"{intermediate_path}/block_df_split/{signal_path.split('/')[-1]}")
-
-    del move_df, block_df, index_dict, id_list
+    del block_df, id_list
     gc.collect()
 
+    signal_path_dict = {}
+    for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Signal Path Dictionary"):
+        for read_id in id_list:
+            signal_path_dict[read_id] = signal_path
+
+    del index_dict
+    gc.collect()
+
+    extract_move(args.bam, args.cpu, signal_path_dict, signal_path_arr, intermediate_path)
+
+    del signal_path_dict
+    gc.collect()
+
+    np.random.shuffle(signal_path_arr)
+    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+
     proc_list = []
-    for signal_path_arr in signal_path_arr_split:
+    for signal_paths in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_fft_signal,
-                          args=(args.output, signal_path_arr))
+                          args=(args.output, signal_paths))
         proc_list.append(proc)
         proc.start()
 
-    del  signal_path_arr_split
+    del signal_path_arr_split
     gc.collect()
 
     for proc in proc_list:

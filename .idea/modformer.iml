@@ -5,4 +5,7 @@
     <orderEntry type="jdk" jdkName="Deep1 Python 3.9.0 Torch" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
+  <component name="PyDocumentationSettings">
+    <option name="renderExternalDocumentation" value="true" />
+  </component>
 </module>
