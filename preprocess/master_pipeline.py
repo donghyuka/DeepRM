@@ -21,11 +21,11 @@ def restructure_directory(args, dir_keyword = "raw"):
         args.input = rename_path
 
         ## check if input directory has a single subdirectory
-        subdir_list = os.listdir(args.input_path)
+        subdir_list = os.listdir(args.input)
         if len(subdir_list) != 1:
             raise ValueError(f"Input directory {args.input} contains multiple subdirectories.")
 
-        subdir_path = os.path.join(args.input_path, subdir_list[0])
+        subdir_path = os.path.join(args.input, subdir_list[0])
         ## check if input directory has a single subdirectory
         subdir_list = os.listdir(subdir_path)
         if len(subdir_list) != 1:
@@ -85,7 +85,6 @@ def parse_args():
     args = parser.parse_args()
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
-    os.makedirs(args.output, exist_ok=True)
     return args
 
 def main():
@@ -94,6 +93,7 @@ def main():
     printmessage(f"Input directory: {args.input}")
     printmessage(f"Output directory: {args.output}")
     restructure_directory(args)
+    os.makedirs(args.output, exist_ok=True)
 
     wdir = f"{args.output}/intermediates/"
     os.makedirs(wdir, exist_ok=True)
@@ -113,28 +113,28 @@ def main():
     cmd = f"samtools index -@ {args.cpu} {bam_path}"
     printmessage(cmd)
     os.system(cmd)
-
-    ## step 2. Run dag_extract_cb.py
-    printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
-    block_df_path = f"{wdir}/block_df.pkl"
-    cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
-    printmessage(cmd)
-    os.system(cmd)
-
-    ## Step 3. Run segment_normalize_signal.py
-    printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
-    signal_path = f"{wdir}/normalized_segment_signal/"
-    cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"
-    printmessage(cmd)
-    os.system(cmd)
-
-    ## step 4. run tokenizer.py
-    printmessage(f"[Step 4/4] Running Tokenization")
-    signal_path = f"{signal_path}/block"
-    token_path = f"{args.output}/token"
-    cmd = f"python -m preprocess.tokenizer --cpu {args.cpu} --signal {signal_path} --output {token_path}"
-    printmessage(cmd)
-    os.system(cmd)
+    #
+    # ## step 2. Run dag_extract_cb.py
+    # printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
+    # block_df_path = f"{wdir}/block_df.pkl"
+    # cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
+    # printmessage(cmd)
+    # os.system(cmd)
+    #
+    # ## Step 3. Run segment_normalize_signal.py
+    # printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
+    # signal_path = f"{wdir}/normalized_segment_signal/"
+    # cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"
+    # printmessage(cmd)
+    # os.system(cmd)
+    #
+    # ## step 4. run tokenizer.py
+    # printmessage(f"[Step 4/4] Running Tokenization")
+    # signal_path = f"{signal_path}/block"
+    # token_path = f"{args.output}/token"
+    # cmd = f"python -m preprocess.tokenizer --cpu {args.cpu} --signal {signal_path} --output {token_path}"
+    # printmessage(cmd)
+    # os.system(cmd)
 
     pass
 

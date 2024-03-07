@@ -36,7 +36,7 @@ def main():
         raise ValueError("Unknown file format: {}".format(args.format))
 
     if args.verbose:
-        print(df.head())
+        print(df)
 
     return None
 

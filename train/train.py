@@ -25,22 +25,30 @@ def parse_args():
     parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
     parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
     parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
-    parser.add_argument("--model", type=str, default="transformer_prototype_v7")
+    parser.add_argument("--model", type=str, default="transformer_prototype_v11")
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=50)
     parser.add_argument("--es_start", type=int, default=1000)
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--enc_dim", type=int, default=512)
-    parser.add_argument("--lin_dim", type=int, default=2048)
+    parser.add_argument("--lin_dim", type=int, default=1024)
     parser.add_argument("--head", type=int, default=8)
-    parser.add_argument("--enc_layer", type=int, default=8)
+    parser.add_argument("--enc_layer", type=int, default=6)
     parser.add_argument("--lin_layer", type=int, default=4)
     parser.add_argument("--enc_dropout", type=float, default=0.2)
     parser.add_argument("--lin_dropout", type=float, default=0.1)
     parser.add_argument("--period", type=int, default=30)
+    parser.add_argument("--buffer_size", type=int, default=10000)
+    parser.add_argument("--kmer_size", type=int, default=5)
+    parser.add_argument("--signal_size", type=int, default=25)
+    parser.add_argument("--spectrogram_size", type=int, default=21)
+    parser.add_argument("--block_len", type=int, default=17)
+    parser.add_argument("--seq_len", type=int, default=200)
+    parser.add_argument("--t_act", type=str, default="gelu")
+    parser.add_argument("--lin_act", type=str, default="gelu")
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v7-{strfttime}")
+    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v11-{strfttime}")
     return parser.parse_args()
 
 
@@ -64,6 +72,7 @@ class Trainer:
             es_delta: float,
             model_name: str,
             num_gpu: int,
+            model_config: dict = None,
     ) -> None:
 
         self.gpu_id = gpu_id
@@ -75,7 +84,6 @@ class Trainer:
         self.grad_clip = grad_clip
         self.scheduler = scheduler
         self.log_interval = log_interval
-        self.tb_writer = SummaryWriter(tb_path)
         self.metric_func_dict = metric_func_dict
         self.checkpoint_path = checkpoint_path
         self.es_start = es_start
@@ -89,12 +97,17 @@ class Trainer:
         self.current_epoch = 0
         self.current_batch = 0
         self.current_batch_loss = 0
-        self.current_epoch_losses = []
+        self.current_epoch_loss = 0
         self.current_lr = 0
         self.pbar = None
         self.model_name = model_name
         self.num_gpu = num_gpu
+        self.model_config = model_config
 
+        if self.gpu_id == 0:
+            self.tb_writer = SummaryWriter(tb_path)
+        else:
+            self.tb_writer = None
 
         ## END of __init__
 
@@ -129,8 +142,8 @@ class Trainer:
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
         self.current_batch_loss = loss.item()
-        self.current_epoch_losses.append(self.current_batch_loss)
-
+        # dist.barrier()
+        # time.sleep(0.03*self.gpu_id)
         self.pbar.update(1)
         self.pbar.set_postfix_str(f"Loss {self.current_batch_loss:.3E} | LR {self.current_lr:.3E}")
         self.current_batch += 1
@@ -146,14 +159,26 @@ class Trainer:
         self.model.train()
         self.current_lr = self.optimizer.param_groups[0]['lr']
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
-        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu + 1, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
+        current_epoch_losses = []
+        dist.barrier()
+        time.sleep(0.03*self.gpu_id)
+        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
                        position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)]) as self.pbar:
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
-        current_epoch_loss = np.mean(self.current_epoch_losses)
-        self.current_epoch_losses = []
-        self.tb_writer.add_scalar("Loss", current_epoch_loss, self.current_epoch)
-        self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_epoch)
+                current_epoch_losses.append(self.current_batch_loss)
+        current_epoch_loss = np.mean(current_epoch_losses)
+
+        ## ALL REDUCE LOSS
+        dist.barrier()
+        current_epoch_loss = torch.tensor(current_epoch_loss).to(self.gpu_id)
+        dist.all_reduce(current_epoch_loss, op=dist.ReduceOp.SUM)
+        self.current_epoch_loss = current_epoch_loss / self.num_gpu
+        dist.barrier()
+
+        if self.gpu_id == 0:
+            self.tb_writer.add_scalar("Loss", self.current_epoch_loss, self.current_epoch)
+            self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_epoch)
         self.scheduler.step()
         return None
 
@@ -179,25 +204,24 @@ class Trainer:
 
         for metric_name, metric_func in self.metric_func_dict.items():
             metric_dict[metric_name] = metric_func(outputs, targets)
-            self.tb_writer.add_scalar(f"Val_{metric_name}", metric_dict[metric_name], self.current_epoch)
-        self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_epoch)
 
+        ## ALL REDUCE LOSS and METRICS
+        dist.barrier()
+        val_loss = torch.tensor(val_loss).to(self.gpu_id)
+        dist.all_reduce(torch.tensor(val_loss), op=dist.ReduceOp.SUM)
+        val_loss = val_loss / self.num_gpu
+        for key, value in metric_dict.items():
+            metric = torch.tensor(value).to(self.gpu_id)
+            dist.all_reduce(metric, op=dist.ReduceOp.SUM)
+            metric_dict[key] = metric / self.num_gpu
         self.current_val_loss = val_loss
         self.current_val_metric_dict = metric_dict
-
-        ## All-reduce self.current_val_loss and metrics
-        # dist.barrier()
-        # self.current_val_loss = torch.tensor(self.current_val_loss).to(self.gpu_id)
-        # gather_list = [torch.zeros_like(self.current_val_loss) for _ in range(self.num_gpu)]
-        # dist.all_gather(gather_list, self.current_val_loss)
-        # self.current_val_loss = torch.cat(gather_list, dim=0)
-        # self.current_val_loss = self.current_val_loss.mean().item()
-        # for key in self.current_val_metric_dict.keys():
-        #     self.current_val_metric_dict[key] = torch.tensor(self.current_val_metric_dict[key]).to(self.gpu_id)
-        #     dist.all_reduce(self.current_val_metric_dict[key], op=dist.ReduceOp.SUM)
-        #     self.current_val_metric_dict[key] = self.current_val_metric_dict[key].item() / self.num_gpu
+        dist.barrier()
 
         if self.gpu_id == 0:
+            self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_epoch)
+            for key, value in metric_dict.items():
+                self.tb_writer.add_scalar(f"Val_{key}", value, self.current_epoch)
             evaltext = f"Epoch {self.current_epoch} | Val Loss {self.current_val_loss:.3E} | "
             evaltext += " | ".join([f"{k} {v:.2E}" for k,v in self.current_val_metric_dict.items()])
             printmessage(evaltext)
@@ -216,6 +240,7 @@ class Trainer:
                         'scheduler_state_dict': self.scheduler.state_dict(),
                         'val_loss': self.current_val_loss,
                         'metric_dict': self.current_val_metric_dict,
+                        'model_config': self.model_config,
                         }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}.pt")
             printmessage(f"Model Saved at Epoch {self.current_epoch}")
             self.continue_training = 1
@@ -233,15 +258,17 @@ class Trainer:
 
     def train(self, max_epochs: int):
         for epoch in range(max_epochs):
+            dist.barrier()
             self.current_epoch = epoch
             self._run_epoch()
             self._run_eval()
-
+            dist.barrier()
             if self.gpu_id == 0:
                 self._save_checkpoint()
             if self.continue_training == 0:
                 break
-        self.tb_writer.flush()
+        if self.gpu_id == 0:
+            self.tb_writer.flush()
         return None
 
     ## END of Class NanoporeTrainer
@@ -255,7 +282,7 @@ def setup_ddp(rank,world_size):
     return None
 
 
-def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replicas, seed):
+def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replicas, buffer_size, seed):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -264,31 +291,34 @@ def prepare_dataloader(data_path, batch_size, disk_shard_size, rank, num_replica
     val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size,
-                                disk_shard_size, rank, num_replicas, seed = seed, shuffle = True, drop_last = True)
+                                disk_shard_size, rank, num_replicas, buffer_size, seed = seed, shuffle = True, drop_last = True)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, batch_size,
-                              disk_shard_size, rank, num_replicas, seed = seed, shuffle = False, drop_last = True)
+                              disk_shard_size, rank, num_replicas, buffer_size, seed = seed, shuffle = False, drop_last = True)
 
     return train_loader, val_loader
 
 
 def main_worker(rank, args_dict):
-    printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
     TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
     model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
                              n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
-                             t_act = 'gelu', lin_act = 'relu',
+                             t_act = args_dict["t_act"], lin_act = args_dict["lin_act"],
                              encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
-                             kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
+                             kmer_size = args_dict["kmer_size"], signal_size = args_dict["signal_size"],
+                             spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"], seq_len = args_dict["seq_len"])
 
     model = model.to(rank)
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = 0.1)
-    scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 10,
-                                                                                num_training_steps = args_dict["epochs"],
-                                                                                num_cycles =  args_dict["epochs"] // args_dict["period"],
-                                                                                last_epoch = -1)
+    # scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 10,
+    #                                                                             num_training_steps = args_dict["epochs"],
+    #                                                                             num_cycles =  args_dict["epochs"] // args_dict["period"],
+    #                                                                             last_epoch = -1)
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = 100, eta_min = 1e-6)
+
     loss_func = torch.nn.MSELoss()
 
     metric_func_dict = {"acc": cm.BinaryAccuracy().to(rank),
@@ -297,10 +327,10 @@ def main_worker(rank, args_dict):
                         "f-1": cm.BinaryF1Score().to(rank),}
 
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["disk_shard_size"],
-                                                  rank, args_dict["gpu"], args_dict["seed"])
+                                                  rank, args_dict["gpu"], args_dict["buffer_size"], args_dict["seed"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, 1.0, metric_func_dict,
                         10, args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"])
+                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"], model_config = args_dict)
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")

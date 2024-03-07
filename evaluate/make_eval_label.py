@@ -1,16 +1,15 @@
 import argparse, os
 
 
-## These fixed paths will be refactored.
+## TODO: Refactor to remove these fixed paths.
 LABEL_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv",
-               "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip_reformatted.tsv",
+               # "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/sac_seq.reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6ace_reformatted.tsv"]
 GLORI_PATH = "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv"
 IMAGE_PATH = "/extdata4/baeklab/Hyeonseo/exp_MRNA/{EXP}/index/image_11mer_messy_{crit}"
 OUT_PATH = "/extdata3/baeklab/Jungmin/RNAmod/exp_MRNA/{EXP}/{EXP}/save_path/image_label_comp_messy_{crit}.tsv"
-A_POS_PKL_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/A_pos/ref_A_pos.nrnm.pkl"
-DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0086/ON0086/save_path/dorado.sorted.depth.txt"
+DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado2/dorado_output.sorted.pileup.filtered.tsv"
 
 
 import pandas as pd
@@ -94,20 +93,12 @@ def get_label_df():
 
 
 
-def make_label_df(a_pos_df_proc, return_list, union_df, intersect_df, glori_df, depth_df):
-    a_pos_df_explode = a_pos_df_proc.explode("A_pos")
-    a_pos_df_explode["id"] = a_pos_df_explode["nmid"] + ":" + a_pos_df_explode["A_pos"].astype(str)
-    a_pos_df_explode = a_pos_df_explode.merge(union_df, how="left", on="id")
-    a_pos_df_explode = a_pos_df_explode.merge(intersect_df, how="left", on="id")
-    a_pos_df_explode = a_pos_df_explode.merge(glori_df, how="left", on="id")
-    a_pos_df_explode = a_pos_df_explode.merge(depth_df, how="left", on="id")
-
-    a_pos_df_explode.fillna(0, inplace=True)
-    a_pos_df_explode["label"] = a_pos_df_explode["intersect"] - a_pos_df_explode["union"]
-    a_pos_df_explode.drop(["union","intersect","id"], axis=1, inplace=True)
-    a_pos_df_explode["datID"] = a_pos_df_explode.apply(lambda x: get_image_id(x["nmid"], x["A_pos"]), axis=1)
-    return_list.append(a_pos_df_explode)
-
+def make_label_df(return_list, union_df, intersect_df, glori_df, depth_df):
+    depth_df["label"] = depth_df["id"].isin(union_df["id"]) * -1
+    depth_df["label"] = depth_df["label"] + depth_df["id"].isin(intersect_df["id"])
+    depth_df = depth_df.merge(glori_df, how="left", on="id")
+    depth_df["m6A_level"] = depth_df["m6A_level"].fillna(0)
+    return_list.append(depth_df)
     return None
 
 
@@ -115,13 +106,6 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args = args.parse_args()
-    a_pos_df = pd.read_pickle(A_POS_PKL_PATH)
-    a_pos_df["nmid"] = a_pos_df.index
-    a_pos_df["nmid"] = a_pos_df["nmid"].apply(lambda x: x.split(".")[0])
-    a_pos_df.reset_index(drop=True, inplace=True)
-    a_pos_df.drop(columns=["seq", "A_count"], inplace=True)
-    print(a_pos_df)
-    a_pos_df_split = np.array_split(a_pos_df, args.cpu)
 
     union_df, intersect_df = get_label_df()
     union_df["union"] = 1
@@ -138,23 +122,20 @@ def main():
     print(glori_df)
 
     depth_df = pd.read_csv(DEPTH_PATH, sep='\t', header=None)
-    depth_df.columns = ["nmid", "pos", "depth"]
+    depth_df.columns = ["nmid", "pos", "nuc", "depth"]
     depth_df["nmid"] = depth_df["nmid"].str.split(".").str[0]
     depth_df["pos"] = depth_df["pos"] - 1
     depth_df["id"] = depth_df["nmid"] + ":" + depth_df["pos"].astype(str)
-    depth_df = depth_df[["id", "depth", "nmid"]]
+    depth_df = depth_df[["id", "depth", "nmid", "pos"]]
     print(depth_df)
-    depth_df_grouped = depth_df.groupby("nmid")
+    depth_df_split = np.array_split(depth_df, args.cpu)
 
     proc_list = []
     man = mp.Manager()
     return_list = man.list()
 
-    for a_pos_df_proc in a_pos_df_split:
-        nmid_list = a_pos_df_proc["nmid"].unique()
-        depth_df_nmid = pd.concat([depth_df_grouped.get_group(nmid) for nmid in nmid_list if nmid in depth_df_grouped.groups.keys()])
-        depth_df_nmid.drop(columns=["nmid"], inplace=True)
-        proc = mp.Process(target=make_label_df, args=(a_pos_df_proc, return_list, union_df, intersect_df, glori_df, depth_df_nmid))
+    for depth_df_proc in depth_df_split:
+        proc = mp.Process(target=make_label_df, args=(return_list, union_df, intersect_df, glori_df, depth_df_proc))
         proc_list.append(proc)
         proc.start()
 
@@ -164,11 +145,26 @@ def main():
     return_list = list(return_list)
     datid_df = pd.concat(return_list)
     datid_df = datid_df.dropna()
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0086/ON0086/save_path/rna004_label.tsv", sep='\t', index=False)
-
-
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label.tsv", sep='\t', index=False)
+    datid_df = sample_eval_data(datid_df)
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label_sampled.tsv", sep='\t', index=False)
     return None
 
+
+def main2():
+    datid_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label.tsv", sep='\t')
+    datid_df = sample_eval_data(datid_df)
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label_sampled.tsv", sep='\t', index=False)
+    return None
+
+def sample_eval_data(datid_df, depth_cutoff = 20, seed = 42, ratio = 10):
+    datid_df = datid_df[datid_df["depth"] > depth_cutoff]
+    datid_df_pos = datid_df[datid_df["label"] == 1]
+    datid_df_neg = datid_df[datid_df["label"] == 0]
+    datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
+    datid_df = pd.concat([datid_df_pos, datid_df_neg])
+    return datid_df
+
 if __name__ == "__main__":
-    main()
+    main2()
 
