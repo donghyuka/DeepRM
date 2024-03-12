@@ -78,14 +78,15 @@ def run_inference(args):
 def inference_worker(rank, args_dict):
     printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
-    TransformerModel = importlib.import_module(f"model.{args_dict['ver']}").TransformerModel
-    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
-                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
-                             t_act = 'gelu', lin_act = 'relu',
-                             encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
+    save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
+    model_config = save_dict["model_config"]
+    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
+    model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
+                             n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
+                             t_act = model_config["t_act"], lin_act = model_config["lin_act"],
+                             encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
     model.to(rank)
-    save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
@@ -110,7 +111,7 @@ def inference_worker(rank, args_dict):
         with torch.no_grad():
             pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
 
-        pred_list.append(pred.cpu().numpy())
+        pred_list.append(pred.cpu().detach().numpy())
         id_list.append(np.array(data["label_id"]))
         label_list.append(np.array(data["label"]))
 

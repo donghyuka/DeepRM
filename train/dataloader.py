@@ -11,7 +11,7 @@ from utils.utils import printmessage
 ## Load Nanopore Dataset from Pickled Pandas DataFrame
 
 class BinaryClassDatasetIterator:
-    def __init__(self, pos_file_paths, neg_file_paths, buffer_size, shuffle = True):
+    def __init__(self, pos_file_paths, neg_file_paths, buffer_size, shuffle = True, class_ratio = 1):
 
         self.paths = [neg_file_paths, pos_file_paths]
         self.shuffle = shuffle
@@ -21,9 +21,15 @@ class BinaryClassDatasetIterator:
         self.current_class = 0
         self.avail_class = [0,1]
         self.len_iterator = [0,0]
+        self.class_ratio = class_ratio
 
     def __iter__(self):
         return self
+
+    def __next__(self):
+        result = self._next()
+        source, target = self.nanopore_row_to_tensor(result,self.current_class)
+        return source, target
 
     def _read_once(self):
 
@@ -47,20 +53,23 @@ class BinaryClassDatasetIterator:
 
         self.current_iterator[self.current_class] = df.iterrows()
         return None
-
-    def __next__(self):
-        result = self._next()
-        source, target = self.nanopore_row_to_tensor(result,self.current_class)
-        return source, target
+    def _get_rand_class(self, class_ratio):
+        rand = torch.randint(0, 1+class_ratio, (1,))
+        if rand < 1:
+            return 1
+        else:
+            return 0
 
     def _next(self):
         ## Randomly decide between positive and negative data
         if len(self.avail_class) == 0:
             raise StopIteration
+
         elif len(self.avail_class) == 1:
             self.current_class = self.avail_class[0]
+
         else:
-            self.current_class = torch.randint(0, 2, (1,)).item()
+            self.current_class = self._get_rand_class(self.class_ratio)
 
         if self.current_df_index[self.current_class] == -1:
             self._read_once()
@@ -104,35 +113,40 @@ class BinaryClassDatasetIterator:
 
 class NanoporeDataset(torch.utils.data.IterableDataset):
     def __init__(self, pos_data_path, neg_data_path, batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                 seed = 0, shuffle = True, drop_last = True):
+                 seed = 0, shuffle = True, drop_last = True, class_ratio = 1):
         super(NanoporeDataset).__init__()
 
-        self.pos_data_path = pos_data_path
-        self.neg_data_path = neg_data_path
+        self.pos_file_paths = pos_data_path
+        self.neg_file_paths = neg_data_path
         self.batch_size = batch_size
         self.disk_shard_size = disk_shard_size
         self.rank = rank
         self.num_replicas = num_replicas
-        self.pos_file_paths = glob.glob(f"{self.pos_data_path}/*.pkl")
-        self.neg_file_paths = glob.glob(f"{self.neg_data_path}/*.pkl")
         self.shuffle = shuffle
         self.drop_last = drop_last
         self.epoch = 0
         self.seed = seed
         self.buffer_size = buffer_size
+        self.class_ratio = class_ratio
 
         if self.drop_last:
+
             self.pos_num_shard = math.floor(len(self.pos_file_paths)/num_replicas)
+            self.neg_num_shard = math.floor(len(self.neg_file_paths)/num_replicas)
+            self.pos_num_shard = min(self.pos_num_shard, self.neg_num_shard // self.class_ratio)
+            self.neg_num_shard = self.pos_num_shard * self.class_ratio
             self.pos_total_num_shard = self.pos_num_shard * num_replicas
             self.pos_dataset_size = self.pos_total_num_shard * disk_shard_size
-            self.neg_num_shard = math.floor(len(self.neg_file_paths)/num_replicas)
             self.neg_total_num_shard = self.neg_num_shard * num_replicas
             self.neg_dataset_size = self.neg_total_num_shard * disk_shard_size
+
         else:
             self.pos_num_shard = math.ceil(len(self.pos_file_paths)/num_replicas)
+            self.neg_num_shard = math.ceil(len(self.neg_file_paths)/num_replicas)
+            self.pos_num_shard = min(self.pos_num_shard, self.neg_num_shard // self.class_ratio)
+            self.neg_num_shard = self.pos_num_shard * self.class_ratio
             self.pos_total_num_shard = self.pos_num_shard * num_replicas
             self.pos_dataset_size = self.pos_total_num_shard * disk_shard_size
-            self.neg_num_shard = math.ceil(len(self.neg_file_paths)/num_replicas)
             self.neg_total_num_shard = self.neg_num_shard * num_replicas
             self.neg_dataset_size = self.neg_total_num_shard * disk_shard_size
 
@@ -140,12 +154,15 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
 
 
     def __len__(self):
+
         return self.dataset_size
 
     def __iter__(self):
         pos_file_paths = self._deterministic_shuffle_and_sample(self.pos_file_paths, self.pos_num_shard, self.pos_total_num_shard)
         neg_file_paths = self._deterministic_shuffle_and_sample(self.neg_file_paths, self.neg_num_shard, self.neg_total_num_shard)
-        return BinaryClassDatasetIterator(pos_file_paths, neg_file_paths, buffer_size = self.buffer_size, shuffle = self.shuffle)
+        ## TODO: Use Torch Multiprocessing to parallelize the data shuffling process (do it while the model is training).
+        return BinaryClassDatasetIterator(pos_file_paths, neg_file_paths,
+                                          buffer_size = self.buffer_size, shuffle = self.shuffle, class_ratio = self.class_ratio)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -168,14 +185,15 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         else:
             indices = list(range(len(data_path_list)))  # type: ignore[arg-type]
 
-        if not self.drop_last:
+        if len(indices) < total_num_shard:
             # add extra samples to make it evenly divisible
             padding_size = total_num_shard - len(indices)
             if padding_size <= len(indices):
                 indices += indices[:padding_size]
             else:
                 indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
-        else:
+
+        elif len(indices) > total_num_shard:
             # remove tail of data to make it evenly divisible.
             indices = indices[:total_num_shard]
 
@@ -219,11 +237,13 @@ class NanoporeDataLoader(DataLoader):
 
 def load_dataset(pos_data_path, neg_data_path, batch_size,
                  disk_shard_size, rank, num_replicas, buffer_size, seed = 0, shuffle = True, drop_last = True,
-                 pad_to = 200, bq_clip = 40):
+                 pad_to = 200, bq_clip = 40, class_ratio = 1):
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
-    dataset = NanoporeDataset(pos_data_path, neg_data_path, batch_size,
-                                disk_shard_size, rank, num_replicas, buffer_size, seed, shuffle, drop_last)
+    pos_data_paths = glob.glob(f"{pos_data_path}/*.pkl")
+    neg_data_paths = glob.glob(f"{neg_data_path}/*.pkl")
+    dataset = NanoporeDataset(pos_data_paths, neg_data_paths, batch_size, disk_shard_size, rank, num_replicas, buffer_size,
+                              seed, shuffle, drop_last, class_ratio = class_ratio)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=True,
                                     collate_fn = pad_collate_func, prefetch_factor=4)
     return dataloader

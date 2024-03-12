@@ -11,35 +11,56 @@ import pod5
 import pysam
 import scipy
 import tqdm
-from utils.utils import oom_killer
+from utils.utils import oom_killer, printmessage
 
 
 def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_dict, chunk):
+
+    chunk_buffer = None
+    pod5_idx = 0
+
     for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list)):
         oom_killer()
         signal_list = []
         offset_list = []
         scale_list = []
         id_list = []
-        with pod5.Reader(pod5_path) as reader:
-            for record in reader:
-                signal_arr = record.signal
-                offset = record.calibration.offset
-                scale = record.calibration.scale
-                offset_list.append(offset)
-                scale_list.append(scale)
-                signal_list.append(signal_arr)
-                id_list.append(str(record.read_id))
+        try:
+            with pod5.Reader(pod5_path) as reader:
+                for record in reader:
+                    signal_arr = record.signal
+                    offset = record.calibration.offset
+                    scale = record.calibration.scale
+                    offset_list.append(offset)
+                    scale_list.append(scale)
+                    signal_list.append(signal_arr)
+                    id_list.append(str(record.read_id))
+        except:
+            ## Pod5 file is corrupted
+            printmessage(f"Corrupted POD5 file: {pod5_path}")
+            continue
         gc.collect()
         df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
         ## chunking
+        if chunk_buffer is not None:
+            df = pd.concat([chunk_buffer, df], ignore_index=True)
+            chunk_buffer = None
         for chunk_idx in range(0, len(df) // chunk + 1):
             signal_df = df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(df))].copy()
-            save_path = f"{signal_df_path}/{pid}-{pod5_idx}-{chunk_idx}.pkl"
-            signal_df.to_pickle(save_path)
-            id_list = signal_df["read_id"].tolist()
-            index_dict[save_path] = id_list
+            if len(signal_df) == chunk:
+                save_path = f"{signal_df_path}/{pid}-{pod5_idx}-{chunk_idx}.pkl"
+                signal_df.to_pickle(save_path)
+                id_list = signal_df["read_id"].tolist()
+                index_dict[save_path] = id_list
+            else:
+                chunk_buffer = signal_df
             gc.collect()
+
+    if chunk_buffer is not None:
+        save_path = f"{signal_df_path}/{pid}-{pod5_idx+1}-0.pkl"
+        chunk_buffer.to_pickle(save_path)
+        id_list = chunk_buffer["read_id"].tolist()
+        index_dict[save_path] = id_list
 
     return None
 
@@ -174,7 +195,7 @@ def parse_args():
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--chunk", "-k", type=int, default=200, help="Chunk size")
+    parser.add_argument("--chunk", "-n", type=int, default=5000, help="Chunk size")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -208,7 +229,7 @@ def main():
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
-    move_path = f"{intermediate_path}/move_df.pkl"
+
     os.makedirs(intermediate_path, exist_ok=True)
     os.makedirs(signal_raw_path, exist_ok=True)
     os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)

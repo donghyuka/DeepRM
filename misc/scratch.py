@@ -1,11 +1,18 @@
-import glob
-import os, shutil
+import torch
+import math
 
-path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block"
-filelist = glob.glob(f"{path}/*.pkl_0")
+d_model = 16
+seq_len = 10
 
-for file in filelist:
-    ## rename to .pkl
-    new_name = file.replace(".pkl_0", ".pkl")
-    os.rename(file, new_name)
+position = torch.arange(seq_len).unsqueeze(1)
+print(position)
+div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+print(div_term)
+pe = torch.zeros(1, seq_len, d_model)
+pe[:, :, 0::2] = torch.sin(position * div_term)
+pe[:, :, 1::2] = torch.cos(position * div_term)
+print(pe)
+
+
+
 

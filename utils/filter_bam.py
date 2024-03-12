@@ -2,6 +2,7 @@ import pysam, argparse
 from tqdm import tqdm
 import numpy as np
 from utils.utils import printmessage, mean_phred
+import os
 
 def parse_args():
     args = argparse.ArgumentParser()
@@ -21,7 +22,7 @@ def filter_bam(args):
             continue
         out_bam.write(read)
     out_bam.close()
-    bamfile.close()
+    in_bam.close()
     return None
 
 def main():
