@@ -246,7 +246,7 @@ def sample_dataset_kmer_balanced(kmer_df, sample_ratio = 0.01, seed = 42):
             kmer_sub_df = kmer_sub_df.sample(frac=sample_ratio, random_state=seed)
             sample_list.append(kmer_sub_df)
 
-    sample_df = pd.concat(sample_list)
+    sample_df = pd.concat(sample_list, ignore_index=True)
 
     return sample_df
 
@@ -280,7 +280,7 @@ def main():
     assert neg_cnt > pos_cnt, "Negative count should be greater than positive count."
 
     if pos_cnt * args.ratio > neg_cnt:
-        pos_cnt = int(neg_cnt / pos_cnt)
+        pos_cnt = neg_cnt // args.ratio
         pos_metadata_df = sample_dataset_kmer_balanced(pos_metadata_df, sample_ratio = pos_cnt , seed = args.seed)
 
     else:
@@ -417,6 +417,6 @@ def main2():
 
 
 if __name__ == "__main__":
-    main2()
+    main()
 
 

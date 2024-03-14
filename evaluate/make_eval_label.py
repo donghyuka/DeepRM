@@ -2,14 +2,18 @@ import argparse, os
 
 
 ## TODO: Refactor to remove these fixed paths.
-LABEL_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
+UNION_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
+               "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip_reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv",
-               # "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/sac_seq.reformatted.tsv",
+               "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/sac_seq.reformatted.tsv",
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6ace_reformatted.tsv"]
+
+INTERSECT_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
+                   "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/sac_seq.reformatted.tsv",
+                   "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv",]
+
 GLORI_PATH = "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv"
-IMAGE_PATH = "/extdata4/baeklab/Hyeonseo/exp_MRNA/{EXP}/index/image_11mer_messy_{crit}"
-OUT_PATH = "/extdata3/baeklab/Jungmin/RNAmod/exp_MRNA/{EXP}/{EXP}/save_path/image_label_comp_messy_{crit}.tsv"
-DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado2/dorado_output.sorted.pileup.filtered.tsv"
+DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.pileup.filtered.tsv"
 
 
 import pandas as pd
@@ -27,41 +31,27 @@ def get_image_id(nmid,pos):
     image_id = f"{nmid_prefix}:{nmid_suffix}:{pos:06d}"
     return image_id
 
-
-def plot_depth_hist(datid_df,exp):
-    ## mark 90th, 95th, percentile
-    ## Draw Histogram
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import numpy as np
-    plt.rcParams.update({'font.size': 22})
-
-    fig, ax = plt.subplots(figsize=(20,10))
-    ax.set_title("Depth Histogram")
-    ax.set_xlabel("Depth")
-    ax.set_ylabel("Count")
-    ## Label 90th, 95th percentile
-    ax.text(np.percentile(datid_df["depth"], 90), 0.9 * ax.get_ylim()[1], "90th percentile", color="red")
-    ax.text(np.percentile(datid_df["depth"], 95), 0.8 * ax.get_ylim()[1], "95th percentile", color="red")
-    ax.axvline(np.percentile(datid_df["depth"], 90), color="red", linestyle="--")
-    ax.axvline(np.percentile(datid_df["depth"], 95), color="red", linestyle="--")
-    ax.text(np.percentile(datid_df["depth"], 90), 0.7 * ax.get_ylim()[1], f"{np.percentile(datid_df['depth'], 90):.0f}", color="red")
-    ax.text(np.percentile(datid_df["depth"], 95), 0.6 * ax.get_ylim()[1], f"{np.percentile(datid_df['depth'], 95):.0f}", color="red")
-
-    ## Remove outliers at 99th percentile
-    datid_df_depth_list = datid_df[datid_df["depth"] < np.percentile(datid_df["depth"], 99)]["depth"].to_numpy()
-
-    sns.histplot(datid_df_depth_list, ax=ax, kde=True, stat="density", bins=100)
-
-    fig.savefig(OUT_PATH.format(EXP=exp).replace(".tsv","_depth_hist.png"), dpi=300)
-    plt.close(fig)
-
-
-    return None
-
 def get_label_df():
     label_df_list = []
-    for label_path in LABEL_PATHS:
+    for label_path in UNION_PATHS:
+        label_df  = pd.read_csv(label_path, sep='\t')
+        label_df["id"] = label_df[["NMID","transcript_coordinate"]].astype(str).agg(":".join, axis=1)
+        label_df = label_df[["id","NMID","transcript_coordinate"]]
+        label_df_list.append(label_df)
+
+    ## Get union by id
+    left = label_df_list[0]
+    for right in label_df_list[1:]:
+        left = left.merge(right, how="outer", on="id")
+        ## if NMID_x is not null, then NMID_x, else NMID_y
+        left["NMID"] = np.where(left["NMID_x"].isnull(), left["NMID_y"], left["NMID_x"])
+        left["transcript_coordinate"] = np.where(left["transcript_coordinate_x"].isnull(), left["transcript_coordinate_y"], left["transcript_coordinate_x"])
+        left.drop(["NMID_x","NMID_y","transcript_coordinate_x","transcript_coordinate_y"], axis=1, inplace=True)
+    union_df = left.copy().reset_index(drop=True)
+
+
+    label_df_list = []
+    for label_path in INTERSECT_PATHS:
         label_df  = pd.read_csv(label_path, sep='\t')
         label_df["id"] = label_df[["NMID","transcript_coordinate"]].astype(str).agg(":".join, axis=1)
         label_df = label_df[["id","NMID","transcript_coordinate"]]
@@ -75,16 +65,6 @@ def get_label_df():
         left.rename({"NMID_x":"NMID","transcript_coordinate_x":"transcript_coordinate"}, axis=1, inplace=True)
 
     intersect_df = left.copy().reset_index(drop=True)
-
-    ## Get union by id
-    left = label_df_list[0]
-    for right in label_df_list[1:]:
-        left = left.merge(right, how="outer", on="id")
-        ## if NMID_x is not null, then NMID_x, else NMID_y
-        left["NMID"] = np.where(left["NMID_x"].isnull(), left["NMID_y"], left["NMID_x"])
-        left["transcript_coordinate"] = np.where(left["transcript_coordinate_x"].isnull(), left["transcript_coordinate_y"], left["transcript_coordinate_x"])
-        left.drop(["NMID_x","NMID_y","transcript_coordinate_x","transcript_coordinate_y"], axis=1, inplace=True)
-    union_df = left.copy().reset_index(drop=True)
 
     ## Remove intersection from union
     union_df = union_df[~union_df["id"].isin(intersect_df["id"])]
@@ -145,17 +125,11 @@ def main():
     return_list = list(return_list)
     datid_df = pd.concat(return_list)
     datid_df = datid_df.dropna()
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label.tsv", sep='\t', index=False)
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/rna004_label_miclip2_glori_sac.tsv", sep='\t', index=False)
     datid_df = sample_eval_data(datid_df)
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label_sampled.tsv", sep='\t', index=False)
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/rna004_label_miclip2_glori_sac_sampled.tsv", sep='\t', index=False)
     return None
 
-
-def main2():
-    datid_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label.tsv", sep='\t')
-    datid_df = sample_eval_data(datid_df)
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label_sampled.tsv", sep='\t', index=False)
-    return None
 
 def sample_eval_data(datid_df, depth_cutoff = 20, seed = 42, ratio = 10):
     datid_df = datid_df[datid_df["depth"] > depth_cutoff]
@@ -166,5 +140,5 @@ def sample_eval_data(datid_df, depth_cutoff = 20, seed = 42, ratio = 10):
     return datid_df
 
 if __name__ == "__main__":
-    main2()
+    main()
 

@@ -149,6 +149,7 @@ def segment_spectrogram(signal, move, filter, sampling = 4000, nperseg = 40, str
 
 def segment_normalize_fft_signal(seg_df_path, signal_path_arr):
     for signal_path in tqdm.tqdm(signal_path_arr):
+        oom_killer()
         signal_df = pd.read_pickle(signal_path)
         move_df = pd.read_pickle(f"{seg_df_path}/intermediates/move_df_split/{signal_path.split('/')[-1]}")
         signal_df = signal_df.merge(move_df, on="read_id", how="inner")
@@ -229,40 +230,46 @@ def main():
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
+    #
+    # os.makedirs(intermediate_path, exist_ok=True)
+    # os.makedirs(signal_raw_path, exist_ok=True)
+    # os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    # os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
+    #
+    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
+    # signal_path_arr = list(index_dict.keys())
+    # gc.collect()
+    #
+    # with open(signal_index_path, "wb") as outfile:
+    #     pickle.dump(index_dict, outfile)
+    #
+    # block_df = pd.read_pickle(args.block)
+    # block_df = assign_block_id(block_df)
+    # for signal_path in signal_path_arr:
+    #     id_list = index_dict[signal_path]
+    #     block_df_proc = block_df[block_df["read_id"].isin(id_list)]
+    #     block_df_proc.to_pickle(f"{intermediate_path}/block_df_split/{signal_path.split('/')[-1]}")
+    #
+    # del block_df, id_list
+    # gc.collect()
+    #
+    # signal_path_dict = {}
+    # for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Signal Path Dictionary"):
+    #     for read_id in id_list:
+    #         signal_path_dict[read_id] = signal_path
+    #
+    # del index_dict
+    # gc.collect()
+    #
+    # extract_move(args.bam, args.cpu, signal_path_dict, signal_path_arr, intermediate_path)
+    #
+    # del signal_path_dict
+    # gc.collect()
 
-    os.makedirs(intermediate_path, exist_ok=True)
-    os.makedirs(signal_raw_path, exist_ok=True)
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
-
-    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
+    with open(signal_index_path, "rb") as infile:
+        index_dict = pickle.load(infile)
     signal_path_arr = list(index_dict.keys())
-    gc.collect()
-
-    with open(signal_index_path, "wb") as outfile:
-        pickle.dump(index_dict, outfile)
-
-    block_df = pd.read_pickle(args.block)
-    block_df = assign_block_id(block_df)
-    for signal_path in signal_path_arr:
-        id_list = index_dict[signal_path]
-        block_df_proc = block_df[block_df["read_id"].isin(id_list)]
-        block_df_proc.to_pickle(f"{intermediate_path}/block_df_split/{signal_path.split('/')[-1]}")
-
-    del block_df, id_list
-    gc.collect()
-
-    signal_path_dict = {}
-    for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Signal Path Dictionary"):
-        for read_id in id_list:
-            signal_path_dict[read_id] = signal_path
-
     del index_dict
-    gc.collect()
-
-    extract_move(args.bam, args.cpu, signal_path_dict, signal_path_arr, intermediate_path)
-
-    del signal_path_dict
     gc.collect()
 
     np.random.shuffle(signal_path_arr)

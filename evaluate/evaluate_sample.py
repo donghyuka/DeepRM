@@ -2,7 +2,7 @@ import time
 
 import torch
 import pysam
-import os
+import os, glob
 import argparse
 import numpy as np
 import pandas as pd
@@ -25,19 +25,11 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, help="Model path")
-    parser.add_argument("--ver", "-v", type=str, required=True, help="Model version")
-    parser.add_argument("--data", "-d", type=str, required=True, help="Data path")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
-    parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
+    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
+    parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
+    parser.add_argument("--batch", "-b", type=int, default=4000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=1000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
-    parser.add_argument("--enc_dim", type=int, default=512)
-    parser.add_argument("--lin_dim", type=int, default=2048)
-    parser.add_argument("--head", type=int, default=8)
-    parser.add_argument("--enc_layer", type=int, default=8)
-    parser.add_argument("--lin_layer", type=int, default=4)
-    parser.add_argument("--enc_dropout", type=float, default=0.2)
-    parser.add_argument("--lin_dropout", type=float, default=0.1)
     args = parser.parse_args()
     return args
 
@@ -46,16 +38,10 @@ def main():
     args = parse_args()
     ## Subdirectories for results: inference, pileup, evaluation, plot
     inference_path = f"{args.output}/inference"
-    pileup_path = f"{args.output}/pileup"
-    evaluation_path = f"{args.output}/evaluation"
     plot_path = f"{args.output}/plot"
     os.makedirs(inference_path, exist_ok=True)
-    os.makedirs(pileup_path, exist_ok=True)
-    os.makedirs(evaluation_path, exist_ok=True)
     os.makedirs(plot_path, exist_ok=True)
-
     run_inference(args)
-
     return None
 
 
@@ -71,12 +57,21 @@ def run_inference(args):
     printmessage("Inference Program Started.")
     printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
-    mp.spawn(inference_worker, nprocs=args.gpu, args=(args_dict,))
+    if args_dict["model"].endswith(".pt"):
+        model_list = [args_dict["model"]]
+    elif os.path.isdir(args_dict["model"]):
+        model_list = [x for x in glob.glob(f"{args_dict['model']}/*.pt")]
+    else:
+        raise ValueError("Invalid model path. It should be a .pt file or a directory containing .pt files.")
+    for model in model_list:
+        printmessage(f"Running inference: {model}")
+        args_dict_model = args_dict.copy()
+        args_dict_model["model"] = model
+        mp.spawn(inference_worker, nprocs=args.gpu, args=(args_dict_model,))
     return None
 
 
 def inference_worker(rank, args_dict):
-    printmessage(f"[GPU {rank}] Worker Process Started.")
     setup_ddp(rank, args_dict["gpu"])
     save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
     model_config = save_dict["model_config"]

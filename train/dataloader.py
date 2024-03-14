@@ -22,6 +22,8 @@ class BinaryClassDatasetIterator:
         self.avail_class = [0,1]
         self.len_iterator = [0,0]
         self.class_ratio = class_ratio
+        self.buffer_df = [None, None]
+        self.read_every = 1000
 
     def __iter__(self):
         return self
@@ -31,28 +33,73 @@ class BinaryClassDatasetIterator:
         source, target = self.nanopore_row_to_tensor(result,self.current_class)
         return source, target
 
-    def _read_once(self):
+    def _read_initial(self):
 
         df_list = []
 
-        if self.current_iterator[self.current_class] is not None:
-            df = pd.DataFrame([row for _, row in self.current_iterator[self.current_class]])
-            df_list.append(df)
-
-        while (self.len_iterator[self.current_class] < self.buffer_size) and (self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1):
+        len_read = 0
+        while (len_read < self.buffer_size) and (self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1):
             self.current_df_index[self.current_class] += 1
             df = pd.read_pickle(self.paths[self.current_class][self.current_df_index[self.current_class]])
+            df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask"]]
             df_list.append(df)
-            self.len_iterator[self.current_class] += len(df)
+            len_read += len(df)
 
-        df = pd.concat(df_list)
+        df = pd.concat(df_list, ignore_index=True)
         del df_list
 
         if self.shuffle:
             df = df.sample(frac=1)
 
-        self.current_iterator[self.current_class] = df.iterrows()
+        self.buffer_df[self.current_class] = df[self.read_every:]
+        df = df[:self.read_every]
+
+        zipped = df.itertuples(index=False)
+
+        self.current_iterator[self.current_class] = zipped
+        self.len_iterator[self.current_class] = self.read_every
+
         return None
+
+
+    def _read_once(self):
+
+        df_list = [self.buffer_df[self.current_class]]
+
+        len_read = 0
+        while (len_read < self.read_every) and (self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1):
+            self.current_df_index[self.current_class] += 1
+            df = pd.read_pickle(self.paths[self.current_class][self.current_df_index[self.current_class]])
+            df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask"]]
+            df_list.append(df)
+            len_read += len(df)
+
+        df = pd.concat(df_list, ignore_index=True)
+        del df_list
+
+        if self.shuffle:
+            df = df.sample(frac=1)
+
+        self.buffer_df[self.current_class] = df[self.read_every:]
+        df = df[:self.read_every]
+
+        zipped = df.itertuples(index=False)
+
+        self.current_iterator[self.current_class] = zipped
+        self.len_iterator[self.current_class] = self.read_every
+        return None
+
+
+    def _consume_buffer(self):
+        df = self.buffer_df[self.current_class]
+        zipped = df.itertuples(index=False)
+
+        self.current_iterator[self.current_class] = zipped
+        self.buffer_df[self.current_class] = None
+        self.len_iterator[self.current_class] = len(df)
+        return None
+
+
     def _get_rand_class(self, class_ratio):
         rand = torch.randint(0, 1+class_ratio, (1,))
         if rand < 1:
@@ -72,13 +119,16 @@ class BinaryClassDatasetIterator:
             self.current_class = self._get_rand_class(self.class_ratio)
 
         if self.current_df_index[self.current_class] == -1:
-            self._read_once()
+            self._read_initial()
 
-        elif self.len_iterator[self.current_class] < self.buffer_size and self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1:
-            self._read_once()
+        elif self.len_iterator[self.current_class] == 0:
+            if self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1:
+                self._read_once()
+            elif self.buffer_df[self.current_class] is not None:
+                self._consume_buffer()
 
         try:
-            result = next(self.current_iterator[self.current_class])[1]
+            result = next(self.current_iterator[self.current_class])
             self.len_iterator[self.current_class] -= 1
 
         except StopIteration:
@@ -91,13 +141,13 @@ class BinaryClassDatasetIterator:
     def nanopore_row_to_tensor(self, row, class_idx):
         ## Columns: "block_id", "motif", "block_score", "kmer_token", "bq_token", "position_token", "signal_token",
         ##          "spectrogram_token", "move_token", "target_mask"
-        kmer_token = torch.tensor(row["kmer_token"], dtype=torch.long)
-        bq_token = torch.tensor(row["bq_token"], dtype=torch.long)
-        position_token = torch.tensor(row["position_token"], dtype=torch.long)
-        signal_token = torch.tensor(row["signal_token"], dtype=torch.float)
-        spectrogram_token = torch.tensor(row["spectrogram_token"], dtype=torch.float)
-        move_token = torch.tensor(row["move_token"], dtype=torch.long)
-        target_mask = torch.tensor(row["target_mask"], dtype=torch.float)
+        kmer_token = torch.tensor(row[0], dtype=torch.long)
+        bq_token = torch.tensor(row[1], dtype=torch.long)
+        position_token = torch.tensor(row[2], dtype=torch.long)
+        signal_token = torch.tensor(row[3], dtype=torch.float)
+        spectrogram_token = torch.tensor(row[4], dtype=torch.float)
+        move_token = torch.tensor(row[5], dtype=torch.long)
+        target_mask = torch.tensor(row[6], dtype=torch.float)
 
         return_dict = {"kmer_token": kmer_token, "bq_token": bq_token, "position_token": position_token,
                        "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
@@ -237,15 +287,16 @@ class NanoporeDataLoader(DataLoader):
 
 def load_dataset(pos_data_path, neg_data_path, batch_size,
                  disk_shard_size, rank, num_replicas, buffer_size, seed = 0, shuffle = True, drop_last = True,
-                 pad_to = 200, bq_clip = 40, class_ratio = 1):
+                 pad_to = 200, bq_clip = 40, class_ratio = 1, prefetch_factor = 512, pin_memory=True):
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
     pos_data_paths = glob.glob(f"{pos_data_path}/*.pkl")
     neg_data_paths = glob.glob(f"{neg_data_path}/*.pkl")
     dataset = NanoporeDataset(pos_data_paths, neg_data_paths, batch_size, disk_shard_size, rank, num_replicas, buffer_size,
                               seed, shuffle, drop_last, class_ratio = class_ratio)
-    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=True,
-                                    collate_fn = pad_collate_func, prefetch_factor=4)
+    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=pin_memory, drop_last=drop_last,
+                                    collate_fn = pad_collate_func, prefetch_factor=prefetch_factor)
+
     return dataloader
 
 

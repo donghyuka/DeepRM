@@ -1,0 +1,6 @@
+version	Embedding	Encoder	FC
+v11	Add all	Full Attention	Use BatchNorm + No Sigmoid
+v12	Concat and add PE	Full Attention	Use BatchNorm + No Sigmoid
+v13	Add all	Full Attention	No BatchNorm + No Sigmoid
+v14	Add all	Full Attention	No BatchNorm + Use Sigmoid
+v15	Add all	Full Attention	Use SyncBatchNorm + No Sigmoid

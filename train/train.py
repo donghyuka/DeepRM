@@ -17,8 +17,8 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch_size", type=int, default=1024)
-    parser.add_argument("--eval_batch_size", type=int, default=None)
+    parser.add_argument("--batch", dest="batch_size", type=int, default=1024)
+    parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
@@ -50,15 +50,20 @@ def parse_args():
     parser.add_argument("--lr_interval", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--class_ratio", type=int, default=1)
-    parser.add_argument("--log_interval", type=int, default=1)
-    parser.add_argument("--eval_interval", type=int, default=10)
+    parser.add_argument("--log_interval", type=int, default=10)
+    parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=100)
     parser.add_argument("--grad_clip", type=float, default=1.0)
+    parser.add_argument("--prefetch_factor", type=int, default=512)
+    parser.add_argument("--profiler", type=int, default=0)
+    parser.add_argument("--pin_memory", type=int, default=0)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--name", type=str, default=f"BERMUDA-Proto-v11-{strfttime}")
+    parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
     if args.eval_batch_size is None:
-        args.eval_batch_size = args.batch_size
+        args.eval_batch_size = args.batch_size * 4
+    if args.name is None:
+        args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
     return args
 
 
@@ -121,11 +126,17 @@ class Trainer:
         self.model_name = model_name
         self.num_gpu = num_gpu
         self.model_config = model_config
+        self.devname = f"{os.uname()[1]}-{self.gpu_id}"
+        self.tb_path = tb_path
 
         if self.gpu_id == 0:
             self.tb_writer = SummaryWriter(tb_path)
         else:
             self.tb_writer = None
+
+        # self.profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        #                                        schedule=torch.profiler.schedule(wait=1, warmup=1, active=10, repeat=0),
+        #                                        on_trace_ready=torch.profiler.tensorboard_trace_handler(self.tb_path, self.devname))
 
         self.eval_sources, self.eval_targets = self._cache_eval_data()
 
@@ -172,12 +183,11 @@ class Trainer:
         self.optimizer.step()
         self.current_batch_loss = loss.item()
         dist.barrier()
-        time.sleep(0.02*self.gpu_id)
+        time.sleep(0.001*self.gpu_id)
         evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
         evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items() if (k in ["auroc","ap"])])
         self.pbar.update(1)
         self.pbar.set_postfix_str(evaltext)
-        dist.barrier()
         return None
 
 
@@ -192,6 +202,7 @@ class Trainer:
         time.sleep(0.03*self.gpu_id)
         with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
                        position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)], smoothing = 0) as self.pbar:
+
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
                 self.current_interval_losses.append(self.current_batch_loss)
@@ -204,11 +215,10 @@ class Trainer:
                     current_interval_loss = torch.tensor(current_interval_loss).to(self.gpu_id)
                     dist.all_reduce(current_interval_loss, op=dist.ReduceOp.SUM)
                     self.current_interval_loss = current_interval_loss / self.num_gpu
-                    dist.barrier()
-
                     if self.gpu_id == 0:
                         self.tb_writer.add_scalar("Loss", self.current_interval_loss, self.current_step)
                         self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_step)
+                    dist.barrier()
 
                 if self.current_step % self.eval_interval == 0:
                     self._run_eval()
@@ -217,6 +227,7 @@ class Trainer:
                     dist.barrier()
                     if self.gpu_id == 0:
                         self._save_checkpoint()
+                    dist.barrier()
 
                 if self.current_step % self.lr_interval == 0:
                     self.scheduler.step()
@@ -259,12 +270,12 @@ class Trainer:
             metric_dict[key] = metric / self.num_gpu
         self.current_val_loss = val_loss
         self.current_val_metric_dict = metric_dict
-        dist.barrier()
 
         if self.gpu_id == 0:
             self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_step)
             for key, value in metric_dict.items():
                 self.tb_writer.add_scalar(f"Val_{key}", value, self.current_step)
+        dist.barrier()
 
         self.model.train()
         return None
@@ -317,7 +328,8 @@ def setup_ddp(rank,world_size):
     return None
 
 
-def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size, seed, class_ratio):
+def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size,
+                       seed, class_ratio, prefetch_factor, pin_memory):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -326,9 +338,11 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                buffer_size, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio)
+                                buffer_size, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                                prefetch_factor = prefetch_factor, pin_memory = pin_memory)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              buffer_size, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio)
+                              buffer_size, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
+                              prefetch_factor = prefetch_factor, pin_memory = pin_memory)
 
     return train_loader, val_loader
 
@@ -347,10 +361,6 @@ def main_worker(rank, args_dict):
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
-    # scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps = 10,
-    #                                                                             num_training_steps = args_dict["epochs"],
-    #                                                                             num_cycles =  args_dict["epochs"] // args_dict["period"],
-    #                                                                             last_epoch = -1)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
@@ -361,8 +371,10 @@ def main_worker(rank, args_dict):
                         "ap": cm.BinaryAveragePrecision().to(rank),
                         "f-1": cm.BinaryF1Score().to(rank),}
 
-    train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"], args_dict["disk_shard_size"],
-                                                  rank, args_dict["gpu"], args_dict["buffer_size"], args_dict["seed"], args_dict["class_ratio"])
+    train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
+                                                  args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
+                                                  args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
+                                                  pin_memory = args_dict["pin_memory"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
                         args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                         args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],

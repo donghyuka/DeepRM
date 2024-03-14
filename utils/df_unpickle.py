@@ -26,6 +26,9 @@ def main():
         else:
             raise ValueError("Unknown file format: {}".format(ending))
 
+    if args.verbose:
+        print(df)
+
     if args.format == "tsv":
         df.to_csv(args.out_file, sep="\t", index=True)
     elif args.format == "csv":
@@ -36,7 +39,7 @@ def main():
         raise ValueError("Unknown file format: {}".format(args.format))
 
     if args.verbose:
-        print(df)
+        print("File saved to {}".format(args.out_file))
 
     return None
 

@@ -1,33 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="On explicit save action" serverName="sonic@147.47.218.58:7777 password (2)" deleteMissingItems="true" confirmBeforeDeletion="false">
+  <component name="PublishConfigData" autoUpload="On explicit save action" serverName="modformer" deleteMissingItems="true" confirmBeforeDeletion="false">
     <option name="confirmBeforeDeletion" value="false" />
     <serverData>
-      <paths name="sonic@147.47.218.124 password">
+      <paths name="AICA">
         <serverdata>
           <mappings>
-            <mapping deploy="/extdata2/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="sonic@147.47.218.58:7777">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="sonic@147.47.218.58:7777 password">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="sonic@147.47.218.58:7777 password (2)">
+      <paths name="Deep1">
         <serverdata>
           <mappings>
             <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="SNU-BIO">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/extdata2/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

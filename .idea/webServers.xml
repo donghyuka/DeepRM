@@ -2,13 +2,33 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="5d9d47ef-78be-4482-919e-06e70c9c9c53" name="sonic@147.47.218.124 password">
+      <webServer id="11104950-90ad-4009-9512-922ba16acdf8" name="AICA">
+        <fileTransfer accessType="SFTP" host="114.110.133.6" port="22" sshConfigId="b3cce7f4-9100-4fd5-8d4d-8a3d806cc50e" sshConfig="AICA" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+      <webServer id="5d9d47ef-78be-4482-919e-06e70c9c9c53" name="SNU-BIO">
         <fileTransfer accessType="SFTP" host="147.47.218.124" port="22" sshConfigId="a024a542-0faf-4502-b333-e9ac0faba7b6" sshConfig="sonic@147.47.218.124:22 password">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
         </fileTransfer>
       </webServer>
+      <webServer id="68ae0b22-2945-45c8-9b44-38e9ddd56e3e" name="Deep1">
+        <fileTransfer accessType="SFTP" host="147.47.218.58" port="7777" sshConfigId="56d0a24b-3e5a-4368-baa9-666f08acbc1a" sshConfig="sonic@147.47.218.58:7777 password" />
+      </webServer>
     </option>
+    <groups>
+      <group>
+        <name>modformer</name>
+        <servers>
+          <name value="AICA" />
+          <name value="SNU-BIO" />
+          <name value="Deep1" />
+        </servers>
+      </group>
+    </groups>
   </component>
 </project>

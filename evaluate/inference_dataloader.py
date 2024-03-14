@@ -22,47 +22,50 @@ class NanoporeDatasetIterator:
     def __iter__(self):
         return self
 
+    def _read_df(self):
+        self.current_index += 1
+        df = pd.read_pickle(self.file_paths[self.current_index])
+        df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask",
+                 "label_id", "label"]]
+        self.current_iterator = df.itertuples(index=False)
+        return None
+
     def __next__(self):
 
         if self.current_index == -1:
             if self.current_index == len(self.file_paths) - 1:
                 raise StopIteration
-            self.current_index += 1
-            df = pd.read_pickle(self.file_paths[self.current_index])
-            self.current_iterator = df.iterrows()
+            else:
+                self._read_df()
 
         try:
-            result = next(self.current_iterator)[1]
+            result = next(self.current_iterator)
+
         except StopIteration:
             if self.current_index == len(self.file_paths) - 1:
                 raise StopIteration
             else:
-                self.current_index += 1
-                df = pd.read_pickle(self.file_paths[self.current_index])
-                self.current_iterator = df.iterrows()
-                result = next(self.current_iterator)[1]
+                self._read_df()
+                result = next(self.current_iterator)
 
         source, target = self.nanopore_row_to_tensor(result)
 
         return source, target
 
     def nanopore_row_to_tensor(self, row):
-        ## Columns: "block_id", "label_id", "label", "motif", "block_score", "kmer_token", "bq_token", "position_token", "signal_token",
-        ##          "spectrogram_token", "move_token", "target_mask"
-        kmer_token = torch.tensor(row["kmer_token"], dtype=torch.long)
-        bq_token = torch.tensor(row["bq_token"], dtype=torch.long)
-        position_token = torch.tensor(row["position_token"], dtype=torch.long)
-        signal_token = torch.tensor(row["signal_token"], dtype=torch.float)
-        spectrogram_token = torch.tensor(row["spectrogram_token"], dtype=torch.float)
-        move_token = torch.tensor(row["move_token"], dtype=torch.long)
-        target_mask = torch.tensor(row["target_mask"], dtype=torch.float)
-        block_id = row["block_id"]
-        label_id = row["label_id"]
-        label =row["label"]
+        kmer_token = torch.tensor(row[0], dtype=torch.long)
+        bq_token = torch.tensor(row[1], dtype=torch.long)
+        position_token = torch.tensor(row[2], dtype=torch.long)
+        signal_token = torch.tensor(row[3], dtype=torch.float)
+        spectrogram_token = torch.tensor(row[4], dtype=torch.float)
+        move_token = torch.tensor(row[5], dtype=torch.long)
+        target_mask = torch.tensor(row[6], dtype=torch.float)
+        label_id = row[7]
+        label =row[8]
 
         return_dict = {"kmer_token": kmer_token, "bq_token": bq_token, "position_token": position_token,
                        "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
-                       "target_mask": target_mask, "block_id": block_id, "label_id": label_id, "label": label}
+                       "target_mask": target_mask, "label_id": label_id, "label": label}
 
         label = torch.tensor(label, dtype=torch.long)
 
@@ -126,7 +129,7 @@ def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
     ## Use DataLoader to load the dataset
     dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=False,
-                                    collate_fn = pad_collate_func, prefetch_factor=16)
+                                    collate_fn = pad_collate_func, prefetch_factor=32)
     return dataloader
 
 
@@ -160,7 +163,6 @@ def pad_collate(batch, pad_to, bq_clip):
     ## clip bq
     source["bq_token"] = torch.clamp(source["bq_token"], 0, bq_clip)
 
-    source["block_id"] = [item[0]["block_id"] for item in batch]
     source["label_id"] = [item[0]["label_id"] for item in batch]
     source["label"] = [item[0]["label"] for item in batch]
 
