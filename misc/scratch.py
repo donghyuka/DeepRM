@@ -1,18 +1,5 @@
-import torch
-import math
+import numpy as np
 
-d_model = 16
-seq_len = 10
+set_idx = np.cumsum([0] + [int(np.floor(100 * split_ratio)) for split_ratio in [0.8,0.1,0.1]])
 
-position = torch.arange(seq_len).unsqueeze(1)
-print(position)
-div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-print(div_term)
-pe = torch.zeros(1, seq_len, d_model)
-pe[:, :, 0::2] = torch.sin(position * div_term)
-pe[:, :, 1::2] = torch.cos(position * div_term)
-print(pe)
-
-
-
-
+print(set_idx)

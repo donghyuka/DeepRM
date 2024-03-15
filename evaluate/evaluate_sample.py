@@ -24,7 +24,7 @@ import importlib
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", "-m", type=str, required=True, help="Model path")
+    parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
     parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=4000, help="Batch size")
@@ -57,12 +57,20 @@ def run_inference(args):
     printmessage("Inference Program Started.")
     printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
-    if args_dict["model"].endswith(".pt"):
-        model_list = [args_dict["model"]]
-    elif os.path.isdir(args_dict["model"]):
-        model_list = [x for x in glob.glob(f"{args_dict['model']}/*.pt")]
-    else:
-        raise ValueError("Invalid model path. It should be a .pt file or a directory containing .pt files.")
+
+    model_list = []
+    for model_path in args_dict["model"]:
+        if model_path.endswith(".pt"):
+            model_list.append(model_path)
+        elif os.path.isdir(model_path):
+            model_list += [x for x in glob.glob(f"{model_path}/*.pt")]
+        else:
+            raise ValueError("Invalid model path. It should be a .pt file or a directory containing .pt files.")
+
+    if args_dict["data"].endswith("/"):
+        args_dict["data"] = args_dict["data"][:-1]
+    if not os.path.isdir(args_dict["data"]):
+        raise ValueError("Invalid data path. It should be a directory containing data files.")
     for model in model_list:
         printmessage(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
@@ -81,6 +89,13 @@ def inference_worker(rank, args_dict):
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
+    if rank == 0:
+        total_params = 0
+        for name, parameter in model.named_parameters():
+            params = parameter.numel()
+            total_params += params
+        printmessage(f"Total Params: {total_params:,}")
+
     model.to(rank)
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
@@ -115,7 +130,7 @@ def inference_worker(rank, args_dict):
     pred_list = np.concatenate(pred_list)
 
     data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list})
-    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}/inference_{rank}.tsv"
+    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}.tsv"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     data_df.to_csv(out_path, sep='\t', index=False)
     dist.destroy_process_group()

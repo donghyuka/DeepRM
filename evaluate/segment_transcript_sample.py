@@ -59,7 +59,7 @@ def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, int
 
     return None
 
-def segment_normalize_fft_signal(seg_df_path, signal_path_arr, label_df,
+def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_df,
                                  kmer = 5, cb_len = 21, sampling = 5, sig_window = 5, fft_scale = 0.01,
                                  shard_size = 1000, boi = "A"):
 
@@ -72,10 +72,10 @@ def segment_normalize_fft_signal(seg_df_path, signal_path_arr, label_df,
     for signal_path in tqdm.tqdm(signal_path_arr):
         oom_killer()
 
-        out_path = f"{seg_df_path}/block/{signal_path.split('/')[-1]}"
+        out_path = f"{seg_df_path}/{signal_path.split('/')[-1]}"
         if os.path.exists(out_path):
             continue
-        move_path = f"{seg_df_path}/intermediates/move_df_split/{signal_path.split('/')[-1]}"
+        move_path = f"{wdir_path}/move_df_split/{signal_path.split('/')[-1]}"
         if not os.path.exists(move_path):
             continue
         signal_df = pd.read_pickle(signal_path)
@@ -267,6 +267,7 @@ def parse_args():
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="BQ cutoff")
+    parser.add_argument("--wdir", "-w", type=str, required=True, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument("--chunk", "-k", type=int, default=100, help="Chunk size")
     args = parser.parse_args()
@@ -277,13 +278,13 @@ def parse_args():
     # if os.path.exists(args.output):
     #     raise FileExistsError(f"Output directory {args.output} already exists")
     os.makedirs(args.output, exist_ok=True)
-    os.makedirs(f"{args.output}/block/", exist_ok=True)
+    os.makedirs(args.wdir, exist_ok=True)
     return args
 
 
 def main():
     args = parse_args()
-    intermediate_path = f"{args.output}/intermediates/"
+    intermediate_path = args.wdir
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
     os.makedirs(intermediate_path, exist_ok=True)
@@ -322,7 +323,7 @@ def main():
     del signal_path_dict, index_dict
     gc.collect()
 
-    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/rna004_label_sampled.tsv", sep="\t")
+    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/miclip2_glori_m6ace.v2.sampled.drach.tsv", sep="\t")
 
     np.random.shuffle(signal_path_arr)
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
@@ -330,7 +331,29 @@ def main():
     proc_list = []
     for signal_paths in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_fft_signal,
-                          args=(args.output, signal_paths, label_df))
+                          args=("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/miclip2_glori_m6ace_drach",
+                                intermediate_path, signal_paths, label_df))
+        proc_list.append(proc)
+        proc.start()
+
+    del signal_path_arr_split
+    gc.collect()
+
+    for proc in proc_list:
+        proc.join()
+
+    gc.collect()
+
+    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/miclip2_glori_m6ace.v2.sampled.tsv", sep="\t")
+
+    np.random.shuffle(signal_path_arr)
+    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+
+    proc_list = []
+    for signal_paths in signal_path_arr_split:
+        proc = mp.Process(target=segment_normalize_fft_signal,
+                          args=("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/miclip2_glori_m6ace_all",
+                                intermediate_path, signal_paths, label_df))
         proc_list.append(proc)
         proc.start()
 

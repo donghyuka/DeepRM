@@ -57,6 +57,7 @@ def parse_args():
     parser.add_argument("--prefetch_factor", type=int, default=512)
     parser.add_argument("--profiler", type=int, default=0)
     parser.add_argument("--pin_memory", type=int, default=0)
+    parser.add_argument("--read_every", type=int, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
@@ -64,6 +65,8 @@ def parse_args():
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
         args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
+    if args.read_every is None:
+        args.read_every = args.disk_shard_size
     return args
 
 
@@ -329,7 +332,7 @@ def setup_ddp(rank,world_size):
 
 
 def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                       seed, class_ratio, prefetch_factor, pin_memory):
+                       read_every, seed, class_ratio, prefetch_factor, pin_memory):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -338,10 +341,10 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                buffer_size, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                                buffer_size, read_every, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
                                 prefetch_factor = prefetch_factor, pin_memory = pin_memory)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              buffer_size, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
+                              buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
                               prefetch_factor = prefetch_factor, pin_memory = pin_memory)
 
     return train_loader, val_loader
@@ -356,6 +359,12 @@ def main_worker(rank, args_dict):
                              encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
                              kmer_size = args_dict["kmer_size"], signal_size = args_dict["signal_size"],
                              spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"], seq_len = args_dict["seq_len"])
+    if rank == 0:
+        total_params = 0
+        for name, parameter in model.named_parameters():
+            params = parameter.numel()
+            total_params += params
+        printmessage(f"Total Params: {total_params:,}")
 
     model = model.to(rank)
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
@@ -373,7 +382,7 @@ def main_worker(rank, args_dict):
 
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
                                                   args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
-                                                  args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
+                                                  args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
                         args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],

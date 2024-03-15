@@ -129,7 +129,7 @@ def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
     ## Use DataLoader to load the dataset
     dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=False,
-                                    collate_fn = pad_collate_func, prefetch_factor=32)
+                                    collate_fn = pad_collate_func, prefetch_factor=64)
     return dataloader
 
 

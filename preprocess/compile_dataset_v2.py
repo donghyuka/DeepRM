@@ -36,7 +36,7 @@ import pandas as pd
 import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
 
-from utils.utils import printmessage
+from utils.utils import printmessage, oom_killer
 
 
 def parse_args():
@@ -157,6 +157,7 @@ def sample_and_save_df_worker(id_set_list, out_path_list, in_path_list, pid_str,
     path_df_dict = {out_path:[] for out_path in out_path_list}
 
     for df_path in tqdm.tqdm(in_path_list):
+        oom_killer()
         df = pd.read_pickle(df_path)
         df["label"] = label
         df["token_len"] = df["signal_token"].apply(lambda x: len(x))
@@ -262,8 +263,6 @@ def main():
 
     pos_metadata_df = get_metadata_df(args.pos_path, args.cpu, args.score)
     neg_metadata_df = get_metadata_df(args.neg_path, args.cpu, args.score)
-    pos_cnt = len(pos_metadata_df)
-    neg_cnt = len(neg_metadata_df)
 
     pos_metadata_df["label"] = 1
     neg_metadata_df["label"] = 0
@@ -273,6 +272,9 @@ def main():
 
     pos_metadata_df = pos_metadata_df[pos_metadata_df["token_len"] <= args.max_token_len].reset_index(drop=True).copy()
     neg_metadata_df = neg_metadata_df[neg_metadata_df["token_len"] <= args.max_token_len].reset_index(drop=True).copy()
+
+    pos_cnt = len(pos_metadata_df)
+    neg_cnt = len(neg_metadata_df)
 
     printmessage("Positive before sampling: ", pos_cnt)
     printmessage("Negative before sampling: ", neg_cnt)
@@ -358,53 +360,81 @@ def main2():
     os.makedirs(f"{args.out_path}/metadata", exist_ok=True)
     os.makedirs(f"{args.out_path}/metadata_path", exist_ok=True)
 
-    pos_train = pd.read_pickle(f"{args.out_path}/metadata/pos_train.pkl")
-    pos_val = pd.read_pickle(f"{args.out_path}/metadata/pos_val.pkl")
-    pos_test = pd.read_pickle(f"{args.out_path}/metadata/pos_test.pkl")
-    neg_train = pd.read_pickle(f"{args.out_path}/metadata/neg_train.pkl")
-    neg_val = pd.read_pickle(f"{args.out_path}/metadata/neg_val.pkl")
-    neg_test = pd.read_pickle(f"{args.out_path}/metadata/neg_test.pkl")
+    pos_metadata_df = pd.read_pickle(f"{args.out_path}/metadata/all_pos.pkl")
+    neg_metadata_df = pd.read_pickle(f"{args.out_path}/metadata/all_neg.pkl")
 
-    pos_train_count = int(len(pos_train) * args.sampling)
-    neg_train_count = int(pos_train_count * args.ratio)
-    pos_val_count = int(len(pos_val) * args.sampling)
-    neg_val_count = int(pos_val_count * args.ratio)
-    pos_test_count = int(len(pos_test) * args.sampling)
-    neg_test_count = int(pos_test_count * args.ratio)
+    pos_metadata_df = pos_metadata_df[pos_metadata_df["block_score"] >= args.score]
+    neg_metadata_df = neg_metadata_df[neg_metadata_df["block_score"] >= args.score]
+    pos_metadata_df = pos_metadata_df[pos_metadata_df["token_len"] <= args.max_token_len].reset_index(drop=True).copy()
+    neg_metadata_df = neg_metadata_df[neg_metadata_df["token_len"] <= args.max_token_len].reset_index(drop=True).copy()
 
-    print(pos_train_count, neg_train_count, pos_val_count, neg_val_count, pos_test_count, neg_test_count)
+    pos_cnt = len(pos_metadata_df)
+    neg_cnt = len(neg_metadata_df)
 
+    printmessage("Positive before sampling: ", pos_cnt)
+    printmessage("Negative before sampling: ", neg_cnt)
 
-    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = pos_train_count, seed = args.seed)
-    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = pos_val_count, seed = args.seed)
-    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = pos_test_count, seed = args.seed)
-    neg_train_eng = sample_dataset_kmer_balanced(neg_train, sample_ratio = neg_train_count, seed = args.seed)
-    neg_val_eng = sample_dataset_kmer_balanced(neg_val, sample_ratio = neg_val_count, seed = args.seed)
-    neg_test_eng = sample_dataset_kmer_balanced(neg_test, sample_ratio = neg_test_count, seed = args.seed)
+    assert neg_cnt > pos_cnt, "Negative count should be greater than positive count."
 
-    pos_df_list = [pos_train_eng, pos_val_eng, pos_test_eng]
-    neg_df_list = [neg_train_eng, neg_val_eng, neg_test_eng]
+    if pos_cnt * args.ratio > neg_cnt:
+        pos_cnt = neg_cnt // args.ratio
+        pos_metadata_df = sample_dataset_kmer_balanced(pos_metadata_df, sample_ratio = pos_cnt , seed = args.seed)
 
-    pos_train_eng.to_pickle(f"{args.out_path}/metadata/pos_train_imbx10.pkl")
-    pos_val_eng.to_pickle(f"{args.out_path}/metadata/pos_val_imbx10.pkl")
-    pos_test_eng.to_pickle(f"{args.out_path}/metadata/pos_test_imbx10.pkl")
-    neg_train_eng.to_pickle(f"{args.out_path}/metadata/neg_train_imbx10.pkl")
-    neg_val_eng.to_pickle(f"{args.out_path}/metadata/neg_val_imbx10.pkl")
-    neg_test_eng.to_pickle(f"{args.out_path}/metadata/neg_test_imbx10.pkl")
+    else:
+        neg_cnt = int(pos_cnt * args.ratio)
+        neg_metadata_df = sample_dataset_kmer_balanced(neg_metadata_df, sample_ratio = neg_cnt , seed = args.seed)
+
+    printmessage("Positive after sampling: ", len(pos_metadata_df))
+    printmessage("Negative after sampling: ", len(neg_metadata_df))
+
+    pos_metadata_df_split = split_dataset_kmer_balanced(pos_metadata_df, seed = args.seed)
+    neg_metadata_df_split = split_dataset_kmer_balanced(neg_metadata_df, seed = args.seed)
+
+    pos_train = pos_metadata_df_split[0]
+    pos_val = pos_metadata_df_split[1]
+    pos_test = pos_metadata_df_split[2]
+    neg_train = neg_metadata_df_split[0]
+    neg_val = neg_metadata_df_split[1]
+    neg_test = neg_metadata_df_split[2]
+
+    pos_train_eng = sample_dataset_kmer_balanced(pos_train, sample_ratio = args.sampling, seed = args.seed)
+    pos_val_eng = sample_dataset_kmer_balanced(pos_val, sample_ratio = args.sampling, seed = args.seed)
+    pos_test_eng = sample_dataset_kmer_balanced(pos_test, sample_ratio = args.sampling, seed = args.seed)
+    neg_train_eng = sample_dataset_kmer_balanced(neg_train, sample_ratio = args.sampling, seed = args.seed)
+    neg_val_eng = sample_dataset_kmer_balanced(neg_val, sample_ratio = args.sampling, seed = args.seed)
+    neg_test_eng = sample_dataset_kmer_balanced(neg_test, sample_ratio = args.sampling, seed = args.seed)
+
+    pos_df_list = [pos_train, pos_val, pos_test, pos_train_eng, pos_val_eng, pos_test_eng]
+    neg_df_list = [neg_train, neg_val, neg_test, neg_train_eng, neg_val_eng, neg_test_eng]
+
+    pos_train.to_pickle(f"{args.out_path}/metadata/pos_train.pkl")
+    pos_val.to_pickle(f"{args.out_path}/metadata/pos_val.pkl")
+    pos_test.to_pickle(f"{args.out_path}/metadata/pos_test.pkl")
+    pos_train_eng.to_pickle(f"{args.out_path}/metadata/pos_train_eng.pkl")
+    pos_val_eng.to_pickle(f"{args.out_path}/metadata/pos_val_eng.pkl")
+    pos_test_eng.to_pickle(f"{args.out_path}/metadata/pos_test_eng.pkl")
+    neg_train.to_pickle(f"{args.out_path}/metadata/neg_train.pkl")
+    neg_val.to_pickle(f"{args.out_path}/metadata/neg_val.pkl")
+    neg_test.to_pickle(f"{args.out_path}/metadata/neg_test.pkl")
+    neg_train_eng.to_pickle(f"{args.out_path}/metadata/neg_train_eng.pkl")
+    neg_val_eng.to_pickle(f"{args.out_path}/metadata/neg_val_eng.pkl")
+    neg_test_eng.to_pickle(f"{args.out_path}/metadata/neg_test_eng.pkl")
 
     pos_df_list = [set(df["block_id"]) for df in pos_df_list]
     neg_df_list = [set(df["block_id"]) for df in neg_df_list]
 
-    pos_path_list = [f"{args.out_path}/imbx10/train/pos/", f"{args.out_path}/imbx10/val/pos/", f"{args.out_path}/imbx10/test/pos/"]
-    neg_path_list = [f"{args.out_path}/imbx10/train/neg/", f"{args.out_path}/imbx10/val/neg/", f"{args.out_path}/imbx10/test/neg/"]
-    pos_metadata_path_list = [
-                        f"{args.out_path}/metadata_path/pos_train_imbx10.pkl", f"{args.out_path}/metadata_path/pos_val_imbx10.pkl", f"{args.out_path}/metadata_path/pos_test_imbx10.pkl"]
-    neg_metadata_path_list = [
-                        f"{args.out_path}/metadata_path/neg_train_imbx10.pkl", f"{args.out_path}/metadata_path/neg_val_imbx10.pkl", f"{args.out_path}/metadata_path/neg_test_imbx10.pkl"]
-    pos_original_metadata_path_list = [
-                        f"{args.out_path}/metadata/pos_train_imbx10.pkl", f"{args.out_path}/metadata/pos_val_imbx10.pkl", f"{args.out_path}/metadata/pos_test_imbx10.pkl"]
-    neg_original_metadata_path_list = [
-                        f"{args.out_path}/metadata/neg_train_imbx10.pkl", f"{args.out_path}/metadata/neg_val_imbx10.pkl", f"{args.out_path}/metadata/neg_test_imbx10.pkl"]
+    pos_path_list = [f"{args.out_path}/main/train/pos/", f"{args.out_path}/main/val/pos/", f"{args.out_path}/main/test/pos/",
+                     f"{args.out_path}/engineering/train/pos/", f"{args.out_path}/engineering/val/pos/", f"{args.out_path}/engineering/test/pos/"]
+    neg_path_list = [f"{args.out_path}/main/train/neg/", f"{args.out_path}/main/val/neg/", f"{args.out_path}/main/test/neg/",
+                     f"{args.out_path}/engineering/train/neg/", f"{args.out_path}/engineering/val/neg/", f"{args.out_path}/engineering/test/neg/"]
+    pos_metadata_path_list = [f"{args.out_path}/metadata_path/pos_train.pkl", f"{args.out_path}/metadata_path/pos_val.pkl", f"{args.out_path}/metadata_path/pos_test.pkl",
+                              f"{args.out_path}/metadata_path/pos_train_eng.pkl", f"{args.out_path}/metadata_path/pos_val_eng.pkl", f"{args.out_path}/metadata_path/pos_test_eng.pkl"]
+    neg_metadata_path_list = [f"{args.out_path}/metadata_path/neg_train.pkl", f"{args.out_path}/metadata_path/neg_val.pkl", f"{args.out_path}/metadata_path/neg_test.pkl",
+                              f"{args.out_path}/metadata_path/neg_train_eng.pkl", f"{args.out_path}/metadata_path/neg_val_eng.pkl", f"{args.out_path}/metadata_path/neg_test_eng.pkl"]
+    pos_original_metadata_path_list = [f"{args.out_path}/metadata/pos_train.pkl", f"{args.out_path}/metadata/pos_val.pkl", f"{args.out_path}/metadata/pos_test.pkl",
+                                       f"{args.out_path}/metadata/pos_train_eng.pkl", f"{args.out_path}/metadata/pos_val_eng.pkl", f"{args.out_path}/metadata/pos_test_eng.pkl"]
+    neg_original_metadata_path_list = [f"{args.out_path}/metadata/neg_train.pkl", f"{args.out_path}/metadata/neg_val.pkl", f"{args.out_path}/metadata/neg_test.pkl",
+                                       f"{args.out_path}/metadata/neg_train_eng.pkl", f"{args.out_path}/metadata/neg_val_eng.pkl", f"{args.out_path}/metadata/neg_test_eng.pkl"]
 
     for path in pos_path_list:
         os.makedirs(path, exist_ok=True)

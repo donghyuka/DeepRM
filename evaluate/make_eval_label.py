@@ -1,4 +1,8 @@
 import argparse, os
+import pandas as pd
+import numpy as np
+import multiprocessing as mp
+from utils.utils import is_drach
 
 
 ## TODO: Refactor to remove these fixed paths.
@@ -9,27 +13,13 @@ UNION_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatt
                "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6ace_reformatted.tsv"]
 
 INTERSECT_PATHS = ["/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/miclip2_pc_reformatted.tsv",
-                   "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/sac_seq.reformatted.tsv",
+                   "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6ace_reformatted.tsv",
                    "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv",]
 
 GLORI_PATH = "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/glori_reformatted.tsv"
-DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.pileup.filtered.tsv"
+DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.pileup.filtered.v2.tsv"
 
 
-import pandas as pd
-import numpy as np
-import multiprocessing as mp
-
-def get_image_id(nmid,pos):
-    ## The format for image_id is "XX:AAAAAAAAA:NNNNNN"
-    ## XX is NMID prefix
-    ## AAAAAAAAA is NMID suffix
-    ## NNNNNN is position
-    nmid_prefix = nmid[:2]
-    nmid_suffix = nmid.split(".")[0][3:]
-    nmid_suffix = "0" * (9 - len(nmid_suffix)) + nmid_suffix
-    image_id = f"{nmid_prefix}:{nmid_suffix}:{pos:06d}"
-    return image_id
 
 def get_label_df():
     label_df_list = []
@@ -86,7 +76,7 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args = args.parse_args()
-
+    depth_cutoff = 20
     union_df, intersect_df = get_label_df()
     union_df["union"] = 1
     intersect_df["intersect"] = 1
@@ -101,12 +91,13 @@ def main():
     glori_df = glori_df[["id","m6A_level"]]
     print(glori_df)
 
-    depth_df = pd.read_csv(DEPTH_PATH, sep='\t', header=None)
-    depth_df.columns = ["nmid", "pos", "nuc", "depth"]
+    depth_df = pd.read_csv(DEPTH_PATH, sep='\t', header = 0)
+    depth_df.rename({"ref":"nmid"}, axis=1, inplace=True)
     depth_df["nmid"] = depth_df["nmid"].str.split(".").str[0]
     depth_df["pos"] = depth_df["pos"] - 1
     depth_df["id"] = depth_df["nmid"] + ":" + depth_df["pos"].astype(str)
-    depth_df = depth_df[["id", "depth", "nmid", "pos"]]
+    depth_df = depth_df[["id", "depth", "nmid", "pos", "5mer"]]
+    depth_df = depth_df[depth_df["depth"] > depth_cutoff].copy()
     print(depth_df)
     depth_df_split = np.array_split(depth_df, args.cpu)
 
@@ -125,19 +116,26 @@ def main():
     return_list = list(return_list)
     datid_df = pd.concat(return_list)
     datid_df = datid_df.dropna()
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/rna004_label_miclip2_glori_sac.tsv", sep='\t', index=False)
-    datid_df = sample_eval_data(datid_df)
-    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/rna004_label_miclip2_glori_sac_sampled.tsv", sep='\t', index=False)
+    datid_df.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/miclip2_glori_m6ace.v2.tsv", sep='\t', index=False)
+    datid_df_s = sample_eval_data(datid_df, drach = False)
+    datid_df_s.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/miclip2_glori_m6ace.v2.sampled.tsv", sep='\t', index=False)
+    datid_df_s = sample_eval_data(datid_df, drach = True)
+    datid_df_s.to_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/miclip2_glori_m6ace.v2.sampled.drach.tsv", sep='\t', index=False)
     return None
 
 
-def sample_eval_data(datid_df, depth_cutoff = 20, seed = 42, ratio = 10):
-    datid_df = datid_df[datid_df["depth"] > depth_cutoff]
+def sample_eval_data(datid_df, seed = 42, ratio = 10, drach = False):
+    if drach:
+        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
+        datid_df = datid_df[datid_df["drach"]]
+        datid_df.drop("drach", axis=1, inplace=True)
+
     datid_df_pos = datid_df[datid_df["label"] == 1]
     datid_df_neg = datid_df[datid_df["label"] == 0]
     datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
     datid_df = pd.concat([datid_df_pos, datid_df_neg])
     return datid_df
+
 
 if __name__ == "__main__":
     main()
