@@ -58,6 +58,7 @@ def parse_args():
     parser.add_argument("--profiler", type=int, default=0)
     parser.add_argument("--pin_memory", type=int, default=0)
     parser.add_argument("--read_every", type=int, default=None)
+    parser.add_argument("--rlrop", type=float, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
@@ -229,6 +230,8 @@ class Trainer:
                 if self.current_step % self.save_interval == 0:
                     dist.barrier()
                     if self.gpu_id == 0:
+                        for name, parameter in self.model.named_parameters():
+                            self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
                         self._save_checkpoint()
                     dist.barrier()
 
@@ -371,7 +374,13 @@ def main_worker(rank, args_dict):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
+    if args_dict["rlrop"] is not None:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = "min", factor = 0.5, patience = args_dict["lr_step"],
+                                                               threshold = args_dict["rlrop"], threshold_mode = "rel", cooldown = 0,
+                                                               min_lr = 1e-6, eps = 1e-8, verbose = True)
+
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
     loss_func = torch.nn.MSELoss()
 

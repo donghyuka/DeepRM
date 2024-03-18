@@ -1,5 +1,6 @@
 import os
-default_n_threads = 64
+
+default_n_threads = os.cpu_count() // 2
 os.environ['OPENBLAS_NUM_THREADS'] = f"{default_n_threads}"
 os.environ['MKL_NUM_THREADS'] = f"{default_n_threads}"
 os.environ['OMP_NUM_THREADS'] = f"{default_n_threads}"
@@ -14,6 +15,7 @@ import argparse
 import glob
 from utils.utils import printmessage
 import pickle
+from utils.utils import max_f1_score
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -38,9 +40,9 @@ def gmm_em_lda(pred_arr):
 def process_inferece(data_path):
     data_paths = glob.glob(f"{data_path}/*.tsv")
     data_df = pd.concat([pd.read_csv(data_path, sep = "\t") for data_path in data_paths])
-
-    # threshold = gmm_em_lda(data_df["pred"].values)
-    threshold = 0.20 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
+    data_df.fillna(0, inplace = True)
+    threshold = gmm_em_lda(data_df["pred"].values)
+    # threshold = 0.20 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
     epsilon = 1e-6
     data_df["dom"] = data_df["pred"].apply(lambda x: 1 if x >=threshold else 0)
     ## Groupby label_id and get mean of predictions
@@ -59,10 +61,10 @@ def plot_roc(data_df, outdir, modelname):
     fig, ax = plt.subplots(figsize = (20,20))
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_geo"])
     roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'Transformer (AUC = {roc_auc:.2f})', color = "royalblue")
+    ax.plot(fpr, tpr, lw=3, label=f'Transformer (AUC = {roc_auc:.3f})', color = "royalblue")
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_m6anet"])
     roc_auc_m6anet = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3,label=f'm6Anet (AUC = {roc_auc_m6anet:.2f})', color = "tomato")
+    ax.plot(fpr, tpr, lw=3,label=f'm6Anet (AUC = {roc_auc_m6anet:.3f})', color = "tomato")
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -79,10 +81,12 @@ def plot_pr(data_df, outdir, pr_baseline_level, modelname):
     fig, ax = plt.subplots(figsize = (20,20))
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_geo"])
     pr_auc = auc(recall, precision)
-    ax.plot(recall, precision, lw=3, label=f'Transformer (AUC = {pr_auc:.2f})', color = "royalblue")
+    max_f1 = max_f1_score(data_df["label"], data_df["pred_geo"])
+    ax.plot(recall, precision, lw=3, label=f'Transformer (AUC = {pr_auc:.3f}, Max F-1 = {max_f1:.3f})', color = "royalblue")
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_m6anet"])
     pr_auc_m6anet = auc(recall, precision)
-    ax.plot(recall, precision, lw=3,label=f'm6Anet (AUC = {pr_auc_m6anet:.2f})', color = "tomato")
+    max_f1 = max_f1_score(data_df["label"], data_df["pred_m6anet"])
+    ax.plot(recall, precision, lw=3,label=f'm6Anet (AUC = {pr_auc_m6anet:.3f}, Max F-1 = {max_f1:.3f})', color = "tomato")
     ax.plot([0, 1], [pr_baseline_level, pr_baseline_level], color='grey', lw=2, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])

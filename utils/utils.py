@@ -232,3 +232,10 @@ def oom_killer(program_name=None, margin=0.01):
 
     return None
 
+def max_f1_score(y_true, y_pred):
+    from sklearn.metrics import f1_score
+    f1_scores = []
+    for threshold in np.arange(0, 1, 0.01):
+        y_pred_ = y_pred > threshold
+        f1_scores.append(f1_score(y_true, y_pred_))
+    return max(f1_scores)
