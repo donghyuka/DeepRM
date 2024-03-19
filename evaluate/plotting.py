@@ -41,8 +41,8 @@ def process_inferece(data_path):
     data_paths = glob.glob(f"{data_path}/*.tsv")
     data_df = pd.concat([pd.read_csv(data_path, sep = "\t") for data_path in data_paths])
     data_df.fillna(0, inplace = True)
-    threshold = gmm_em_lda(data_df["pred"].values)
-    # threshold = 0.20 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
+    # threshold = gmm_em_lda(data_df["pred"].values)
+    threshold = 0.20 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
     epsilon = 1e-6
     data_df["dom"] = data_df["pred"].apply(lambda x: 1 if x >=threshold else 0)
     ## Groupby label_id and get mean of predictions

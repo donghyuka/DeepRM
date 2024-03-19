@@ -11,7 +11,8 @@ from utils.utils import printmessage
 ## Load Nanopore Dataset from Pickled Pandas DataFrame
 
 class BinaryClassDatasetIterator:
-    def __init__(self, pos_file_paths, neg_file_paths, buffer_size, read_every = 1000, shuffle = True, class_ratio = 1):
+    def __init__(self, pos_file_paths, neg_file_paths, buffer_size, read_every = 1000, shuffle = True, class_ratio = 1,
+                 soft_label = False):
 
         self.paths = [neg_file_paths, pos_file_paths]
         self.shuffle = shuffle
@@ -24,6 +25,8 @@ class BinaryClassDatasetIterator:
         self.class_ratio = class_ratio
         self.buffer_df = [None, None]
         self.read_every = read_every
+        self.soft_label = soft_label
+        self.columns = ["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask", "block_score"]
 
     def __iter__(self):
         return self
@@ -41,7 +44,7 @@ class BinaryClassDatasetIterator:
         while (len_read < self.buffer_size) and (self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1):
             self.current_df_index[self.current_class] += 1
             df = pd.read_pickle(self.paths[self.current_class][self.current_df_index[self.current_class]])
-            df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask"]]
+            df = df[self.columns]
             df_list.append(df)
             len_read += len(df)
 
@@ -70,7 +73,7 @@ class BinaryClassDatasetIterator:
         while (len_read < self.read_every) and (self.current_df_index[self.current_class] < len(self.paths[self.current_class]) - 1):
             self.current_df_index[self.current_class] += 1
             df = pd.read_pickle(self.paths[self.current_class][self.current_df_index[self.current_class]])
-            df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask"]]
+            df = df[self.columns]
             df_list.append(df)
             len_read += len(df)
 
@@ -153,7 +156,14 @@ class BinaryClassDatasetIterator:
                        "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
                        "target_mask": target_mask}
 
-        label = torch.tensor(class_idx, dtype=torch.long)
+        if not self.soft_label:
+            label = torch.tensor(class_idx, dtype=torch.long)
+
+        else:
+            if class_idx == 0:
+                label = torch.tensor(0, dtype=torch.float)
+            else:
+                label = torch.tensor(1-self.soft_label*(1-row[7]), dtype=torch.float)
 
         return return_dict, label
 
@@ -163,7 +173,7 @@ class BinaryClassDatasetIterator:
 
 class NanoporeDataset(torch.utils.data.IterableDataset):
     def __init__(self, pos_data_path, neg_data_path, batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                 read_every = None, seed = 0, shuffle = True, drop_last = True, class_ratio = 1):
+                 read_every = None, seed = 0, shuffle = True, drop_last = True, class_ratio = 1, soft_label = False):
         super(NanoporeDataset).__init__()
 
         self.pos_file_paths = pos_data_path
@@ -179,6 +189,7 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         self.buffer_size = buffer_size
         self.class_ratio = class_ratio
         self.read_every = read_every
+        self.soft_label = soft_label
         if self.read_every is None:
             self.read_every = self.disk_shard_size
 
@@ -215,7 +226,7 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         neg_file_paths = self._deterministic_shuffle_and_sample(self.neg_file_paths, self.neg_num_shard, self.neg_total_num_shard)
         ## TODO: Use Torch Multiprocessing to parallelize the data shuffling process (do it while the model is training).
         return BinaryClassDatasetIterator(pos_file_paths, neg_file_paths, buffer_size = self.buffer_size, read_every=self.read_every,
-                                          shuffle = self.shuffle, class_ratio = self.class_ratio)
+                                          shuffle = self.shuffle, class_ratio = self.class_ratio, soft_label = self.soft_label)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -290,13 +301,13 @@ class NanoporeDataLoader(DataLoader):
 
 def load_dataset(pos_data_path, neg_data_path, batch_size,
                  disk_shard_size, rank, num_replicas, buffer_size, read_every, seed = 0, shuffle = True, drop_last = True,
-                 pad_to = 200, bq_clip = 40, class_ratio = 1, prefetch_factor = 512, pin_memory=True):
+                 pad_to = 200, bq_clip = 40, class_ratio = 1, prefetch_factor = 512, pin_memory=True, soft_label = False):
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
     pos_data_paths = glob.glob(f"{pos_data_path}/*.pkl")
     neg_data_paths = glob.glob(f"{neg_data_path}/*.pkl")
     dataset = NanoporeDataset(pos_data_paths, neg_data_paths, batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                              read_every, seed, shuffle, drop_last, class_ratio = class_ratio)
+                              read_every, seed, shuffle, drop_last, class_ratio = class_ratio, soft_label = soft_label)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=pin_memory, drop_last=drop_last,
                                     collate_fn = pad_collate_func, prefetch_factor=prefetch_factor)
 

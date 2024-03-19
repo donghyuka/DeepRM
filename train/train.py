@@ -52,13 +52,14 @@ def parse_args():
     parser.add_argument("--class_ratio", type=int, default=1)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--eval_interval", type=int, default=100)
-    parser.add_argument("--save_interval", type=int, default=100)
+    parser.add_argument("--save_interval", type=int, default=None)
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--prefetch_factor", type=int, default=512)
     parser.add_argument("--profiler", type=int, default=0)
     parser.add_argument("--pin_memory", type=int, default=0)
     parser.add_argument("--read_every", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
+    parser.add_argument("--soft", type=float, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
@@ -68,6 +69,8 @@ def parse_args():
         args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
+    if args.save_interval is None:
+        args.save_interval = args.eval_interval
     return args
 
 
@@ -95,6 +98,7 @@ class Trainer:
             log_interval: int,
             save_interval: int,
             model_config: dict = None,
+            soft_label: float = None,
     ) -> None:
 
         self.gpu_id = gpu_id
@@ -132,6 +136,7 @@ class Trainer:
         self.model_config = model_config
         self.devname = f"{os.uname()[1]}-{self.gpu_id}"
         self.tb_path = tb_path
+        self.soft_label = soft_label
 
         if self.gpu_id == 0:
             self.tb_writer = SummaryWriter(tb_path)
@@ -183,7 +188,8 @@ class Trainer:
         output, target = self._feed_model(source, target)
         loss = self.loss_func(output, target)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+        if self.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
         self.current_batch_loss = loss.item()
         dist.barrier()
@@ -236,7 +242,10 @@ class Trainer:
                     dist.barrier()
 
                 if self.current_step % self.lr_interval == 0:
-                    self.scheduler.step()
+                    if self.scheduler.__class__.__name__ == "ReduceLROnPlateau":
+                        self.scheduler.step(self.current_val_loss)
+                    else:
+                        self.scheduler.step()
                     self.current_lr = self.optimizer.param_groups[0]['lr']
 
                 self.current_batch += 1
@@ -259,6 +268,8 @@ class Trainer:
         val_loss = np.mean(val_loss)
         outputs = torch.cat(outputs, dim=0)
         targets = torch.cat(self.eval_targets, dim=0)
+        if self.soft_label is not None:
+            targets = torch.where(targets > 0.5, torch.ones_like(targets), torch.zeros_like(targets))
         targets = targets.to(torch.long).to(self.gpu_id)
         metric_dict = {}
 
@@ -335,7 +346,7 @@ def setup_ddp(rank,world_size):
 
 
 def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                       read_every, seed, class_ratio, prefetch_factor, pin_memory):
+                       read_every, seed, class_ratio, prefetch_factor, pin_memory, soft_label):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -345,10 +356,10 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
                                 buffer_size, read_every, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
-                                prefetch_factor = prefetch_factor, pin_memory = pin_memory)
+                                prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
                               buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
-                              prefetch_factor = prefetch_factor, pin_memory = pin_memory)
+                              prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
 
     return train_loader, val_loader
 
@@ -392,11 +403,11 @@ def main_worker(rank, args_dict):
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
                                                   args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
                                                   args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
-                                                  pin_memory = args_dict["pin_memory"])
+                                                  pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
                         args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                         args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict)
+                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,  soft_label = args_dict["soft"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")
