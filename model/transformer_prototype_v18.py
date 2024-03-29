@@ -33,7 +33,6 @@ class TransformerModel(nn.Module):
         self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
         self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
 
-
         ## Weight Initialization
         self.init_weights()
 
@@ -49,7 +48,7 @@ class TransformerModel(nn.Module):
 
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_spectrogram: Tensor, src_bq: Tensor, src_move: Tensor,
-                src_pad_mask: Tensor, target_mask: Tensor) -> Tensor:
+                src_pad_mask: Tensor, target_mask: Tensor, block_score: Tensor) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
@@ -61,20 +60,25 @@ class TransformerModel(nn.Module):
         ## add all embeddings and dropout
         final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding,
                                        pos_encoding, move_embedding], dim = 0).sum(dim = 0)
-        # final_embedding = nn.LayerNorm(final_embedding.size()[1:], elementwise_affine=False)(final_embedding)
         final_embedding = self.embedding_dropout(final_embedding)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+
+        ## Tile block_score to match the output shape with a single channel
+        ## Then concatenate the block_score to the output tensor
+        block_score = block_score.unsqueeze(-1).unsqueeze(-1).repeat(1, output.size(1), 1)
+        output = torch.cat([output, block_score], dim = -1)
 
         ## apply regression head to each token:
         output = self.regression_head(output)
         output = output.squeeze(-1)
 
+
         target_mask_sum = target_mask.sum(dim = 1)
         output = output * target_mask
         output = output.sum(dim = 1)
         output = output / target_mask_sum
-        
-        output = torch.clamp(output, 0, 1)
+
+        output = torch.sigmoid(output)
 
         return output
 
@@ -109,7 +113,12 @@ class RegressionHead(nn.Module):
         super().__init__()
         layer_list=  []
 
-        for i in range(lin_depth-1):
+        layer_list.append(nn.Linear(d_model+1, d_model))
+        layer_list.append(nn.BatchNorm1d(seq_length))
+        layer_list.append(self._get_activation_fn(lin_act))
+        layer_list.append(nn.Dropout(lin_dropout))
+
+        for i in range(lin_depth-2):
             layer_list.append(nn.Linear(d_model, d_model))
             layer_list.append(nn.BatchNorm1d(seq_length))
             layer_list.append(self._get_activation_fn(lin_act))
@@ -120,7 +129,6 @@ class RegressionHead(nn.Module):
         layer_list.append(nn.Linear(d_model, d_model//4))
         layer_list.append(self._get_activation_fn(lin_act))
         layer_list.append(nn.Linear(d_model//4, 1))
-
         self.lin_layers = nn.Sequential(*layer_list)
 
     def forward(self, x: Tensor) -> Tensor:

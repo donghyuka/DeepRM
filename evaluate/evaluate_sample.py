@@ -24,8 +24,10 @@ def parse_args():
     parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=4000, help="Batch size")
-    parser.add_argument("--shard", "-s", type=int, default=1000, help="Shard size")
+    parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
+    parser.add_argument("--nfile", "-n", type=int, default=10, help="Number of files to load")
+    parser.add_argument("--prefetch", "-p", type=int, default=100, help="Number of files to load")
     args = parser.parse_args()
     return args
 
@@ -110,13 +112,21 @@ def inference_worker(rank, args_dict):
     if args_dict["gpu"] > 0:
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]))
+    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
+                               num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"])
 
     id_list = []
     label_list = []
     pred_list = []
+    if "score_feature" in model_config:
+        if model_config["score_feature"]:
+            score_feature = True
+        else:
+            score_feature = False
+    else:
+        score_feature = False
 
-    for data in tqdm.tqdm(data_loader, total=len(data_loader)):
+    for data in tqdm.tqdm(data_loader, total=len(data_loader), smoothing = 0):
         data = data[0]
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
@@ -126,6 +136,10 @@ def inference_worker(rank, args_dict):
             src_move = data["move_token"].to(rank)
             src_pad_mask = (src_kmer == 0)
             src_target_mask = data["target_mask"].to(rank)
+            if score_feature:
+                    ## Fill with one, shape is (batch, )
+                    src_score = torch.ones(src_kmer.size(0)).to(rank)
+
         else:
             src_kmer = data["kmer_token"]
             src_signal = data["signal_token"]
@@ -134,9 +148,14 @@ def inference_worker(rank, args_dict):
             src_move = data["move_token"]
             src_pad_mask = (src_kmer == 0)
             src_target_mask = data["target_mask"]
+            if score_feature:
+                src_score = torch.ones(src_kmer.size(0))
 
         with torch.no_grad():
-            pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+            if score_feature:
+                pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
+            else:
+                pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
         else:

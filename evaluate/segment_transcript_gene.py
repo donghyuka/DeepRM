@@ -17,7 +17,7 @@ from utils.utils import mean_phred, oom_killer
 from preprocess.tokenizer import create_segment_len_arr, sequence_to_kmer_token, expand_token_to_segment, \
     create_positional_token, create_move_token, segmented_signal_to_block, segmented_fft_to_block, create_target_mask
 
-def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
+def extract_move(gene_name, bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
     ## Extract mv tag from bam and save to separate file
 
     data_dict = {x: {"mv": [], "read_id": [], "sm": [], "sd": [], "ts": [], "seq": [], "bq": [],
@@ -32,25 +32,26 @@ def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, int
                 bq = np.array(read.query_qualities, dtype=int)
                 if mean_phred(bq) < bq_cutoff:
                     continue
-                read_id = str(read.query_name)
-                signal_path = signal_path_dict[read_id]
-                data = data_dict[signal_path]
-                data["read_id"].append(read_id)
-                data["seq"].append(str(read.query_sequence))
-                data["mv"].append(read.get_tag("mv"))
-                data["sm"].append(read.get_tag("sm"))
-                data["sd"].append(read.get_tag("sd"))
-                data["ts"].append(read.get_tag("ts"))
-                data["bq"].append(bq)
-                data["ref"].append(read.reference_name)
-                data["start"].append(read.reference_start)
-                data["cigar"].append(read.cigarstring)
+                if read.reference_name == gene_name:
+                    read_id = str(read.query_name)
+                    signal_path = signal_path_dict[read_id]
+                    data = data_dict[signal_path]
+                    data["read_id"].append(read_id)
+                    data["seq"].append(str(read.query_sequence))
+                    data["mv"].append(read.get_tag("mv"))
+                    data["sm"].append(read.get_tag("sm"))
+                    data["sd"].append(read.get_tag("sd"))
+                    data["ts"].append(read.get_tag("ts"))
+                    data["bq"].append(bq)
+                    data["ref"].append(read.reference_name)
+                    data["start"].append(read.reference_start)
+                    data["cigar"].append(read.cigarstring)
 
     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
         move_df = pd.DataFrame.from_dict(data, orient="columns")
         df_len = len(move_df)
         if df_len > 0:
-            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
+            move_df.to_pickle(f"{intermediate_path}/move_df_split_gene/{signal_path.split('/')[-1]}")
         del move_df
 
     del data_dict
@@ -59,9 +60,9 @@ def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, int
 
     return None
 
-def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_df,
+def segment_normalize_fft_signal(ref_name, seg_df_path, wdir_path, signal_path_arr, label_df,
                                  kmer = 5, cb_len = 21, sampling = 5, sig_window = 5, fft_scale = 0.01,
-                                 shard_size = 10000, boi = "A"):
+                                 shard_size = 1000, boi = "A"):
 
     cb_half_len = cb_len//2
     cb_lr_pad = (cb_len-kmer)//2
@@ -75,14 +76,20 @@ def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_
         out_path = f"{seg_df_path}/{signal_path.split('/')[-1]}"
         if os.path.exists(out_path):
             continue
-        move_path = f"{wdir_path}/move_df_split/{signal_path.split('/')[-1]}"
+        move_path = f"{wdir_path}/move_df_split_gene/{signal_path.split('/')[-1]}"
         if not os.path.exists(move_path):
             continue
+
+        move_df = pd.read_pickle(move_path)
+        move_df = move_df[move_df["ref"] == ref_name]
+        if len(move_df) == 0:
+            continue
+
+
         signal_df = pd.read_pickle(signal_path)
         if len(signal_df) == 0:
             continue
 
-        move_df = pd.read_pickle(move_path)
         signal_df = signal_df.merge(move_df, on="read_id", how="inner")
         del move_df
         gc.collect()
@@ -289,7 +296,8 @@ def main():
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
     os.makedirs(intermediate_path, exist_ok=True)
     os.makedirs(signal_raw_path, exist_ok=True)
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split_gene", exist_ok=True)
+    gene_name = "NM_001101.5"
 
     # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
     # signal_path_arr = list(index_dict.keys())
@@ -316,14 +324,13 @@ def main():
         for read_id in id_list:
             signal_path_dict[read_id] = signal_path
     signal_path_arr = list(index_dict.keys())
-    #
-    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
 
+    extract_move(gene_name, args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
 
     del signal_path_dict, index_dict
     gc.collect()
 
-    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/BaeklabV2_GP3.depth20.notsampled.drach.tsv", sep="\t")
+    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/actb_glori.tsv", sep="\t")
 
     np.random.shuffle(signal_path_arr)
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
@@ -331,7 +338,7 @@ def main():
     proc_list = []
     for signal_paths in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_fft_signal,
-                          args=("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/baeklab_v2_depth20_drach",
+                          args=(gene_name, "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/actb_glori",
                                 intermediate_path, signal_paths, label_df))
         proc_list.append(proc)
         proc.start()
@@ -343,6 +350,7 @@ def main():
         proc.join()
 
     gc.collect()
+
 
     return None
 

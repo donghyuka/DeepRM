@@ -37,22 +37,31 @@ def gmm_em_lda(pred_arr):
     return threshold
 
 
-def process_inferece(data_path):
+def process_inferece(data_path, outdir, modelname):
     data_paths = glob.glob(f"{data_path}/*.tsv")
     data_df = pd.concat([pd.read_csv(data_path, sep = "\t") for data_path in data_paths])
     data_df.fillna(0, inplace = True)
+    plot_histogram_read(data_df, outdir, modelname)
     # threshold = gmm_em_lda(data_df["pred"].values)
-    threshold = 0.20 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
-    epsilon = 1e-6
+    threshold = 0.70 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
+    epsilon = 1e-12
     data_df["dom"] = data_df["pred"].apply(lambda x: 1 if x >=threshold else 0)
     ## Groupby label_id and get mean of predictions
     data_df["count"] = 1
     data_df.rename(columns = {"pred": "pred_ari"}, inplace = True)
-    data_df["pred_geo"] = np.clip(np.log10(1 + epsilon - data_df["pred_ari"].to_numpy()), None, 0)
+    data_df["pred_geo"] = np.clip(data_df["pred_ari"].to_numpy(), 0.0, 1 - epsilon)
+    data_df["pred_geo"] = np.log10(1 - data_df["pred_geo"].to_numpy())
+    ## groupby label_id and remove max
     data_df = data_df.groupby("label_id").agg({"label": "first", "pred_ari": "mean", "pred_geo": "mean",
                                                "dom": "mean", "count": "sum"}).reset_index()
     data_df["pred_geo"] = np.clip(data_df["pred_geo"], None, 0)
     data_df["pred_geo"] = (1 - 10**data_df["pred_geo"].to_numpy())
+
+    # ## If DoM is less than 0.1, than pred_geo is 0
+    # data_df["dom_2"] = data_df["dom"] >= 0.1
+    # data_df["pred_geo"] = data_df["pred_geo"] * data_df["dom_2"]
+    # data_df.drop(["dom_2"], axis = 1, inplace = True)
+
     return data_df
 
 
@@ -61,10 +70,10 @@ def plot_roc(data_df, outdir, modelname):
     fig, ax = plt.subplots(figsize = (20,20))
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_geo"])
     roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'Transformer (AUC = {roc_auc:.3f})', color = "royalblue")
+    ax.plot(fpr, tpr, lw=3, label=f'Transformer (AUC = {roc_auc:.3f})', color = "royalblue", zorder = 2)
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_m6anet"])
     roc_auc_m6anet = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3,label=f'm6Anet (AUC = {roc_auc_m6anet:.3f})', color = "tomato")
+    ax.plot(fpr, tpr, lw=3,label=f'm6Anet (AUC = {roc_auc_m6anet:.3f})', color = "tomato", zorder = 1)
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -82,11 +91,13 @@ def plot_pr(data_df, outdir, pr_baseline_level, modelname):
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_geo"])
     pr_auc = auc(recall, precision)
     max_f1 = max_f1_score(data_df["label"], data_df["pred_geo"])
-    ax.plot(recall, precision, lw=3, label=f'Transformer (AUC = {pr_auc:.3f}, Max F-1 = {max_f1:.3f})', color = "royalblue")
+    ax.plot(recall, precision, lw=3, label=f'Transformer (AUC = {pr_auc:.3f}, Max F-1 = {max_f1:.3f})',
+            color = "royalblue", zorder = 2)
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_m6anet"])
     pr_auc_m6anet = auc(recall, precision)
     max_f1 = max_f1_score(data_df["label"], data_df["pred_m6anet"])
-    ax.plot(recall, precision, lw=3,label=f'm6Anet (AUC = {pr_auc_m6anet:.3f}, Max F-1 = {max_f1:.3f})', color = "tomato")
+    ax.plot(recall, precision, lw=3,label=f'm6Anet (AUC = {pr_auc_m6anet:.3f}, Max F-1 = {max_f1:.3f})', color = "tomato",
+            zorder = 1)
     ax.plot([0, 1], [pr_baseline_level, pr_baseline_level], color='grey', lw=2, linestyle='--')
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -131,6 +142,31 @@ def plot_scatter(data_df, outdir, modelname):
     return None
 
 
+def plot_histogram_read(data_df, outdir, modelname):
+    ## Plot histogram of predictions
+    plt.rcParams.update({'font.size': 24})
+    fig, ax = plt.subplots(figsize = (20,20))
+    ax.hist(data_df["pred"], bins = 100, color = "royalblue", label = "Transformer")
+    ax.set_xlabel("Prediction")
+    ax.set_ylabel("Count")
+    ax.set_title(f"{modelname}")
+    ax.legend()
+    plt.savefig(f"{outdir}/hist_read.png")
+    return None
+
+
+def plot_histogram_site(data_df, outdir, modelname):
+    ## Plot histogram of predictions
+    plt.rcParams.update({'font.size': 24})
+    fig, ax = plt.subplots(figsize = (20,20))
+    ax.hist(data_df["pred_geo"], bins = 100, color = "royalblue", label = "Transformer")
+    ax.set_xlabel("Prediction")
+    ax.set_ylabel("Count")
+    ax.set_title(f"{modelname}")
+    ax.legend()
+    plt.savefig(f"{outdir}/hist_site.png")
+    return None
+
 
 def main():
     args = parse_args()
@@ -148,7 +184,7 @@ def main():
         modelname = modelname.split("/")[-1]
         outdir = os.path.join(args.output, modelname)
         os.makedirs(outdir, exist_ok = True)
-        data_df = process_inferece(data_path)
+        data_df = process_inferece(data_path, outdir, modelname)
         data_df = data_df.merge(baseline_pred, on = "label_id", how = "inner")
         data_df.to_csv(f"{outdir}/{modelname}.tsv", sep = "\t", index = False)
         roc_auc = plot_roc(data_df, outdir, modelname)
@@ -158,6 +194,7 @@ def main():
         result_dict["roc_auc"].append(roc_auc)
         result_dict["pr_auc"].append(pr_auc)
         plot_scatter(data_df, outdir, modelname)
+        plot_histogram_site(data_df, outdir, modelname)
     print("==========================")
     result_df = pd.DataFrame(result_dict)
     result_df.to_csv(f"{args.output}/result.tsv", sep = "\t", index = False)

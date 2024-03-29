@@ -151,10 +151,11 @@ class BinaryClassDatasetIterator:
         spectrogram_token = torch.tensor(row[4], dtype=torch.float)
         move_token = torch.tensor(row[5], dtype=torch.long)
         target_mask = torch.tensor(row[6], dtype=torch.float)
+        block_score = torch.tensor(row[7], dtype=torch.float)
 
         return_dict = {"kmer_token": kmer_token, "bq_token": bq_token, "position_token": position_token,
                        "signal_token": signal_token, "spectrogram_token": spectrogram_token, "move_token": move_token,
-                       "target_mask": target_mask}
+                       "target_mask": target_mask, "block_score": block_score}
 
         if not self.soft_label:
             label = torch.tensor(class_idx, dtype=torch.long)
@@ -163,7 +164,7 @@ class BinaryClassDatasetIterator:
             if class_idx == 0:
                 label = torch.tensor(0, dtype=torch.float)
             else:
-                label = torch.tensor(1-self.soft_label*(1-row[7]), dtype=torch.float)
+                label = torch.tensor(1-self.soft_label, dtype=torch.float)
 
         return return_dict, label
 
@@ -343,5 +344,6 @@ def pad_collate(batch, pad_to, bq_clip):
 
     ## clip bq
     source["bq_token"] = torch.clamp(source["bq_token"], 0, bq_clip)
+    source["block_score"] = torch.stack([item[0]["block_score"] for item in batch], dim=0)
 
     return source, target

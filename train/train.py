@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader import load_dataset, NanoporeDataset, NanoporeDataLoader
+from train.dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -60,6 +60,8 @@ def parse_args():
     parser.add_argument("--read_every", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
     parser.add_argument("--soft", type=float, default=None)
+    parser.add_argument("--loss", type=str, default="MSE")
+    parser.add_argument("--score_feature", type=bool, default=False)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
@@ -99,6 +101,7 @@ class Trainer:
             save_interval: int,
             model_config: dict = None,
             soft_label: float = None,
+            score_feature: bool = False
     ) -> None:
 
         self.gpu_id = gpu_id
@@ -137,6 +140,7 @@ class Trainer:
         self.devname = f"{os.uname()[1]}-{self.gpu_id}"
         self.tb_path = tb_path
         self.soft_label = soft_label
+        self.score_feature = score_feature
 
         if self.gpu_id == 0:
             self.tb_writer = SummaryWriter(tb_path)
@@ -179,7 +183,13 @@ class Trainer:
         src_move = src_move.to(self.gpu_id)
         target = target.to(torch.float32)
         target = target.to(self.gpu_id)
-        output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+
+        if not self.score_feature:
+            output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+        else:
+            src_score = source["block_score"]
+            src_score = src_score.to(self.gpu_id)
+            output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
         return output, target
 
 
@@ -393,7 +403,16 @@ def main_worker(rank, args_dict):
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
-    loss_func = torch.nn.MSELoss()
+    if args_dict["loss"] == "MSE":
+        loss_func = torch.nn.MSELoss()
+    elif args_dict["loss"] == "BCE":
+        loss_func = torch.nn.BCELoss()
+    elif args_dict["loss"] == "BCEWL":
+        loss_func = torch.nn.BCEWithLogitsLoss()
+    elif args_dict["loss"] == "CE":
+        loss_func = torch.nn.CrossEntropyLoss()
+    else:
+        raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
 
     metric_func_dict = {"acc": cm.BinaryAccuracy().to(rank),
                         "auroc": cm.BinaryAUROC().to(rank),
@@ -407,7 +426,8 @@ def main_worker(rank, args_dict):
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
                         args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                         args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,  soft_label = args_dict["soft"])
+                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
+                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")

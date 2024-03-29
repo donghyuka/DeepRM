@@ -13,18 +13,21 @@ from utils.utils import printmessage
 ## DO NOT SHUFFLE BECAUSE THIS LOADER IS FOR INFERENCE ONLY
 
 class NanoporeDatasetIterator:
-    def __init__(self, file_paths):
+    def __init__(self, file_paths, num_files_read_once = 1000):
 
         self.file_paths = file_paths
         self.current_index = -1
         self.current_iterator = None
+        self.num_files_read_once = num_files_read_once
 
     def __iter__(self):
         return self
 
     def _read_df(self):
         self.current_index += 1
-        df = pd.read_pickle(self.file_paths[self.current_index])
+        read_start = self.current_index*self.num_files_read_once
+        read_end = min(len(self.file_paths), (self.current_index+1)*self.num_files_read_once)
+        df = pd.concat([pd.read_pickle(file_path) for file_path in self.file_paths[read_start:read_end]])
         df = df[["kmer_token", "bq_token", "position_token", "signal_token", "spectrogram_token", "move_token", "target_mask",
                  "label_id", "label"]]
         self.current_iterator = df.itertuples(index=False)
@@ -33,16 +36,13 @@ class NanoporeDatasetIterator:
     def __next__(self):
 
         if self.current_index == -1:
-            if self.current_index == len(self.file_paths) - 1:
-                raise StopIteration
-            else:
-                self._read_df()
+            self._read_df()
 
         try:
             result = next(self.current_iterator)
 
         except StopIteration:
-            if self.current_index == len(self.file_paths) - 1:
+            if self.current_index == len(self.file_paths) // self.num_files_read_once:
                 raise StopIteration
             else:
                 self._read_df()
@@ -77,7 +77,7 @@ class NanoporeDatasetIterator:
 
 class NanoporeDataset(torch.utils.data.IterableDataset):
     def __init__(self, data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 seed = 0):
+                 seed = 0, num_files_read_once = 1000):
         super(NanoporeDataset).__init__()
 
         self.data_path = data_path
@@ -92,13 +92,15 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         self.num_shard = math.ceil(len(self.file_paths)/num_replicas)
         self.total_num_shard = self.num_shard * num_replicas
         self.dataset_size = self.num_shard * disk_shard_size
+        self.num_files_read_once = num_files_read_once
+
 
     def __len__(self):
         return self.dataset_size
 
     def __iter__(self):
         self.file_paths = self.file_paths[self.rank::self.num_replicas]
-        return NanoporeDatasetIterator(self.file_paths)
+        return NanoporeDatasetIterator(self.file_paths, num_files_read_once = self.num_files_read_once)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -124,12 +126,12 @@ class NanoporeDataLoader(DataLoader):
 
 
 def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 pad_to = 200, bq_clip = 40):
+                 pad_to = 200, bq_clip = 40, num_files_read_once = 1000, prefetch_factor = 100000):
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
-    dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas)
+    dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas, num_files_read_once = num_files_read_once)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=1, pin_memory=False, drop_last=False,
-                                    collate_fn = pad_collate_func, prefetch_factor=64)
+                                    collate_fn = pad_collate_func, prefetch_factor=prefetch_factor)
     return dataloader
 
 

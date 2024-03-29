@@ -13,44 +13,69 @@ import tqdm
 import pysam
 
 from preprocess.segment_normalize_signal import preprocess_pod5, segment_signal, segment_spectrogram
-from utils.utils import mean_phred, oom_killer
+from utils.utils import mean_phred, oom_killer, ncid_to_chr
 from preprocess.tokenizer import create_segment_len_arr, sequence_to_kmer_token, expand_token_to_segment, \
     create_positional_token, create_move_token, segmented_signal_to_block, segmented_fft_to_block, create_target_mask
 
 def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
+
+    ## Extract mv tag from bam and save to separate file
+    orig_data_dict = {}
+    orig_bam_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado/intermediates/dorado_output.bam"
+
+    with pysam.AlignmentFile(orig_bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
+        with tqdm.tqdm(total=(input_bam.mapped + input_bam.unmapped), desc="Parsing Original BAM File") as pbar:
+            for read in input_bam:
+                if read.has_tag("pi"):
+                    continue
+                read_id = str(read.query_name)
+                orig_data_dict[read_id]=(read.get_tag("mv"),read.get_tag("sm"),read.get_tag("sd"),read.get_tag("ts"))
+                pbar.update(1)
+
     ## Extract mv tag from bam and save to separate file
 
     data_dict = {x: {"mv": [], "read_id": [], "sm": [], "sd": [], "ts": [], "seq": [], "bq": [],
                      "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
-
     with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
         with tqdm.tqdm(total=input_bam.mapped, desc="Parsing BAM File") as pbar:
             for read in input_bam:
                 pbar.update(1)
+
+
                 if read.has_tag("pi"):
                     continue
                 bq = np.array(read.query_qualities, dtype=int)
                 if mean_phred(bq) < bq_cutoff:
                     continue
                 read_id = str(read.query_name)
-                signal_path = signal_path_dict[read_id]
+                try:
+                    signal_path = signal_path_dict[read_id]
+                except KeyError:
+                    print(f"Read ID {read_id} not found in signal path dict")
+                    continue
+
+                try:
+                    mv, sm, sd, ts = orig_data_dict[read_id]
+                except KeyError:
+                    print(f"Read ID {read_id} not found in original data dict")
+                    continue
                 data = data_dict[signal_path]
                 data["read_id"].append(read_id)
-                data["seq"].append(str(read.query_sequence))
-                data["mv"].append(read.get_tag("mv"))
-                data["sm"].append(read.get_tag("sm"))
-                data["sd"].append(read.get_tag("sd"))
-                data["ts"].append(read.get_tag("ts"))
                 data["bq"].append(bq)
+                data["seq"].append(str(read.query_sequence))
                 data["ref"].append(read.reference_name)
                 data["start"].append(read.reference_start)
                 data["cigar"].append(read.cigarstring)
+                data["mv"].append(mv)
+                data["sm"].append(sm)
+                data["sd"].append(sd)
+                data["ts"].append(ts)
 
     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
         move_df = pd.DataFrame.from_dict(data, orient="columns")
         df_len = len(move_df)
         if df_len > 0:
-            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path.split('/')[-1]}")
+            move_df.to_pickle(f"{intermediate_path}/move_df_split_gene/{signal_path.split('/')[-1]}")
         del move_df
 
     del data_dict
@@ -61,7 +86,7 @@ def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, int
 
 def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_df,
                                  kmer = 5, cb_len = 21, sampling = 5, sig_window = 5, fft_scale = 0.01,
-                                 shard_size = 10000, boi = "A"):
+                                 shard_size = 1000, boi = "A"):
 
     cb_half_len = cb_len//2
     cb_lr_pad = (cb_len-kmer)//2
@@ -75,14 +100,18 @@ def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_
         out_path = f"{seg_df_path}/{signal_path.split('/')[-1]}"
         if os.path.exists(out_path):
             continue
-        move_path = f"{wdir_path}/move_df_split/{signal_path.split('/')[-1]}"
+        move_path = f"{wdir_path}/move_df_split_gene/{signal_path.split('/')[-1]}"
         if not os.path.exists(move_path):
             continue
+
+        move_df = pd.read_pickle(move_path)
+        if len(move_df) == 0:
+            continue
+
         signal_df = pd.read_pickle(signal_path)
         if len(signal_df) == 0:
             continue
 
-        move_df = pd.read_pickle(move_path)
         signal_df = signal_df.merge(move_df, on="read_id", how="inner")
         del move_df
         gc.collect()
@@ -122,7 +151,7 @@ def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_
         if len(signal_df) == 0:
             continue
 
-        signal_df["ref"] = signal_df["ref"].str.split(".").str[0]
+        signal_df["ref"] = signal_df["ref"].apply(ncid_to_chr)
         signal_df["ref_pos"] = signal_df["pos"].apply(lambda x: x[0])
         signal_df["query_pos"] = signal_df["pos"].apply(lambda x: x[1])
         signal_df["label"] = signal_df["pos"].apply(lambda x: x[2])
@@ -188,7 +217,11 @@ def segment_normalize_fft_signal(seg_df_path, wdir_path, signal_path_arr, label_
                 buffer = chunk
             del signal_df
 
+        print(buffer)
         gc.collect()
+
+    if len(buffer) > 0:
+        buffer.to_pickle(f"{out_path.split('.')[0]}-{chunk_idx+1}.pkl")
 
     return None
 
@@ -245,9 +278,6 @@ def ref_pos_to_query_pos(ref_pos_list, cigar, start_pos):
 
 
 def get_label_pos_list(ref, start, cigar, label_df):
-    ref = ref.split(".")[0]
-    label_df = label_df[label_df["nmid"] == ref]
-
     if len(label_df) == 0:
         return []
 
@@ -269,7 +299,9 @@ def parse_args():
     parser.add_argument("--qcut", "-q", type=int, default=7, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, required=True, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--chunk", "-k", type=int, default=100, help="Chunk size")
+    parser.add_argument("--chunk", "-k", type=int, default=300, help="Chunk size")
+    parser.add_argument("--max_size", "-m", type=int, default=30, help="Maximum dataframe size in MB")
+    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum dataframe size in MB")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -289,9 +321,10 @@ def main():
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
     os.makedirs(intermediate_path, exist_ok=True)
     os.makedirs(signal_raw_path, exist_ok=True)
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split_gene", exist_ok=True)
 
-    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk)
+
+    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.max_size, args.min_size)
     # signal_path_arr = list(index_dict.keys())
     # gc.collect()
     #
@@ -316,14 +349,12 @@ def main():
         for read_id in id_list:
             signal_path_dict[read_id] = signal_path
     signal_path_arr = list(index_dict.keys())
-    #
-    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
 
+    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_path_arr, intermediate_path)
 
     del signal_path_dict, index_dict
     gc.collect()
-
-    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/BaeklabV2_GP3.depth20.notsampled.drach.tsv", sep="\t")
+    label_df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/label/malat_glori.tsv", sep="\t")
 
     np.random.shuffle(signal_path_arr)
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
@@ -331,7 +362,7 @@ def main():
     proc_list = []
     for signal_paths in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_fft_signal,
-                          args=("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/baeklab_v2_depth20_drach",
+                          args=("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/eval_data/hela_malat",
                                 intermediate_path, signal_paths, label_df))
         proc_list.append(proc)
         proc.start()
@@ -343,6 +374,7 @@ def main():
         proc.join()
 
     gc.collect()
+
 
     return None
 

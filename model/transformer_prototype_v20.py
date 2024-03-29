@@ -16,9 +16,7 @@ class TransformerModel(nn.Module):
         ## Embedding Initialization
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
-        self.spectrogram_embedding = nn.Linear(spectrogram_size, d_model)
-        self.bq_embedding = nn.Embedding(max_bq+1, d_model)
-        self.move_embedding = nn.Embedding(block_len+1, d_model)
+        self.bq_embedding = nn.Linear(1, d_model)
         self.embedding_dropout = nn.Dropout(encoder_dropout)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
 
@@ -33,16 +31,13 @@ class TransformerModel(nn.Module):
         self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
         self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
 
-
         ## Weight Initialization
         self.init_weights()
 
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
-        self.spectrogram_embedding.weight.data.uniform_(-initrange, initrange)
         self.bq_embedding.weight.data.uniform_(-initrange, initrange)
-        self.move_embedding.weight.data.uniform_(-initrange, initrange)
         self.regression_head.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         return None
@@ -53,15 +48,12 @@ class TransformerModel(nn.Module):
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
-        spectrogram_embedding = self.spectrogram_embedding(src_spectrogram)
         bq_embedding = self.bq_embedding(src_bq)
-        move_embedding = self.move_embedding(src_move)
+        bq_embedding = nn.GELU()(bq_embedding)
         pos_encoding = self.pos_encoding(kmer_embedding)
 
         ## add all embeddings and dropout
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, spectrogram_embedding, bq_embedding,
-                                       pos_encoding, move_embedding], dim = 0).sum(dim = 0)
-        # final_embedding = nn.LayerNorm(final_embedding.size()[1:], elementwise_affine=False)(final_embedding)
+        final_embedding = torch.stack([kmer_embedding, signal_embedding, bq_embedding, pos_encoding], dim = 0).sum(dim = 0)
         final_embedding = self.embedding_dropout(final_embedding)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
@@ -73,8 +65,8 @@ class TransformerModel(nn.Module):
         output = output * target_mask
         output = output.sum(dim = 1)
         output = output / target_mask_sum
-        
-        output = torch.clamp(output, 0, 1)
+
+        output = torch.sigmoid(output)
 
         return output
 
@@ -108,7 +100,6 @@ class RegressionHead(nn.Module):
     def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
         super().__init__()
         layer_list=  []
-
         for i in range(lin_depth-1):
             layer_list.append(nn.Linear(d_model, d_model))
             layer_list.append(nn.BatchNorm1d(seq_length))
@@ -120,7 +111,6 @@ class RegressionHead(nn.Module):
         layer_list.append(nn.Linear(d_model, d_model//4))
         layer_list.append(self._get_activation_fn(lin_act))
         layer_list.append(nn.Linear(d_model//4, 1))
-
         self.lin_layers = nn.Sequential(*layer_list)
 
     def forward(self, x: Tensor) -> Tensor:

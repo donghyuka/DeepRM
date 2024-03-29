@@ -103,8 +103,12 @@ def tokenizer_worker(file_id_arr, signal_df_path_arr, output_dir, kmer = 5, cb_l
         signal_df["signal_fft"] = signal_df["signal_fft"].apply(lambda x: x[trim:-trim])
         signal_df["bq"] = signal_df["bq"].apply(lambda x: x[trim:-trim])
         signal_df["segment_len_arr"] = signal_df["signal_seg"].apply(lambda x: create_segment_len_arr(x, sampling))
-        signal_df["signal_token"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal_seg"], x["segment_len_arr"],
-                                                                                        kmer, sampling, sig_window), axis=1)
+        try:
+            signal_df["signal_token"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal_seg"], x["segment_len_arr"],
+                                                                                            kmer, sampling, sig_window), axis=1)
+        except:
+            print(f"Error in {file_id}")
+            continue
         signal_df = signal_df[signal_df["signal_token"].notnull()]
         signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x[trim:-trim])
         signal_df["kmer_token"] = signal_df["motif"].apply(lambda x: sequence_to_kmer_token(x, kmer))

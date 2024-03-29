@@ -41,8 +41,8 @@ from utils.utils import printmessage, oom_killer
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--pos", dest="pos_path", type=str, required=True, nargs="+", help="Positive token files")
-    args.add_argument("--neg", dest="neg_path", type=str, required=True, nargs="+", help="Negative token files")
+    args.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
+    args.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
     args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
     args.add_argument("--max", dest="max_token_len", type=int, default=200, help="Maximum token length")
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
@@ -59,6 +59,8 @@ def sample_and_save_df(in_path_list, out_path, ncpu, label, chunk, min_score_lis
                        id_digit=8, shuffle = True):
 
     in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.pkl")]
+    if shuffle:
+        in_file_list = np.random.permutation(in_file_list)
     in_file_list = np.array_split(in_file_list, ncpu)
     proc_list = []
     pid_digit = len(str(ncpu))
@@ -184,11 +186,12 @@ def main():
         for score in args.score:
             for label in ["pos", "neg"]:
                 os.makedirs(f"{args.out_path}/score-{score}/{set_name}/{label}", exist_ok=True)
-
-    sample_and_save_df(args.pos_path, args.out_path, args.cpu, label = 1,
-                       chunk = args.chunk, min_score_list = args.score, max_token_len = args.max_token_len)
-    sample_and_save_df(args.neg_path, args.out_path, args.cpu, label = 0,
-                       chunk = args.chunk, min_score_list = args.score, max_token_len = args.max_token_len)
+    if args.pos_path is not None:
+        sample_and_save_df(args.pos_path, args.out_path, args.cpu, label = 1,
+                           chunk = args.chunk, min_score_list = args.score, max_token_len = args.max_token_len)
+    if args.neg_path is not None:
+        sample_and_save_df(args.neg_path, args.out_path, args.cpu, label = 0,
+                           chunk = args.chunk, min_score_list = args.score, max_token_len = args.max_token_len)
 
     return None
 
