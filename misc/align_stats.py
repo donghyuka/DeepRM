@@ -10,7 +10,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 
 
-REF_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_mane.fasta"
+REF_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta"
 
 
 def parse_args():
@@ -47,12 +47,17 @@ def align_bam(args):
     return aln_bam_path
 
 
-def extract_cigar(aln_bam_path, args):
-    bamfile = pysam.AlignmentFile(aln_bam_path, "rb", threads=args.cpu, check_sq=False)
+def extract_cigar(args):
+    bamfile = pysam.AlignmentFile(args.input, "rb", check_sq=False, threads=args.cpu)
     cigar_list = []
     for read in tqdm(bamfile):
+        if read.is_unmapped or read.is_secondary:
+            continue
         mean_bq = mean_phred(np.array(read.query_qualities, dtype=int))
         if mean_bq < args.bq:
+            continue
+        mapq = read.mapping_quality
+        if mapq < args.mapq:
             continue
         cigar = read.cigarstring
         cigar_list.append(cigar)
@@ -173,11 +178,11 @@ def main():
     if run_flag:
         os.makedirs(args.output, exist_ok=True)
 
-        printmessage("Aligning BAM file")
-        aln_bam_path = align_bam(args)
+        # printmessage("Aligning BAM file")
+        # aln_bam_path = align_bam(args)
 
         printmessage("Extracting CIGAR string")
-        cigar_list = extract_cigar(aln_bam_path, args)
+        cigar_list = extract_cigar(args)
         with open(f"{args.output}/cigar_list.pkl", "wb") as f:
             pickle.dump(cigar_list, f)
 

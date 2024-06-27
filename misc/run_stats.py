@@ -23,6 +23,7 @@ def parse_args():
     args = args.parse_args()
     return args
 
+
 def plot_read_len(read_len_arr, out_path):
     ## plot read length KDE
     fig, ax = plt.subplots(figsize=(10,10))
@@ -44,18 +45,77 @@ def plot_read_len(read_len_arr, out_path):
     return None
 
 
+def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
+
+    read_len_arr_passed = read_len_arr[mean_qual_arr >= bq_thres]
+    read_len_arr_failed = read_len_arr[mean_qual_arr < bq_thres]
+
+    ## plot read length KDE
+    fig, ax = plt.subplots(figsize=(10,10))
+    read_len_max = np.percentile(read_len_arr, 98)
+    binrange = (0, read_len_max)
+    binwidth = 100
+
+    sns.histplot(read_len_arr_passed, ax=ax, color="royalblue", label=f"Passed (n={len(read_len_arr_passed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step",  stat='density')
+    sns.histplot(read_len_arr_failed, ax=ax, color="tomato", label=f"Failed (n={len(read_len_arr_failed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step", stat='density')
+
+    ## Median
+    ax.axvline(np.median(read_len_arr_passed), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_passed), 0.9 * ax.get_ylim()[1], f"Passed median = {np.median(read_len_arr_passed):.0f}", color="black")
+    ax.axvline(np.median(read_len_arr_failed), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_failed), 0.8 * ax.get_ylim()[1], f"Failed median = {np.median(read_len_arr_failed):.0f}", color="black")
+
+    ax.set_title(f"Read Length Distribution (n={len(read_len_arr):,})")
+    ax.set_xlabel("Read Length")
+    ax.set_ylabel("Count")
+    ax.legend()
+    ## Vline at median
+    fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
+    plt.close(fig)
+    return None
+
+def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
+
+    read_len_arr_passed = read_len_arr[mean_qual_arr >= bq_thres]
+    read_len_arr_failed = read_len_arr[mean_qual_arr < bq_thres]
+
+    ## plot read length KDE
+    fig, ax = plt.subplots(figsize=(10,10))
+    read_len_max = np.percentile(read_len_arr, 98)
+    binrange = (0, read_len_max)
+    binwidth = 10
+
+    sns.histplot(read_len_arr_passed, ax=ax, color="royalblue", label=f"Passed (n={len(read_len_arr_passed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step",  stat='density')
+    sns.histplot(read_len_arr_failed, ax=ax, color="tomato", label=f"Failed (n={len(read_len_arr_failed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step", stat='density')
+
+    ## Median
+    ax.axvline(np.median(read_len_arr_passed), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_passed), 0.9 * ax.get_ylim()[1], f"Passed median = {np.median(read_len_arr_passed):.0f}", color="black")
+    ax.axvline(np.median(read_len_arr_failed), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_failed), 0.8 * ax.get_ylim()[1], f"Failed median = {np.median(read_len_arr_failed):.0f}", color="black")
+
+    ax.set_title(f"Poly(A) Length Distribution (n={len(read_len_arr):,})")
+    ax.set_xlabel("Poly(A) Length")
+    ax.set_ylabel("Count")
+    ax.legend()
+    ## Vline at median
+    fig.savefig(f"{out_path}/polya_len_hist.png", dpi=300)
+    plt.close(fig)
+    return None
+
+
 def plot_qual(mean_qual_arr, out_path, bq_thres = 7):
     ## plot mean quality score KDE with histogram
     fig, ax = plt.subplots(figsize=(10,10))
     pass_arr = mean_qual_arr[mean_qual_arr >= bq_thres]
     fail_arr = mean_qual_arr[mean_qual_arr < bq_thres]
     ax.set_title(f"Read Mean Base Quality Distribution (n={len(mean_qual_arr):,})")
-    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, 18))
-    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, 18))
+    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, 24))
+    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, 24))
     ## vline at median
     ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
     ax.legend()
-    ax.set_xlim(0, 18)
+    ax.set_xlim(0, 24)
     fig.savefig(f"{out_path}/mean_qual_hist.png", dpi=300)
     plt.close(fig)
     return None
@@ -71,6 +131,8 @@ def main():
                 read_len_arr = pickle.load(f)
             with open(f"{args.out_path}/mean_qual.pkl", "rb") as f:
                 mean_qual_arr = pickle.load(f)
+            with open(f"{args.out_path}/polya_len.pkl", "rb") as f:
+                polya_len_arr = pickle.load(f)
         except:
             printmessage("Pickle loading failed. Re-run with a different output directory")
             return None
@@ -81,14 +143,32 @@ def main():
         bam_file = pysam.AlignmentFile(args.bam_path, "rb", check_sq=False, threads=args.cpu)
         read_len_arr = []
         qual_arr = []
+        polya_len_arr = []
+        printmessage("Reading BAM file")
 
-        printmessage("Reading bam file")
+
+
         for read in tqdm(bam_file, total=bam_file.count()):
+            if read.is_secondary or read.is_supplementary:
+                continue
+            if read.has_tag("pi"):
+                continue
+            try:
+                bq = mean_phred(np.array(read.query_qualities, dtype=int))
+                qual_arr.append(bq)
+                if bq > args.bq_thres:
+                    print(read.query_sequence[-10:])
+            except:
+                continue
+            try:
+                polya_len_arr.append(read.get_tag("pt"))
+            except:
+                polya_len_arr.append(0)
             read_len_arr.append(read.query_length)
-            qual_arr.append(np.array(read.query_qualities, dtype=int))
 
         read_len_arr = np.array(read_len_arr)
-        mean_qual_arr = np.array([mean_phred(x) for x in qual_arr])
+        mean_qual_arr = np.array(qual_arr)
+        polya_len_arr = np.array(polya_len_arr)
 
         printmessage("Saving pickle")
         ## save pickle
@@ -96,11 +176,14 @@ def main():
             pickle.dump(read_len_arr, f)
         with open(f"{args.out_path}/mean_qual.pkl", "wb") as f:
             pickle.dump(mean_qual_arr, f)
+        with open(f"{args.out_path}/polya_len.pkl", "wb") as f:
+            pickle.dump(polya_len_arr, f)
+
 
     printmessage("Plotting")
-    read_len_arr = read_len_arr[mean_qual_arr >= args.bq_thres]
-    plot_read_len(read_len_arr, args.out_path)
+    plot_read_len_v2(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
     plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
+    plot_polya_len(polya_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
 
     return None
 

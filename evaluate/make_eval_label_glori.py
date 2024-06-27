@@ -9,7 +9,7 @@ import gc
 
 ## TODO: Refactor to remove these fixed paths.
 DATA_PATH = "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6A_Jungmin_110823.tsv"
-DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.pileup.filtered.v2.tsv"
+DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.filtered.pileup.filtered.v2.tsv"
 
 
 def get_data_df(gp_cutoff):
@@ -40,9 +40,28 @@ def make_label_df(return_list, data_df, depth_df,
     del data_df
     gc.collect()
 
+    if len(depth_df) == 0:
+        return None
+
+    depth_df["label"] = depth_df["label"].astype(int)
+
+    if filter_adjacent:
+        depth_df = remove_adjacent_sites(depth_df, strict_site_only = adjacent_strict, distance = adjacent_distance)
+        if depth_df is None:
+            return None
+
+    depth_df["label"] = depth_df["label"].astype(int)
+
+    if filter_no_m6a:
+        depth_df = remove_no_m6a_transripts(depth_df, strict_site_only = no_m6a_strict)
+        if depth_df is None:
+            return None
+
+    depth_df["label"] = depth_df["label"].astype(int)
 
     depth_df = depth_df.dropna()
     return_list.append(depth_df)
+
     return None
 
 
@@ -202,6 +221,6 @@ def main(depth_cutoff = 20, gp_cutoff=4,
 
 if __name__ == "__main__":
     main(gp_cutoff=3, filter_adjacent=False, adjacent_strict=False,
-         filter_no_m6a=False, no_m6a_strict=False)
+         filter_no_m6a=True, no_m6a_strict=True)
 
 

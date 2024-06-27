@@ -1,3 +1,5 @@
+
+
 import os, argparse
 from utils.utils import printmessage
 
@@ -67,14 +69,15 @@ def parse_args():
     num_cpu = os.cpu_count()
     parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--out", "-o", dest = "output", type=str, required=True, help="Output directory")
-    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3", help="Dorado path")
-    parser.add_argument("--cpu", "-t", type=int, default=int(num_cpu*0.9), help="Number of threads")
+    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.2", help="Dorado path")
+    parser.add_argument("--cpu", "-t", type=int, default=120, help="Number of threads")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
-    parser.add_argument("--batch", "-b", type=int, default=2560, help="Dorado Batch size")
+    parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--rename", "-r", type=str, default="", help="rename input directory")
     parser.add_argument("--dag_cfg", "-c", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB.json", help="DAG config file")
-    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3,4], help="Step to run")
+    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,], help="Step to run")
+
     args = parser.parse_args()
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
@@ -96,16 +99,21 @@ def main():
     bam_path = f"{wdir}/dorado_output.bam"
     pod5_path = args.input
     block_df_path = f"{wdir}/block_df.pkl"
-    signal_path = f"{wdir}/normalized_segment_signal/"
-    signal_block_path = f"{signal_path}/block"
-    token_path = f"{args.output}/token"
+    signal_path = f"{wdir}/segmented_tokenized/"
+    dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v5.0.0"
+    toml_path = "/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml"
+    # signal_block_path = f"{signal_path}/block"
+    # token_path = f"{args.output}/token"
     os.makedirs(wdir, exist_ok=True)
 
     if 1 in args.step:
         ## step 1. Run Dorado Basecaller and SAMtools
-        printmessage(f"[Step 1/4] Running Dorado Basecaller and SAMtools")
-        dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v3.0.1"
-        cmd = f"{args.dorado}/bin/dorado basecaller -x {args.gpu} -b {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
+        printmessage(f"[Step 1/3] Running Dorado Basecaller and SAMtools")
+        if args.batch is not None:
+            args.batch = f"-b {args.batch}"
+        else:
+            args.batch = ""
+        cmd = f"{args.dorado}/bin/dorado basecaller--chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
         printmessage(cmd)
         os.system(cmd)
         cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"
@@ -117,22 +125,15 @@ def main():
 
     if 2 in args.step:
         ## step 2. Run dag_extract_cb.py
-        printmessage(f"[Step 2/4] Running DAG-based CB Extraction")
+        printmessage(f"[Step 2/3] Running DAG-based CB Extraction")
         cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
         printmessage(cmd)
         os.system(cmd)
 
     if 3 in args.step:
         ## Step 3. Run segment_normalize_signal.py
-        printmessage(f"[Step 3/4] Running Signal Segmentation, Normalization, and FFT")
-        cmd = f"python -m preprocess.segment_normalize_signal --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path}"
-        printmessage(cmd)
-        os.system(cmd)
-
-    if 4 in args.step:
-        ## step 4. run tokenizer.py
-        printmessage(f"[Step 4/4] Running Tokenization")
-        cmd = f"python -m preprocess.tokenizer --cpu {args.cpu} --signal {signal_block_path} --output {token_path}"
+        printmessage(f"[Step 3/3] Running Signal Segmentation, Normalization, and FFT")
+        cmd = f"python -m preprocess.segment_normalize_signal --skip_intermediate --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {toml_path}"
         printmessage(cmd)
         os.system(cmd)
 

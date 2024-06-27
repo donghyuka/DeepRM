@@ -6,3 +6,6 @@ v14	Add all	Full Attention	No BatchNorm + Use Sigmoid	X
 v15	Add all	Full Attention	Use SyncBatchNorm + No Sigmoid	X
 v16	Add all	Full Attention	Use SyncBatchNorm + Use Sigmoid	V
 v17	Add all	Full Attention	Use SyncBatchNorm + No Sigmoid	V
+v47	No Target mask. Average all. From v19. Use overlap.
+v48	Use move, bq, and cross attention (v35). No overlap.
+v49	Use Single nucleotide and position embedding. No overlap.

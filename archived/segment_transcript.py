@@ -1,6 +1,5 @@
 import argparse
 import gc
-import glob
 import multiprocessing as mp
 import os
 import pickle
@@ -11,9 +10,9 @@ import scipy
 import tqdm
 import pysam
 
-from preprocess.segment_normalize_signal import preprocess_pod5, segment_signal, segment_spectrogram
+from archived.segment_normalize_signal import preprocess_pod5, segment_signal, segment_spectrogram
 from utils.utils import mean_phred, oom_killer
-from preprocess.tokenizer import create_segment_len_arr, sequence_to_kmer_token, expand_token_to_segment, \
+from archived.tokenizer import create_segment_len_arr, sequence_to_kmer_token, expand_token_to_segment, \
     create_positional_token, create_move_token, segmented_signal_to_block, segmented_fft_to_block, create_target_mask
 
 def extract_move(bam_path,ncpu,bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate.inference_dataloader import load_dataset
+from archived.inference_dataloader import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -118,6 +118,7 @@ def inference_worker(rank, args_dict):
     id_list = []
     label_list = []
     pred_list = []
+    block_id_list = []
     if "score_feature" in model_config:
         if model_config["score_feature"]:
             score_feature = True
@@ -130,8 +131,8 @@ def inference_worker(rank, args_dict):
         data = data[0]
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
+            # src_signal = data["signal_token"]
             src_signal = data["signal_token"].to(rank)
-            src_spectrogram = data["spectrogram_token"].to(rank)
             src_bq = data["bq_token"].to(rank)
             src_move = data["move_token"].to(rank)
             src_pad_mask = (src_kmer == 0)
@@ -142,8 +143,8 @@ def inference_worker(rank, args_dict):
 
         else:
             src_kmer = data["kmer_token"]
+            # src_signal = data["signal_token"]
             src_signal = data["signal_token"]
-            src_spectrogram = data["spectrogram_token"]
             src_bq = data["bq_token"]
             src_move = data["move_token"]
             src_pad_mask = (src_kmer == 0)
@@ -153,21 +154,31 @@ def inference_worker(rank, args_dict):
 
         with torch.no_grad():
             if score_feature:
-                pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
             else:
-                pred = model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
+
+        ## if pred has additional dimension, remove it.
+        if len(pred.shape) > 1:
+            target_mask_sum = src_target_mask.sum(dim = 1)
+            pred = pred * src_target_mask
+            pred = pred.sum(dim = 1)
+            pred = pred / target_mask_sum
+
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
         else:
             pred_list.append(pred.detach().numpy())
         id_list.append(np.array(data["label_id"]))
+        block_id_list.append(np.array(data["block_id"]))
         label_list.append(np.array(data["label"]))
 
     id_list = np.concatenate(id_list)
     label_list = np.concatenate(label_list)
     pred_list = np.concatenate(pred_list)
+    block_id_list = np.concatenate(block_id_list)
 
-    data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list})
+    data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list, "block_id": block_id_list})
     out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}.tsv"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     data_df.to_csv(out_path, sep='\t', index=False)

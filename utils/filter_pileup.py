@@ -9,19 +9,25 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-i", type=str, required=True, help="Input pileup file")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output pileup file")
-    parser.add_argument("--min_depth", "-d", type=int, default=20, help="Minimum depth")
+    parser.add_argument("--min_depth", "-m", type=int, default=5, help="Minimum depth")
+    parser.add_argument("--max_depth", "-x", type=int, default=None, help="Maximum depth")
     parser.add_argument("--base", "-b", type=int, nargs="+", default=["A"], help="Base to select")
-    parser.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
+    parser.add_argument("--cpu", "-c",  type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args = parser.parse_args()
     return args
 
 
 def filter_pileup(args):
-    df = pd.read_csv(args.input, sep="\t", header=None, quoting=3, engine="c")
+    if args.input.endswith(".tsv"):
+        df = pd.read_csv(args.input, sep="\t", header=None, quoting=3, engine="c")
+    elif args.input.endswith(".pkl"):
+        df = pd.read_pickle(args.input)
+    else:
+        raise ValueError("Input file must be either .tsv or .pkl")
     df.to_pickle(args.input.replace(".tsv",".pkl"))
     ## Create columns
     df.columns = ["ref","pos","base","depth","align","qual"]
-    df["depth"] = df["align"].str.count("\\.")
+    # df["depth"] = df["align"].str.count("\\.")
     df = df[["ref","pos","base","depth"]]
     print(df)
     df_list_split = np.array_split(df, args.cpu)
@@ -62,7 +68,7 @@ def filter_pileup(args):
     process_later_df = pd.concat(local_list, ignore_index=True)
     processed_df_list.append(process_later_df)
     df = pd.concat(processed_df_list, ignore_index=True)
-    df.to_csv(args.output, sep="\t", index=False)
+    df.to_pickle(args.output)
     print(df)
     return None
 
@@ -105,7 +111,10 @@ def process_df(df, args):
         df = df[df["base"] == args.base[0]]
     else:
         df = df[df["base"].isin(args.base)]
-    df = df[df["depth"] >= args.min_depth]
+    if args.max_depth is not None:
+        df = df[(df["depth"] >= args.min_depth) & (df["depth"] <= args.max_depth)].copy()
+    else:
+        df = df[df["depth"] >= args.min_depth].copy()
     return df
 
 

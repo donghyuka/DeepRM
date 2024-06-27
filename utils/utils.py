@@ -58,35 +58,44 @@ def ncid_to_chr(ncid):
         chr = "chrUnk"
     return chr
 
+REFFLAT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.gtf.refflat.txt"
+def parse_refflat(refflat_path=REFFLAT_PATH, drop_y = False, drop_m = True, drop_unk = True, drop_ver = True, reindex = True):
+    col_list=["NMID","NCID","strand","txStart","txEnd","cdsStart","cdsEnd","exonCount","exonStarts","exonEnds"]
+    with open(refflat_path,"r") as infile:
+        refflat_df=pd.read_csv(infile,sep="\t",header=None,names=col_list)
 
-def parse_refflat(refflat_path="/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.gtf.refflat.txt"):
-    col_list = ["NMID", "NCID", "strand", "txStart", "txEnd", "cdsStart", "cdsEnd", "exonCount", "exonStarts",
-                "exonEnds"]
-    with open(refflat_path, "r") as infile:
-        refflat_df = pd.read_csv(infile, sep="\t", header=None, names=col_list)
+    refflat_df["chr"]=refflat_df["NCID"].apply(lambda x: ncid_to_chr(x))
+    if drop_ver:
+        refflat_df["NMID"]=refflat_df["NMID"].str.split(".").str[0]
+    if drop_unk:
+        refflat_df = refflat_df[refflat_df["chr"]!="chrUnk"]
+    refflat_df=refflat_df[refflat_df["cdsEnd"]>=refflat_df["cdsStart"]]
+    refflat_df["chrstrand"]=refflat_df["chr"].astype(str)+refflat_df["strand"]
+    refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]]=refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]].astype(int)
+    refflat_df["exonStarts"]=refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df["exonEnds"]=refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
 
-    refflat_df["chr"] = refflat_df["NCID"].apply(lambda x: ncid_to_chr(x))
-    refflat_df["NMID"] = refflat_df["NMID"].str.split(".").str[0]
-    refflat_df = refflat_df[refflat_df["chr"] != "chrUnk"]
-    refflat_df = refflat_df[refflat_df["cdsEnd"] >= refflat_df["cdsStart"]]
-    refflat_df["chrstrand"] = refflat_df["chr"].astype(str) + refflat_df["strand"]
-    refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]] = refflat_df[
-        ["txStart", "txEnd", "cdsStart", "cdsEnd"]].astype(int)
-    refflat_df["exonStarts"] = refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
-    refflat_df["exonEnds"] = refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
 
     ## Drop duplicates
-    chr_list = [f"chr{i}" for i in list(range(1, 23))] + ["X", "Y", "M"]
-    refflat_df_list = []
+    add_list = ["X"]
+    if not drop_y:
+        add_list.append("Y")
+    if not drop_m:
+        add_list.append("M")
+    chr_list = [f"chr{i}" for i in list(range(1,23))+add_list]
+    refflat_df_list=[]
     for chr in chr_list:
-        refflat_df_chrs = refflat_df[refflat_df["chr"] == chr].copy()
-        refflat_df_chrs.drop_duplicates(subset='NMID', keep="first", inplace=True, ignore_index=True)
+        refflat_df_chrs = refflat_df[refflat_df["chr"]==chr].copy()
+        refflat_df_chrs.drop_duplicates(subset='NMID',keep="first",inplace=True,ignore_index=True)
         refflat_df_list.append(refflat_df_chrs)
 
-    refflat_df = pd.concat(refflat_df_list, ignore_index=True)
-    refflat_df.set_index("NMID", inplace=True)
+    refflat_df = pd.concat(refflat_df_list,ignore_index=True)
+
+    if reindex:
+        refflat_df.set_index("NMID",inplace=True)
 
     return refflat_df
+
 
 
 def reformat_nmid(nmid):
@@ -137,7 +146,7 @@ def median(data):
     return m, h
 
 
-def printmessage(*string, color=None, color_time="green", end='\n'):
+def printmessage(*string, color=None, color_time="green", end='\n', msg_type=None, error=None):
     COLOR_FORE_DICT = {'red': Fore.RED, 'green': Fore.GREEN, 'yellow': Fore.YELLOW,
                        'blue': Fore.BLUE, 'magenta': Fore.MAGENTA, 'cyan': Fore.CYAN, 'white': Fore.WHITE}
 
@@ -149,7 +158,7 @@ def printmessage(*string, color=None, color_time="green", end='\n'):
         if color_time in COLOR_FORE_DICT:
             timestr = COLOR_FORE_DICT[color_time] + timestr + Style.RESET_ALL
         else:
-            print('Warning: color_time not recognized.')
+            print(timestr, '[Printmessage warning] Argument color_time not recognized.')
 
     str_out = ' '.join(str(x) for x in string)
     if color:
@@ -157,9 +166,29 @@ def printmessage(*string, color=None, color_time="green", end='\n'):
         if color in COLOR_FORE_DICT:
             str_out = COLOR_FORE_DICT[color] + str_out + Style.RESET_ALL
         else:
-            print('Warning: color not recognized.')
+            print(timestr, '[Printmessage warning] Argument color not recognized.')
 
-    print(timestr, str_out, end=end)
+    if msg_type is not None:
+        if msg_type == 'error':
+            str_type = COLOR_FORE_DICT['red'] + '[error]' + Style.RESET_ALL
+        elif msg_type == 'warning':
+            str_type = COLOR_FORE_DICT['yellow'] + '[warning]' + Style.RESET_ALL
+        elif msg_type == 'info':
+            str_type = COLOR_FORE_DICT['cyan'] + '[info]' + Style.RESET_ALL
+        elif msg_type == 'success':
+            str_type = COLOR_FORE_DICT['green'] + '[success]' + Style.RESET_ALL
+        else:
+            str_type = COLOR_FORE_DICT['white'] + f'[{msg_type}]' + Style.RESET_ALL
+        print(timestr, str_type, str_out, end=end)
+
+    else:
+        print(timestr, str_out, end=end)
+
+    if error is not None:
+        if not (isinstance(error, Exception) or issubclass(error, Exception)):
+            raise ValueError(f"[Printmessage error] Error argument must be an exception, not {type(error)}")
+        else:
+            raise error
 
     return None
 

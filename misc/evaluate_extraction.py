@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 
 
 
-BLOCK_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/block/pentamer_block_flexible_kmer_v0326v10.pkl"
-ALIGNMENT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/intermediates/dorado_output.aligned.filtered.sorted.pentamer.subsampled.bam"
+BLOCK_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/block/pentamer_block.pkl_downsampled.pkl"
+ALIGNMENT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/intermediates/dorado_output.aligned.filtered.sorted.pentamer.bam"
 CORRECT_POSITION = [3+87*n+i for n in range(5) for i in [16, 27+16, 27+27+16]]
 
 def read_bam(id_list):
@@ -39,6 +39,7 @@ def read_bam(id_list):
 
 def get_block_df(align_pair_dict, block_df):
     block_df["align_pairs"] = block_df["read_id"].map(align_pair_dict)
+    print(block_df)
     block_df = block_df.dropna()
     block_df.to_pickle(BLOCK_PATH+"_with_align_pairs.pkl")
     return block_df
@@ -60,24 +61,27 @@ def main():
     # gc.collect()
     # block_df = pd.read_pickle(BLOCK_PATH+"_downsampled.pkl")
     id_list = block_df["read_id"].unique()
+    print(len(id_list))
     align_pair_dict = read_bam(id_list)
+    print(len(align_pair_dict))
     block_df = get_block_df(align_pair_dict, block_df)
     check_if_correct_position(block_df)
     plot_pr_curve(block_df)
     return None
 
 
-def plot_pr_curve(block_df):
+def plot_pr_curve(block_df, total = 15*100000):
     x = block_df["score"]
     y = block_df["correct"]
     precision, recall, _ = precision_recall_curve(y, x)
+    recall = recall * (len(y) / total)
     pr_auc = auc(recall, precision)
     fig, ax = plt.subplots()
     ax.plot(recall, precision, label=f"PR AUC = {pr_auc:.2f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.legend()
-    plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/plot/pr_curve_flex.png", dpi=300)
+    plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/plot/pr_curve_rigid.png", dpi=300)
     return None
 
 

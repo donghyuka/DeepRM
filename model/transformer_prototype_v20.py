@@ -16,7 +16,8 @@ class TransformerModel(nn.Module):
         ## Embedding Initialization
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
-        self.bq_embedding = nn.Linear(1, d_model)
+        self.bq_embedding = nn.Embedding(max_bq+1, d_model)
+        self.move_embedding = nn.Embedding(block_len+1, d_model)
         self.embedding_dropout = nn.Dropout(encoder_dropout)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
 
@@ -38,6 +39,7 @@ class TransformerModel(nn.Module):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
         self.bq_embedding.weight.data.uniform_(-initrange, initrange)
+        self.move_embedding.weight.data.uniform_(-initrange, initrange)
         self.regression_head.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         return None
@@ -49,11 +51,12 @@ class TransformerModel(nn.Module):
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
         bq_embedding = self.bq_embedding(src_bq)
-        bq_embedding = nn.GELU()(bq_embedding)
+        move_embedding = self.move_embedding(src_move)
         pos_encoding = self.pos_encoding(kmer_embedding)
 
         ## add all embeddings and dropout
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, bq_embedding, pos_encoding], dim = 0).sum(dim = 0)
+        final_embedding = torch.stack([kmer_embedding, signal_embedding, bq_embedding,
+                                       pos_encoding, move_embedding], dim = 0).sum(dim = 0)
         final_embedding = self.embedding_dropout(final_embedding)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 

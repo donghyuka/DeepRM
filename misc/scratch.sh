@@ -1,15 +1,8 @@
-
-# AICA
-python -m train.train --batch 600 --data /data/Hyeonseo/m6A/dataset/ver030924/main/ --output /data/Hyeonseo/m6A//model --tb /data/Hyeonseo/m6A/tensorboard --class_ratio 3   --gpu 8 --lr 1e-4 --model transformer_prototype_v16 --eval_interval 500 --save_interval 500 --log_interval 10 --lr_step 500 --model transformer_prototype_v16 --head 12 --enc_layer 12 --enc_dim 768 --lin_layer 3
-
-# XE8545
-python -m train.train --batch 1600 --data /data/Hyeonseo/m6A/dataset/ver031624/ --output /data/Hyeonseo/m6A/model --tb /data/Hyeonseo/m6A/tensorboard --class_ratio 1   --gpu 4 --lr 1e-4 --model transformer_prototype_v16 --eval_interval 100 --save_interval 100 --log_interval 10 --lr_step 500 --model transformer_prototype_v16 --enc_dim 512
-
-# DEEP1-BIO C1
-python -m train.train --gpu 4 --batch 240 --data /extdata4/baeklab/Hyeonseo/m6A/dataset/ver030924/imbx10/ --class_ratio 4 --eval_interval 1000 --save_interval 1000 --log_interval 10 --model transformer_prototype_v16 --enc_layer 12 --enc_dim 768 --lin_layer 3 --lr_step 100 --model transformer_prototype_v16 --rlrop 1e-2
-
-# Deep1 N06
-python -m evaluate.evaluate_sample --batch 4000 --gpu 0 --data /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data/miclip2_glori_m6ace_drach --model /extdata4/baeklab/Hyeonseo/m6A/inference/model_to_eval_2/
-
-# SNU-BIO C1
-python -m train.train --gpu 4 --batch 240 --data /extdata2/baeklab/Hyeonseo/m6A/dataset/ver030924/engx10/ --output /extdata2/baeklab/Hyeonseo/m6A/model --tb /extdata2/baeklab/Hyeonseo/m6A/tensorboard --class_ratio 1 --log_interval 10 --eval_interval 1000 --save_interval 1000 --log_interval 10 --model transformer_prototype_v16 --enc_layer 12 --enc_dim 768 --lin_layer 3 --lr_step 100 --model transformer_prototype_v16 --rlrop 1e-2
+# samtools mpileup -B -Q 0 -f /extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta -a --ff 4 /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.bam > /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.pileup.tsv
+# samtools mpileup -B -Q 0 -f /extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta -a --ff 4 /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.bam > /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.pileup.tsv
+# python -m utils.filter_pileup -i /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.pileup.tsv -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.pileup.filtered.tsv -c 120
+# python -m utils.filter_pileup -i /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.pileup.tsv -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.pileup.filtered.tsv -c 120
+# python -m evaluate.make_eval_label_inhouse -d /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.pileup.filtered.tsv -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label -c 120
+# python -m evaluate.make_eval_label_inhouse -d /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.pileup.filtered.tsv -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/label -c 120
+python -m evaluate.segment_transcript_sample_V6 -c 120 -p /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/raw/pod5 -b /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.bam -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block_070/ -l /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label//extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.depth5_None.twm6astrict.notsampled.tsv
+python -m evaluate.segment_transcript_sample_V6 -c 120 -p /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/raw/pod5 -b /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/dorado-070-aligned/intermediates/dorado_output.bam -o /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/block_070/ -l /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/label//extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/label/Baeklab.070.depth5_None.twm6astrict.notsampled.tsv

@@ -26,6 +26,7 @@ def main():
     val_pos_list = glob.glob(f"{args.pos}/val/pos/*.pkl")
     val_neg_list = glob.glob(f"{args.neg}/val/neg/*.pkl")
 
+
     rng = np.random.default_rng(args.seed)
 
     ## sample to match the ratio
@@ -35,10 +36,13 @@ def main():
         else:
             train_pos_list = rng.choice(train_pos_list, int(len(train_neg_list) / args.ratio), replace = False)
 
-        if len(val_pos_list) * args.ratio < len(val_neg_list):
-            val_neg_list = rng.choice(val_neg_list, int(len(val_pos_list) * args.ratio), replace = False)
-        else:
-            val_pos_list = rng.choice(val_pos_list, int(len(val_neg_list) / args.ratio), replace = False)
+        if len(val_pos_list) < int(len(train_pos_list) * args.val_ratio):
+            raise ValueError(f"Number of positive validation samples is less than {int(len(train_pos_list) * args.val_ratio)}")
+        if len(val_neg_list) < int(len(train_pos_list) * args.ratio * args.val_ratio):
+            raise ValueError(f"Number of negative validation samples is less than {int(len(train_pos_list) * args.ratio * args.val_ratio)}")
+        val_pos_list = rng.choice(val_pos_list, int(len(train_pos_list) * args.val_ratio), replace = False)
+        val_neg_list = rng.choice(val_neg_list, int(len(train_neg_list) * args.val_ratio), replace = False)
+
 
     else:
         if len(train_pos_list) < args.count:

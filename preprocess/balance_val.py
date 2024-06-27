@@ -1,0 +1,57 @@
+import os
+import glob
+import argparse
+import numpy as np
+import tqdm
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--neg", "-n", type=str, required=True, help="Negative data path")
+    parser.add_argument("--pos", "-p", type=str, required=True, help="Positive data path")
+    parser.add_argument("--seed", "-s", type=int, default=None, help="Random seed")
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
+    parser.add_argument("--count", "-c", type=int, default=None, help="Number of positive samples")
+    parser.add_argument("--val_ratio", "-v", type=float, default=0.1, help="Validation ratio")
+
+    args = parser.parse_args()
+
+    return args
+
+
+def main():
+    args = parse_args()
+    train_pos_list = glob.glob(f"{args.pos}/train/pos/*.pkl")
+    train_neg_list = glob.glob(f"{args.neg}/train/neg/*.pkl")
+    val_pos_list = glob.glob(f"{args.pos}/val/pos/*.pkl")
+    val_neg_list = glob.glob(f"{args.neg}/val/neg/*.pkl")
+
+
+    rng = np.random.default_rng(args.seed)
+
+    if len(val_pos_list) < int(len(train_pos_list) * args.val_ratio):
+        raise ValueError(f"Number of positive validation samples is less than {int(len(train_pos_list) * args.val_ratio)}")
+    if len(val_neg_list) < int(len(train_neg_list) * args.val_ratio):
+        raise ValueError(f"Number of negative validation samples is less than {len(train_neg_list) * args.val_ratio}")
+    val_pos_list = rng.choice(val_pos_list, int(len(train_pos_list) * args.val_ratio), replace = False)
+    val_neg_list = rng.choice(val_neg_list, int(len(train_neg_list) * args.val_ratio), replace = False)
+
+    ## Create symbolic links
+    os.makedirs(f"{args.output}/train/pos", exist_ok = True)
+    os.makedirs(f"{args.output}/train/neg", exist_ok = True)
+    os.makedirs(f"{args.output}/val/pos", exist_ok = True)
+    os.makedirs(f"{args.output}/val/neg", exist_ok = True)
+
+    for train_pos in tqdm.tqdm(train_pos_list):
+        os.symlink(train_pos, f"{args.output}/train/pos/{os.path.basename(train_pos)}")
+    for train_neg in tqdm.tqdm(train_neg_list):
+        os.symlink(train_neg, f"{args.output}/train/neg/{os.path.basename(train_neg)}")
+    for val_pos in tqdm.tqdm(val_pos_list):
+        os.symlink(val_pos, f"{args.output}/val/pos/{os.path.basename(val_pos)}")
+    for val_neg in tqdm.tqdm(val_neg_list):
+        os.symlink(val_neg, f"{args.output}/val/neg/{os.path.basename(val_neg)}")
+
+    return None
+
+
+if __name__ == "__main__":
+    main()

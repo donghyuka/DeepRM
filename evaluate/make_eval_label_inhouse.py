@@ -7,13 +7,9 @@ import tqdm
 import gc
 
 
-## TODO: Refactor to remove these fixed paths.
-DATA_PATH = "/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6A_Jungmin_110823.tsv"
-DEPTH_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado/dorado_output.sorted.pileup.filtered.v2.tsv"
 
-
-def get_data_df(gp_cutoff):
-    data_df = pd.read_csv(DATA_PATH, sep='\t')
+def get_data_df(gp_cutoff,data_path ):
+    data_df = pd.read_csv(data_path, sep='\t')
     data_df["id"] = data_df["NMID"] + ":" + data_df["transcript_coordinate"].astype(str)
     data_df["intersect"] = data_df["validated"] >= gp_cutoff
     data_df["intersect"] = data_df["intersect"].astype(int)
@@ -113,38 +109,82 @@ def remove_no_m6a_transripts(depth_df, strict_site_only = False):
     return depth_df
 
 
-def sample_eval_data(datid_df, seed = None, ratio = 10, drach = False):
+def sample_eval_data(datid_df, seed = None, ratio = False, drach = False, non_drach = False, downsample = None):
     if drach:
         datid_df["drach"] = datid_df["5mer"].apply(is_drach)
         datid_df = datid_df[datid_df["drach"]]
         datid_df = datid_df.copy()
         datid_df.drop("drach", axis=1, inplace=True)
 
+    elif non_drach:
+        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
+        datid_df = datid_df[datid_df["drach"] == False]
+        datid_df = datid_df.copy()
+        datid_df.drop("drach", axis=1, inplace=True)
+
     if ratio is not False:
         datid_df_pos = datid_df[datid_df["label"] == 1]
         datid_df_neg = datid_df[datid_df["label"] == 0]
-        datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
+        if len(datid_df_pos) < len(datid_df_neg) // ratio:
+            datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
+        else:
+            datid_df_pos = datid_df_pos.sample(n=len(datid_df_neg)//ratio, random_state=seed)
+        if downsample is not None:
+            datid_df_pos = datid_df_pos.sample(frac=downsample, random_state=seed)
+            datid_df_neg = datid_df_neg.sample(frac=downsample, random_state=seed)
         datid_df = pd.concat([datid_df_pos, datid_df_neg], ignore_index=True)
     return datid_df
 
 
-def main(depth_cutoff = 20, gp_cutoff=4,
-         filter_adjacent = False, adjacent_distance = 10, adjacent_strict = False,
-         filter_no_m6a = False, no_m6a_strict = False, sample_ratio = 20):
+def parse_args():
+    parser = argparse.ArgumentParser(description='Preprocess RNA-seq data for training')
+    parser.add_argument('--depth', '-d', type=str, help='Depth file', required=True)
+    parser.add_argument('--out', '-o', type=str, help='Output directory', required=True)
+    parser.add_argument('--data', '-a', type=str, help='Data file', default="/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6A_Jungmin_110823.tsv")
+    parser.add_argument('--cpu', '-c', type=int, default=None, help='Number of threads')
+    parser.add_argument('--gp', type=int, default=3, help='GP cutoff')
+    parser.add_argument('--adj', type=bool, default=False, help='Filter adjacent sites')
+    parser.add_argument('--adj_strict', type=bool, default=False, help='Filter adjacent sites strictly')
+    parser.add_argument('--adj_distance', type=int, default=10, help='Distance to adjacent sites')
+    parser.add_argument('--nom6a', type=bool, default=True, help='Filter no m6A genes')
+    parser.add_argument('--nom6a_strict', type=bool, default=True, help='Filter no m6A genes strictly')
+    parser.add_argument('--min_depth', type=int, default=5, help='Minimum depth')
+    parser.add_argument('--max_depth', type=int, default=None, help='Maximum depth')
 
-    args = argparse.ArgumentParser()
-    args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args = args.parse_args()
-    data_df = get_data_df(gp_cutoff)
+    args = parser.parse_args()
+    if args.cpu is None:
+        args.cpu = int(os.cpu_count() * 0.9)
+
+    os.makedirs(args.out, exist_ok=True)
+    return args
+
+
+def main():
+
+    args = parse_args()
+
+    gp_cutoff = args.gp
+    filter_adjacent = args.adj
+    adjacent_strict = args.adj_strict
+    filter_no_m6a = args.nom6a
+    no_m6a_strict = args.nom6a_strict
+    min_depth = args.min_depth
+    max_depth = args.max_depth
+    adjacent_distance = args.adj_distance
+
+    data_df = get_data_df(gp_cutoff, args.data)
     print(data_df)
 
-    depth_df = pd.read_csv(DEPTH_PATH, sep='\t', header = 0)
+    depth_df = pd.read_pickle(args.depth)
     depth_df.rename({"ref":"nmid"}, axis=1, inplace=True)
     depth_df["nmid"] = depth_df["nmid"].str.split(".").str[0]
     depth_df["pos"] = depth_df["pos"] - 1
     depth_df["id"] = depth_df["nmid"] + ":" + depth_df["pos"].astype(str)
     depth_df = depth_df[["id", "depth", "nmid", "pos", "5mer"]]
-    depth_df = depth_df[depth_df["depth"] > depth_cutoff].copy()
+    if min_depth is not None:
+        depth_df = depth_df[depth_df["depth"] > min_depth].copy()
+    if max_depth is not None:
+        depth_df = depth_df[depth_df["depth"] < max_depth].copy()
     print(depth_df)
 
     depth_df_groupby = depth_df.groupby("nmid")
@@ -200,7 +240,7 @@ def main(depth_cutoff = 20, gp_cutoff=4,
     del return_list
     gc.collect()
 
-    label_name = f"BaeklabV2_GP{gp_cutoff}.depth{depth_cutoff}"
+    label_name = f"Baeklab.070.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
     if filter_adjacent:
         label_name += f".adj{adjacent_distance}"
         if adjacent_strict:
@@ -210,19 +250,17 @@ def main(depth_cutoff = 20, gp_cutoff=4,
         if no_m6a_strict:
             label_name += "strict"
 
-    # datid_df.to_csv(f"/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/{label_name}.notsampled.tsv", sep='\t', index=False)
-    # datid_df_s = sample_eval_data(datid_df.copy(), drach = False, ratio = sample_ratio)
-    # datid_df_s.to_csv(f"/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/{label_name}.sampled.tsv", sep='\t', index=False)
-    #
-    datid_df_s = sample_eval_data(datid_df.copy(), drach = True, ratio = False)
-    datid_df_s.to_csv(f"/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/{label_name}.notsampled.drach.tsv", sep='\t', index=False)
+    datid_df["drach"] = datid_df["5mer"].apply(is_drach)
+    datid_df.to_csv(f"{args.out}/{label_name}.tsv", sep='\t', index=False)
+
+    drach_df = datid_df[datid_df["drach"]]
+    drach_df.to_csv(f"{args.out}/{label_name}.drach.tsv", sep='\t', index=False)
 
     return None
 
 
 if __name__ == "__main__":
-    main(gp_cutoff=3, filter_adjacent=False, adjacent_strict=False,
-         filter_no_m6a=False, no_m6a_strict=False)
+    main()
 
     # for gp_cutoff in [3,4]:
     #     for filter_adjacent, adjacent_strict in [(False, False), (True, False), (True, True)]:

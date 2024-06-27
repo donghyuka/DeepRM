@@ -1,12 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="On explicit save action" serverName="modformer" deleteMissingItems="true" confirmBeforeDeletion="false">
+  <component name="PublishConfigData" autoUpload="On explicit save action" serverName="modformer" deleteMissingItems="true" confirmBeforeUploading="false" confirmBeforeDeletion="false">
     <option name="confirmBeforeDeletion" value="false" />
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="AICA">
+      <paths name="AICA-A100">
         <serverdata>
           <mappings>
             <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="AICA-H100">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="BIOSCI">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/extdata2/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
@@ -14,6 +29,13 @@
         <serverdata>
           <mappings>
             <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="Genome1">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/extdata1/baeklab/Hyeonseo/m6A/workspace" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

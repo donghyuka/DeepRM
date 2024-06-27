@@ -16,10 +16,12 @@ def main(penalty_cutoff = 10, bq_cutoff=7, max_penalty = 15):
     prefix = "/extdata4/baeklab/Hyeonseo/m6A/plot/dataset3/"
     os.makedirs(prefix, exist_ok=True)
     # neg_bam_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0093/ON0093/result/dorado/intermediates/dorado_output.bam"
-    # pos_bam_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0092/ON0092/result/dorado/intermediates/dorado_output.bam"
-    # pos_cnt, pos_pass_cnt = count_bam(pos_bam_path, bq_cutoff)
+    pos_bam_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0092/ON0092/result/dorado/intermediates/dorado_output.bam"
+    pos_cnt, pos_pass_cnt = count_bam(pos_bam_path, bq_cutoff)
     # neg_cnt, neg_pass_cnt = count_bam(neg_bam_path, bq_cutoff)
-    # print(f"positive reads passed: {pos_pass_cnt:,} / {pos_cnt:,}")
+    print(f"positive reads passed: {pos_pass_cnt:,} / {pos_cnt:,}")
+
+
     # print(f"negative reads passed: {neg_pass_cnt:,} / {neg_cnt:,}")
     # pos_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0093/ON0093/result/dorado/intermediates/block_df.pkl"
     # neg_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0092/ON0092/result/dorado/intermediates/block_df.pkl"
@@ -39,14 +41,14 @@ def main(penalty_cutoff = 10, bq_cutoff=7, max_penalty = 15):
     # print(f"negative after filtering: {len(neg_df):,}")
     # pos_df.to_pickle(f"{prefix}/pos_df_samp.pkl")
     # neg_df.to_pickle(f"{prefix}/neg_df_samp.pkl")
-    pos_df = pd.read_pickle(f"{prefix}/pos_df_samp.pkl")
-    neg_df = pd.read_pickle(f"{prefix}/neg_df_samp.pkl")
-    print(pos_df)
-    print(neg_df)
-    os.makedirs(prefix, exist_ok=True)
-    motif_cdf(pos_df, neg_df, prefix)
-    motif_composition(pos_df, neg_df, prefix)
-    bq_plot(pos_df, neg_df, prefix)
+    # pos_df = pd.read_pickle(f"{prefix}/pos_df_samp.pkl")
+    # neg_df = pd.read_pickle(f"{prefix}/neg_df_samp.pkl")
+    # print(pos_df)
+    # print(neg_df)
+    # os.makedirs(prefix, exist_ok=True)
+    # motif_cdf(pos_df, neg_df, prefix)
+    # motif_composition(pos_df, neg_df, prefix)
+    # bq_plot(pos_df, neg_df, prefix)
     return None
 
 

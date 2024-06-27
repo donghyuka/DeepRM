@@ -14,9 +14,9 @@ def parse_args():
     return args
 
 def filter_bam(args):
-    in_bam = pysam.AlignmentFile(args.bam_path, "rb", threads=args.cpu, check_sq=False)
-    out_bam = pysam.AlignmentFile(args.out_path, "wb", template=in_bam)
-    for read in tqdm(in_bam):
+    in_bam = pysam.AlignmentFile(args.bam_path, "rb", threads=args.cpu//2, check_sq=False)
+    out_bam = pysam.AlignmentFile(args.out_path, "wb", template=in_bam, threads=args.cpu//2)
+    for read in tqdm(in_bam, total=in_bam.mapped + in_bam.unmapped):
         mean_bq = mean_phred(np.array(read.query_qualities, dtype=int))
         if mean_bq < args.bq_thres:
             continue
