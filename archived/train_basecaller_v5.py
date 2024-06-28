@@ -1,7 +1,9 @@
+import functools
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_v3 import load_dataset, NanoporeDataLoader
+from archived.dataloader_v2 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -28,10 +30,10 @@ def parse_args():
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=50)
     parser.add_argument("--es_start", type=int, default=1000)
-    parser.add_argument("--disk_shard_size", type=int, default=4000)
+    parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--enc_dim", type=int, default=512)
-    parser.add_argument("--lin_dim", type=int, default=1024)
+    parser.add_argument("--lin_dim", type=int, default=512)
     parser.add_argument("--head", type=int, default=8)
     parser.add_argument("--enc_layer", type=int, default=6)
     parser.add_argument("--lin_layer", type=int, default=4)
@@ -40,7 +42,7 @@ def parse_args():
     parser.add_argument("--period", type=int, default=30)
     parser.add_argument("--buffer_size", type=int, default=10000)
     parser.add_argument("--kmer_size", type=int, default=5)
-    parser.add_argument("--signal_size", type=int, default=30)
+    parser.add_argument("--signal_size", type=int, default=25)
     parser.add_argument("--spectrogram_size", type=int, default=21)
     parser.add_argument("--block_len", type=int, default=17)
     parser.add_argument("--seq_len", type=int, default=200)
@@ -49,18 +51,18 @@ def parse_args():
     parser.add_argument("--lr_step", type=int, default=1000)
     parser.add_argument("--lr_interval", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.1)
-    parser.add_argument("--class_ratio", type=int, default=None)
+    parser.add_argument("--class_ratio", type=int, default=1)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=None)
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--prefetch_factor", type=int, default=512)
     parser.add_argument("--profiler", type=int, default=0)
-    parser.add_argument("--pin_memory", type=int, default=1)
-    parser.add_argument("--yield_period", type=int, default=None)
+    parser.add_argument("--pin_memory", type=int, default=0)
+    parser.add_argument("--read_every", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
     parser.add_argument("--soft", type=float, default=None)
-    parser.add_argument("--loss", type=str, default="BCE")
+    parser.add_argument("--loss_ratio", type=float, default=1.0)
     parser.add_argument("--score_feature", type=bool, default=False)
     parser.add_argument("--gpu_pool", type=int, nargs="+", default=None)
     parser.add_argument("--cut_overlap", type=bool, default=False)
@@ -71,7 +73,9 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"BERMUDA-Basecaller-Compound-{args.model.split('_')[-1]}-{strfttime}"
+    if args.read_every is None:
+        args.read_every = args.disk_shard_size
     if args.save_interval is None:
         args.save_interval = args.eval_interval
     if args.gpu_pool is None:
@@ -80,6 +84,14 @@ def parse_args():
         if len(args.gpu_pool) < args.gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
     return args
+
+
+def kmer_to_nuc_tensor(kmer_tensor, m6a, target_mask, src_pad_mask):
+    ## Channel order: [U, G, C, A, PAD]
+    nuc_tensor = ((kmer_tensor-1)%64)//16 + 1
+    nuc_tensor = nuc_tensor * (src_pad_mask == 0)
+    nuc_tensor = 4 - nuc_tensor
+    return nuc_tensor
 
 
 class Trainer:
@@ -92,7 +104,7 @@ class Trainer:
             val_loader: NanoporeDataLoader,
             optimizer: torch.optim.Optimizer,
             scheduler: torch.optim.lr_scheduler,
-            loss_func: torch.nn.Module,
+            loss_ratio: float,
             grad_clip: float,
             metric_func_dict: dict,
             checkpoint_path: str,
@@ -118,7 +130,7 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = optimizer
-        self.loss_func = loss_func
+        self.loss_func = functools.partial(self._loss_func, loss_ratio=loss_ratio)
         self.grad_clip = grad_clip
         self.scheduler = scheduler
         self.lr_interval = lr_interval
@@ -166,6 +178,16 @@ class Trainer:
         ## END of __init__
 
 
+    def _loss_func(self, output_basecalling, output_modification, target_basecalling, target_modification, loss_ratio=1.0):
+        modification_loss = torch.nn.BCELoss()(output_modification, target_modification)
+        if loss_ratio <= 10000:
+            ## Channel order: [U, G, C, A, PAD]
+            basecalling_loss = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index = 4)(output_basecalling, target_basecalling)
+            loss =  (basecalling_loss + modification_loss * loss_ratio) / (1 + loss_ratio)
+        else:
+            loss = modification_loss
+        return loss
+
     def _cache_eval_data(self):
         sources = []
         targets = []
@@ -175,35 +197,29 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
-    def _feed_model(self, source, target):
-        src_kmer = source["kmer_token"]
-        src_signal = source["signal_token"]
-        src_bq = source["bq_token"]
-        src_pad_mask = (src_kmer == 0)
-        src_target_mask = source["target_mask"]
-        src_move = source["move_token"]
+    def _feed_model(self, source, target_modification):
 
+        src_kmer = source["kmer_token"].to(self.gpu_id)
+        src_signal = source["signal_token"].to(self.gpu_id)
         if self.cut_overlap:
             src_signal = src_signal[:,:,10:15]
+        src_bq = source["bq_token"].to(self.gpu_id)
+        src_move = source["move_token"].to(self.gpu_id)
+        src_pad_mask = (src_kmer == 0)
+        src_target_mask = source["target_mask"].to(self.gpu_id)
+        target_modification = target_modification.to(self.gpu_id)
 
-        src_kmer = src_kmer.to(self.gpu_id)
-        src_signal = src_signal.to(self.gpu_id)
-        src_bq = src_bq.to(self.gpu_id)
-        src_pad_mask = src_pad_mask.to(self.gpu_id)
-        src_target_mask = src_target_mask.to(self.gpu_id)
-        src_move = src_move.to(self.gpu_id)
-        target = target.to(torch.float32)
-        target = target.to(self.gpu_id)
+        target_basecalling = kmer_to_nuc_tensor(src_kmer, target_modification, src_target_mask, src_pad_mask)
 
-        output = self.model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
+        output_basecalling, output_modification = self.model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
 
-        return output, target
+        return output_basecalling, output_modification, target_basecalling, target_modification
 
 
     def _run_batch(self, source, target):
         self.optimizer.zero_grad()
-        output, target = self._feed_model(source, target)
-        loss = self.loss_func(output, target)
+        output_basecalling, output_modification,target_basecalling, target_modification = self._feed_model(source, target)
+        loss = self.loss_func(output_basecalling, output_modification, target_basecalling, target_modification)
         loss.backward()
         if self.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -231,7 +247,6 @@ class Trainer:
                        position=self.rank, colour=colour_choice[self.rank%len(colour_choice)], smoothing = 0) as self.pbar:
 
             for source, targets in self.train_loader:
-
                 self._run_batch(source, targets)
                 self.current_interval_losses.append(self.current_batch_loss)
 
@@ -254,11 +269,11 @@ class Trainer:
                 if self.current_step % self.save_interval == 0 and self.current_step > 0:
                     dist.barrier()
                     if self.rank == 0:
-                        # try:
-                        #     for name, parameter in self.model.named_parameters():
-                        #         self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
-                        # except:
-                        #     pass
+                        try:
+                            for name, parameter in self.model.named_parameters():
+                                self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
+                        except:
+                            pass
                         self._save_checkpoint()
                     dist.barrier()
 
@@ -281,10 +296,10 @@ class Trainer:
         outputs = []
         with torch.no_grad():
             for source, target in zip(self.eval_sources, self.eval_targets):
-                output, target = self._feed_model(source, target)
-                loss = self.loss_func(output, target)
+                output_basecalling, output_modification,target_basecalling, target_modification = self._feed_model(source, target)
+                loss = self.loss_func(output_basecalling, output_modification, target_basecalling, target_modification)
                 val_loss.append(loss.item())
-                outputs.append(output)
+                outputs.append(output_modification)
 
         val_loss = np.mean(val_loss)
         outputs = torch.cat(outputs, dim=0)
@@ -349,7 +364,7 @@ class Trainer:
             self.current_epoch = epoch
             self._run_epoch()
             if self.continue_training == 0:
-                printmessage(f"Early Stopping at Epoch {self.current_epoch}", msg_type="info")
+                printmessage(f"Early Stopping at Epoch {self.current_epoch}")
                 break
         if self.rank == 0:
             self.tb_writer.flush()
@@ -367,7 +382,7 @@ def setup_ddp(rank,world_size,gpu_id):
 
 
 def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                       yield_period, seed, class_ratio, prefetch_factor, pin_memory, soft_label):
+                       read_every, seed, class_ratio, prefetch_factor, pin_memory, soft_label):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -376,10 +391,10 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                buffer_size, yield_period, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                                buffer_size, read_every, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
                                 prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              buffer_size, yield_period, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                              buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
                               prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
 
     return train_loader, val_loader
@@ -400,9 +415,7 @@ def main_worker(rank, args_dict):
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
-        printmessage(f"Total Params: {total_params:,}", msg_type="info")
-
-    model = model.to(gpu_id)
+        printmessage(f"Total Params: {total_params:,}")
 
     if args_dict["load_checkpoint"] is not None:
         save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'})
@@ -410,6 +423,7 @@ def main_worker(rank, args_dict):
     else:
         save_dict = {}
 
+    model = model.to(gpu_id)
     model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
@@ -433,18 +447,6 @@ def main_worker(rank, args_dict):
         # scheduler.load_state_dict(save_dict["scheduler_state_dict"])
         save_dict.clear()
 
-
-    if args_dict["loss"] == "MSE":
-        loss_func = torch.nn.MSELoss()
-    elif args_dict["loss"] == "BCE":
-        loss_func = torch.nn.BCELoss()
-    elif args_dict["loss"] == "BCEWL":
-        loss_func = torch.nn.BCEWithLogitsLoss()
-    elif args_dict["loss"] == "CE":
-        loss_func = torch.nn.CrossEntropyLoss()
-    else:
-        raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
-
     metric_func_dict = {"acc": cm.BinaryAccuracy().to(gpu_id),
                         "auroc": cm.BinaryAUROC().to(gpu_id),
                         "ap": cm.BinaryAveragePrecision().to(gpu_id),
@@ -452,16 +454,16 @@ def main_worker(rank, args_dict):
 
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
                                                   args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
-                                                  args_dict["yield_period"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
+                                                  args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
-    trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
+    trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, args_dict["loss_ratio"], args_dict["grad_clip"], metric_func_dict,
                       args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                       args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
                       args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
                       soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"])
-    printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.", msg_type="info")
+    printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
-    printmessage(f"[GPU {gpu_id}] Training Loop Complete.", msg_type="info")
+    printmessage(f"[GPU {gpu_id}] Training Loop Complete.")
     dist.destroy_process_group()
     return None
 
@@ -475,12 +477,12 @@ def main_master():
     args.tb = os.path.join(args.tb, args.name)
     if args.seed is None:
         args.seed = np.random.randint(0, 10000000)
-    printmessage("Training Program Started.", msg_type="info")
-    printmessage(f"Seed: {args.seed}", msg_type="info")
-    printmessage(f"Using {args.gpu} GPUs.", msg_type="info")
+    printmessage("Training Program Started.")
+    printmessage(f"Seed: {args.seed}")
+    printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
     mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
-    printmessage(f"Training Program Complete.", msg_type="success")
+    printmessage(f"Training Program Complete.")
     return None
 
 

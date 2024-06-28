@@ -5,9 +5,8 @@ import pandas as pd
 import numpy as np
 import multiprocessing as mp
 import os
-import glob
 from tqdm import tqdm
-from evaluate.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
+from archived.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
 from utils.utils import parse_refflat
 
 def parse_args():

@@ -152,7 +152,7 @@ def main():
     if 3 in args.step:
         ## Step 3. Run tokenize_transcript.py
         printmessage(f"[Step 3/3] Tokenize Transcript")
-        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}/Baeklab.070.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n normalise"
+        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}/Baeklab.070 -c {args.cpu} -n normalise"
         printmessage(cmd)
         os.system(cmd)
 

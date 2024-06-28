@@ -3,7 +3,7 @@ import functools
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_v2 import load_dataset, NanoporeDataLoader
+from archived.dataloader_v2 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -87,11 +87,12 @@ def parse_args():
 
 
 def kmer_to_nuc_tensor(kmer_tensor, m6a, target_mask, src_pad_mask):
-    ## Channel order: [U, G, C, A, PAD]
-    nuc_tensor = ((kmer_tensor-1)%64)//16 + 1
-    nuc_tensor = nuc_tensor * (src_pad_mask == 0)
-    nuc_tensor = 4 - nuc_tensor
-    return nuc_tensor
+    ## Channel order: [PAD, cA, C, G, T, m6A]
+    kmer_tensor = ((kmer_tensor-1)%64)//16
+    kmer_tensor = kmer_tensor + (target_mask * m6a.unsqueeze(-1) * 4).long() + 1
+    ## Reserve 0 for padding.
+    kmer_tensor = kmer_tensor * (src_pad_mask == 0)
+    return kmer_tensor
 
 
 class Trainer:
@@ -181,8 +182,11 @@ class Trainer:
     def _loss_func(self, output_basecalling, output_modification, target_basecalling, target_modification, loss_ratio=1.0):
         modification_loss = torch.nn.BCELoss()(output_modification, target_modification)
         if loss_ratio <= 10000:
-            ## Channel order: [U, G, C, A, PAD]
-            basecalling_loss = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index = 4)(output_basecalling, target_basecalling)
+            weight = torch.ones(6, dtype=torch.float).to(self.gpu_id)
+            ## Channel order: [PAD, cA, C, G, T, m6A]
+            weight[0] = 0.0
+            weight[-1] = 10.0
+            basecalling_loss = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index = 0, weight=weight)(output_basecalling, target_basecalling)
             loss =  (basecalling_loss + modification_loss * loss_ratio) / (1 + loss_ratio)
         else:
             loss = modification_loss
@@ -203,15 +207,15 @@ class Trainer:
         src_signal = source["signal_token"].to(self.gpu_id)
         if self.cut_overlap:
             src_signal = src_signal[:,:,10:15]
-        src_bq = source["bq_token"].to(self.gpu_id)
-        src_move = source["move_token"].to(self.gpu_id)
+        # src_bq = source["bq_token"].to(self.gpu_id)
+        # src_move = source["move_token"].to(self.gpu_id)
         src_pad_mask = (src_kmer == 0)
         src_target_mask = source["target_mask"].to(self.gpu_id)
         target_modification = target_modification.to(self.gpu_id)
 
         target_basecalling = kmer_to_nuc_tensor(src_kmer, target_modification, src_target_mask, src_pad_mask)
 
-        output_basecalling, output_modification = self.model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
+        output_basecalling, output_modification = self.model(src_signal, src_pad_mask, src_target_mask)
 
         return output_basecalling, output_modification, target_basecalling, target_modification
 
@@ -457,9 +461,9 @@ def main_worker(rank, args_dict):
                                                   args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
     trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, args_dict["loss_ratio"], args_dict["grad_clip"], metric_func_dict,
-                      args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                      args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                      args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
+                        args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
+                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
                       soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"])
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])

@@ -240,7 +240,7 @@ def main():
     del return_list
     gc.collect()
 
-    label_name = f"Baeklab.070.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
+    label_name = f"GP{gp_cutoff}.depth{min_depth}_{max_depth}"
     if filter_adjacent:
         label_name += f".adj{adjacent_distance}"
         if adjacent_strict:
@@ -251,10 +251,10 @@ def main():
             label_name += "strict"
 
     datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-    datid_df.to_csv(f"{args.out}/{label_name}.tsv", sep='\t', index=False)
+    datid_df.to_csv(f"{args.out}.{label_name}.tsv", sep='\t', index=False)
 
     drach_df = datid_df[datid_df["drach"]]
-    drach_df.to_csv(f"{args.out}/{label_name}.drach.tsv", sep='\t', index=False)
+    drach_df.to_csv(f"{args.out}.{label_name}.drach.tsv", sep='\t', index=False)
 
     return None
 
