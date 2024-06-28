@@ -1,7 +1,9 @@
+import functools
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader import load_dataset, NanoporeDataLoader
+from archived.dataloader_od import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -62,13 +64,15 @@ def parse_args():
     parser.add_argument("--soft", type=float, default=None)
     parser.add_argument("--loss", type=str, default="MSE")
     parser.add_argument("--score_feature", type=bool, default=False)
+    parser.add_argument("--load_checkpoint", type=str, default=None)
+    parser.add_argument("--loss_ratio", type=float, default=1.0)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"BERMUDA-OD-{args.model.split('_')[-1]}-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:
@@ -101,7 +105,8 @@ class Trainer:
             save_interval: int,
             model_config: dict = None,
             soft_label: float = None,
-            score_feature: bool = False
+            score_feature: bool = False,
+            loss_ratio: float = 1.0
     ) -> None:
 
         self.gpu_id = gpu_id
@@ -109,7 +114,8 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = optimizer
-        self.loss_func = loss_func
+        self.loss_ratio = loss_ratio
+        self.loss_func = functools.partial(self._loss_func, loss_ratio = self.loss_ratio)
         self.grad_clip = grad_clip
         self.scheduler = scheduler
         self.lr_interval = lr_interval
@@ -155,6 +161,15 @@ class Trainer:
 
         ## END of __init__
 
+    def _loss_func(self, output_vector, output_scalar, target_vector, target_scalar, loss_ratio=1.0):
+        modification_loss = torch.nn.BCELoss()(output_scalar, target_scalar)
+        if loss_ratio <= 10000:
+            weight_tensor = torch.tensor([85.0, 85.0/4.0, 85.0/80.0]).to(self.gpu_id)
+            detection_loss = torch.nn.CrossEntropyLoss(weight = weight_tensor, ignore_index=3)(output_vector, target_vector)
+            loss =  (detection_loss + modification_loss * loss_ratio) / (1 + loss_ratio)
+        else:
+            loss = modification_loss
+        return loss
 
     def _cache_eval_data(self):
         sources = []
@@ -165,38 +180,42 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
-    def _feed_model(self, source, target):
-        src_kmer = source["kmer_token"]
-        src_signal = source["signal_token"]
-        src_spectrogram = source["spectrogram_token"]
-        src_bq = source["bq_token"]
+    def _forward_model(self, source, target_scalar, return_scalar = False):
+        src_kmer = source["kmer_token"].to(self.gpu_id)
+        src_signal = source["signal_token"].to(self.gpu_id)
+        src_bq = source["bq_token"].to(self.gpu_id)
         src_pad_mask = (src_kmer == 0)
-        src_target_mask = source["target_mask"]
-        src_move = source["move_token"]
+        src_target_mask = source["target_mask"].to(self.gpu_id)
 
-        src_kmer = src_kmer.to(self.gpu_id)
-        src_signal = src_signal.to(self.gpu_id)
-        src_spectrogram = src_spectrogram.to(self.gpu_id)
-        src_bq = src_bq.to(self.gpu_id)
-        src_pad_mask = src_pad_mask.to(self.gpu_id)
-        src_target_mask = src_target_mask.to(self.gpu_id)
-        src_move = src_move.to(self.gpu_id)
-        target = target.to(torch.float32)
-        target = target.to(self.gpu_id)
+        target_scalar = target_scalar.to(self.gpu_id)
+        target_vector = target_scalar.unsqueeze(1) + 1
+        target_vector = target_vector * src_target_mask + 1
+        target_vector = target_vector * (src_pad_mask == 0)
+        target_vector = 3 - target_vector
+        target_vector = target_vector.long()
+        ## 3 - PAD, 2 - BACKGROUND, 1 - UNMODIFIED A, 0 - MODIFIED A.
 
-        if not self.score_feature:
-            output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask)
+        output_vector = self.model(src_kmer, src_signal, src_bq, src_pad_mask)
+
+        if return_scalar:
+            target_mask_sum = src_target_mask.sum(dim = 1)
+            output_scalar = torch.nn.Softmax(dim = 1)(output_vector)
+            output_scalar = output_scalar[:,0,:] * src_target_mask
+            output_scalar = output_scalar.sum(dim = 1)
+            output_scalar = output_scalar / target_mask_sum
+
+            return_tuple = (output_vector, target_vector, output_scalar, target_scalar)
+
         else:
-            src_score = source["block_score"]
-            src_score = src_score.to(self.gpu_id)
-            output = self.model(src_kmer, src_signal, src_spectrogram, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
-        return output, target
+            return_tuple = (output_vector, target_vector)
+
+        return return_tuple
 
 
     def _run_batch(self, source, target):
         self.optimizer.zero_grad()
-        output, target = self._feed_model(source, target)
-        loss = self.loss_func(output, target)
+        output_vector, target_vector = self._forward_model(source, target)
+        loss = self.loss_func(output_vector, target_vector)
         loss.backward()
         if self.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -270,10 +289,10 @@ class Trainer:
         outputs = []
         with torch.no_grad():
             for source, target in zip(self.eval_sources, self.eval_targets):
-                output, target = self._feed_model(source, target)
-                loss = self.loss_func(output, target)
+                output_vector, target_vector, output_scalar, target_scalar = self._forward_model(source, target, return_scalar = True)
+                loss = self.loss_func(output_vector, target_vector)
                 val_loss.append(loss.item())
-                outputs.append(output)
+                outputs.append(output_scalar)
 
         val_loss = np.mean(val_loss)
         outputs = torch.cat(outputs, dim=0)
@@ -310,24 +329,17 @@ class Trainer:
 
     def _save_checkpoint(self):
 
-        if self.best_val_loss - self.current_val_loss > self.es_delta:
-            ## Save Model if Improved
-            self.best_val_loss = self.current_val_loss
-            self.best_val_loss_epoch = self.current_epoch
-            torch.save({'model_state_dict': self.model.module.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'scheduler_state_dict': self.scheduler.state_dict(),
-                        'val_loss': self.current_val_loss,
-                        'metric_dict': self.current_val_metric_dict,
-                        'model_config': self.model_config,
-                        }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt")
-            self.continue_training = 1
+        self.best_val_loss = self.current_val_loss
+        self.best_val_loss_epoch = self.current_epoch
+        torch.save({'model_state_dict': self.model.module.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
+                    'val_loss': self.current_val_loss,
+                    'metric_dict': self.current_val_metric_dict,
+                    'model_config': self.model_config,
+                    }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt")
 
-        elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
-            self.continue_training = 0
-
-        else:
-            self.continue_training = 1
+        self.continue_training = 1
 
         return None
 
@@ -391,17 +403,38 @@ def main_worker(rank, args_dict):
         printmessage(f"Total Params: {total_params:,}")
 
     model = model.to(rank)
+
+    if args_dict["load_checkpoint"] is not None:
+        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{rank}'})
+        model.load_state_dict(state_dict=save_dict["model_state_dict"])
+    else:
+        save_dict = {}
+
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
+    if args_dict["load_checkpoint"] is not None:
+        optimizer.load_state_dict(save_dict["optimizer_state_dict"])
+        ## overwrite lr and weight_decay
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = args_dict["lr"]
+            param_group['weight_decay'] = args_dict["weight_decay"]
+
+
     if args_dict["rlrop"] is not None:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = "min", factor = 0.5, patience = args_dict["lr_step"],
                                                                threshold = args_dict["rlrop"], threshold_mode = "rel", cooldown = 0,
-                                                               min_lr = 1e-6, eps = 1e-8, verbose = True)
-
+                                                               min_lr = 1e-6, eps = 1e-8)
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
+
+    if args_dict["load_checkpoint"] is not None:
+        # scheduler.load_state_dict(save_dict["scheduler_state_dict"])
+        save_dict.clear()
+
+
+    args_dict["loss"] = args_dict["loss"].upper()
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
@@ -424,10 +457,10 @@ def main_worker(rank, args_dict):
                                                   args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
     trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
-                        args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
-                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"])
+                      args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                      args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
+                      args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
+                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], loss_ratio = args_dict["loss_ratio"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")

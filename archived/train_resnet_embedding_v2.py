@@ -1,9 +1,7 @@
-import functools
-
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_od import load_dataset, NanoporeDataLoader
+from archived.dataloader_resnet import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -14,6 +12,7 @@ import tqdm
 import numpy as np
 from utils.utils import printmessage
 import importlib
+from model.transformer_basecaller_embedding_v2 import TransformerModel
 
 
 def parse_args():
@@ -32,25 +31,24 @@ def parse_args():
     parser.add_argument("--es_start", type=int, default=1000)
     parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--enc_dim", type=int, default=512)
-    parser.add_argument("--lin_dim", type=int, default=1024)
-    parser.add_argument("--head", type=int, default=8)
-    parser.add_argument("--enc_layer", type=int, default=6)
-    parser.add_argument("--lin_layer", type=int, default=4)
-    parser.add_argument("--enc_dropout", type=float, default=0.1)
-    parser.add_argument("--lin_dropout", type=float, default=0.2)
-    parser.add_argument("--period", type=int, default=30)
     parser.add_argument("--buffer_size", type=int, default=10000)
-    parser.add_argument("--kmer_size", type=int, default=5)
-    parser.add_argument("--signal_size", type=int, default=25)
-    parser.add_argument("--spectrogram_size", type=int, default=21)
-    parser.add_argument("--block_len", type=int, default=17)
-    parser.add_argument("--seq_len", type=int, default=200)
-    parser.add_argument("--t_act", type=str, default="gelu")
-    parser.add_argument("--lin_act", type=str, default="gelu")
+
+    parser.add_argument("--n_layers_kmer", type=int, default=8)
+    parser.add_argument("--n_layers_sig", type=int, default=8)
+    parser.add_argument("--n_layers_merged", type=int, default=8)
+    parser.add_argument("--n_layers_final", type=int, default=4)
+
+    parser.add_argument("--d_kmer", type=int, default=256)
+    parser.add_argument("--d_signal", type=int, default=256)
+    parser.add_argument("--d_merged", type=int, default=256)
+    parser.add_argument("--d_final", type=int, default=512)
+
+    parser.add_argument("--dropout", type=float, default=0.01)
+    parser.add_argument("--kernel_size", type=int, default=5)
+
     parser.add_argument("--lr_step", type=int, default=1000)
     parser.add_argument("--lr_interval", type=int, default=100)
-    parser.add_argument("--weight_decay", type=float, default=0.1)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--class_ratio", type=int, default=1)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--eval_interval", type=int, default=100)
@@ -65,14 +63,14 @@ def parse_args():
     parser.add_argument("--loss", type=str, default="MSE")
     parser.add_argument("--score_feature", type=bool, default=False)
     parser.add_argument("--load_checkpoint", type=str, default=None)
-    parser.add_argument("--loss_ratio", type=float, default=1.0)
+    parser.add_argument("--load_embedding", type=str, required=True)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"BERMUDA-OD-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"BERMUDA-ResNet-{args.model.split('_')[-1]}-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:
@@ -85,6 +83,7 @@ class Trainer:
             self,
             gpu_id: int,
             model: torch.nn.Module,
+            embedding_model: torch.nn.Module,
             train_loader: NanoporeDataLoader,
             val_loader: NanoporeDataLoader,
             optimizer: torch.optim.Optimizer,
@@ -105,17 +104,16 @@ class Trainer:
             save_interval: int,
             model_config: dict = None,
             soft_label: float = None,
-            score_feature: bool = False,
-            loss_ratio: float = 1.0
+            score_feature: bool = False
     ) -> None:
 
         self.gpu_id = gpu_id
         self.model = model
+        self.embedding_model = embedding_model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = optimizer
-        self.loss_ratio = loss_ratio
-        self.loss_func = functools.partial(self._loss_func, loss_ratio = self.loss_ratio)
+        self.loss_func = loss_func
         self.grad_clip = grad_clip
         self.scheduler = scheduler
         self.lr_interval = lr_interval
@@ -161,15 +159,6 @@ class Trainer:
 
         ## END of __init__
 
-    def _loss_func(self, output_vector, output_scalar, target_vector, target_scalar, loss_ratio=1.0):
-        modification_loss = torch.nn.BCELoss()(output_scalar, target_scalar)
-        if loss_ratio <= 10000:
-            weight_tensor = torch.tensor([85.0, 85.0/4.0, 85.0/80.0]).to(self.gpu_id)
-            detection_loss = torch.nn.CrossEntropyLoss(weight = weight_tensor, ignore_index=3)(output_vector, target_vector)
-            loss =  (detection_loss + modification_loss * loss_ratio) / (1 + loss_ratio)
-        else:
-            loss = modification_loss
-        return loss
 
     def _cache_eval_data(self):
         sources = []
@@ -180,46 +169,40 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
-    def _forward_model(self, source, target_scalar, return_scalar = False):
-        src_kmer = source["kmer_token"].to(self.gpu_id)
-        src_signal = source["signal_token"].to(self.gpu_id)
-        src_bq = source["bq_token"].to(self.gpu_id)
-        src_pad_mask = (src_kmer == 0)
-        src_target_mask = source["target_mask"].to(self.gpu_id)
+    def _feed_model(self, source, target):
+        src_kmer = source["kmer_token"]
+        src_signal = source["signal_token"]
+        src_bq = source["bq_token"]
+        src_move = source["move_token"]
 
-        target_scalar = target_scalar.to(self.gpu_id)
-        target_vector = target_scalar.unsqueeze(1) + 1
-        target_vector = target_vector * src_target_mask + 1
-        target_vector = target_vector * (src_pad_mask == 0)
-        target_vector = 3 - target_vector
-        target_vector = target_vector.long()
-        ## 3 - PAD, 2 - BACKGROUND, 1 - UNMODIFIED A, 0 - MODIFIED A.
+        src_kmer = src_kmer.to(self.gpu_id)
+        src_signal = src_signal.to(self.gpu_id)
+        src_bq = src_bq.to(self.gpu_id)
+        src_move = src_move.to(self.gpu_id)
+        src_pad_mask = (src_move == 0)
+        target = target.to(torch.float32)
+        target = target.to(self.gpu_id)
 
-        output_vector = self.model(src_kmer, src_signal, src_bq, src_pad_mask)
+        target_mask = (src_move == 9)
 
-        if return_scalar:
-            target_mask_sum = src_target_mask.sum(dim = 1)
-            output_scalar = torch.nn.Softmax(dim = 1)(output_vector)
-            output_scalar = output_scalar[:,0,:] * src_target_mask
-            output_scalar = output_scalar.sum(dim = 1)
-            output_scalar = output_scalar / target_mask_sum
+        with torch.no_grad():
+            src_embedding = self.embedding_model(src_kmer, src_signal, src_pad_mask, target_mask)
 
-            return_tuple = (output_vector, target_vector, output_scalar, target_scalar)
+        print(src_embedding)
+        #
+        # output = self.model(src_embedding, src_kmer, src_signal, src_bq, src_move, src_pad_mask)
 
-        else:
-            return_tuple = (output_vector, target_vector)
-
-        return return_tuple
+        return src_embedding, target
 
 
     def _run_batch(self, source, target):
         self.optimizer.zero_grad()
-        output_vector, target_vector = self._forward_model(source, target)
-        loss = self.loss_func(output_vector, target_vector)
-        loss.backward()
+        output, target = self._feed_model(source, target)
+        loss = self.loss_func(output, target)
+        # loss.backward()
         if self.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-        self.optimizer.step()
+        # self.optimizer.step()
         self.current_batch_loss = loss.item()
         dist.barrier()
         time.sleep(0.001*self.gpu_id)
@@ -234,7 +217,7 @@ class Trainer:
         self.train_loader.set_epoch(self.current_epoch)
         self.val_loader.set_epoch(self.current_epoch)
         self.current_batch = 0
-        self.model.train()
+        # self.model.train()
         self.current_lr = self.optimizer.param_groups[0]['lr']
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
         dist.barrier()
@@ -259,10 +242,10 @@ class Trainer:
                         self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_step)
                     dist.barrier()
 
-                if self.current_step % self.eval_interval == 0:
+                if self.current_step % self.eval_interval == 0 and self.current_step > 0:
                     self._run_eval()
 
-                if self.current_step % self.save_interval == 0:
+                if self.current_step % self.save_interval == 0 and self.current_step > 0:
                     dist.barrier()
                     if self.gpu_id == 0:
                         for name, parameter in self.model.named_parameters():
@@ -270,7 +253,7 @@ class Trainer:
                         self._save_checkpoint()
                     dist.barrier()
 
-                if self.current_step % self.lr_interval == 0:
+                if self.current_step % self.lr_interval == 0 and self.current_step > 0:
                     if self.scheduler.__class__.__name__ == "ReduceLROnPlateau":
                         self.scheduler.step(self.current_val_loss)
                     else:
@@ -289,10 +272,10 @@ class Trainer:
         outputs = []
         with torch.no_grad():
             for source, target in zip(self.eval_sources, self.eval_targets):
-                output_vector, target_vector, output_scalar, target_scalar = self._forward_model(source, target, return_scalar = True)
-                loss = self.loss_func(output_vector, target_vector)
+                output, target = self._feed_model(source, target)
+                loss = self.loss_func(output, target)
                 val_loss.append(loss.item())
-                outputs.append(output_scalar)
+                outputs.append(output)
 
         val_loss = np.mean(val_loss)
         outputs = torch.cat(outputs, dim=0)
@@ -323,23 +306,30 @@ class Trainer:
                 self.tb_writer.add_scalar(f"Val_{key}", value, self.current_step)
         dist.barrier()
 
-        self.model.train()
+        # self.model.train()
         return None
 
 
     def _save_checkpoint(self):
 
-        self.best_val_loss = self.current_val_loss
-        self.best_val_loss_epoch = self.current_epoch
-        torch.save({'model_state_dict': self.model.module.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'scheduler_state_dict': self.scheduler.state_dict(),
-                    'val_loss': self.current_val_loss,
-                    'metric_dict': self.current_val_metric_dict,
-                    'model_config': self.model_config,
-                    }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt")
+        if self.best_val_loss - self.current_val_loss > self.es_delta:
+            ## Save Model if Improved
+            self.best_val_loss = self.current_val_loss
+            self.best_val_loss_epoch = self.current_epoch
+            torch.save({'model_state_dict': self.model.module.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.scheduler.state_dict(),
+                        'val_loss': self.current_val_loss,
+                        'metric_dict': self.current_val_metric_dict,
+                        'model_config': self.model_config,
+                        }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt")
+            self.continue_training = 1
 
-        self.continue_training = 1
+        elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
+            self.continue_training = 0
+
+        else:
+            self.continue_training = 1
 
         return None
 
@@ -388,13 +378,11 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
 
 def main_worker(rank, args_dict):
     setup_ddp(rank, args_dict["gpu"])
-    TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
-    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
-                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
-                             t_act = args_dict["t_act"], lin_act = args_dict["lin_act"],
-                             encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
-                             kmer_size = args_dict["kmer_size"], signal_size = args_dict["signal_size"],
-                             spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"], seq_len = args_dict["seq_len"])
+    ResNetModel = importlib.import_module(f"model.{args_dict['model']}").ResNetModel
+    model = ResNetModel(n_layers_kmer = args_dict["n_layers_kmer"], n_layers_sig = args_dict["n_layers_sig"],
+                        n_layers_merged = args_dict["n_layers_merged"], n_layers_final = args_dict["n_layers_final"],
+                        d_kmer = args_dict["d_kmer"], d_signal = args_dict["d_signal"], d_merged = args_dict["d_merged"],
+                        d_final = args_dict["d_final"], dropout = args_dict["dropout"], kernel_size = args_dict["kernel_size"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -434,7 +422,19 @@ def main_worker(rank, args_dict):
         save_dict.clear()
 
 
-    args_dict["loss"] = args_dict["loss"].upper()
+
+    save_dict = torch.load(args_dict["load_embedding"], map_location={'cuda:0': f'cuda:{rank}'})
+    model_config = save_dict["model_config"]
+    embedding_model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
+                             n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
+                             t_act = model_config["t_act"], lin_act = model_config["lin_act"],
+                             encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
+                             kmer_size = 5, signal_size = model_config["signal_size"], spectrogram_size = 21, block_len = 17, seq_len=200)
+    embedding_model = embedding_model.to(rank)
+    embedding_model.load_state_dict(state_dict=save_dict["model_state_dict"], strict=True)
+    embedding_model = DDP(embedding_model, device_ids=[rank], output_device=rank)
+    embedding_model.eval()
+    save_dict.clear()
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
@@ -456,11 +456,12 @@ def main_worker(rank, args_dict):
                                                   args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
                                                   args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
-    trainer = Trainer(rank, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
-                      args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                      args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                      args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
-                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], loss_ratio = args_dict["loss_ratio"])
+
+    trainer = Trainer(rank, model, embedding_model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
+                        args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
+                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
+                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"])
     printmessage(f"[GPU {rank}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {rank}] Training Loop Complete.")

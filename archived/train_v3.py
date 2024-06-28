@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_resnet import load_dataset, NanoporeDataLoader
+from archived.dataloader_v3 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -28,54 +28,57 @@ def parse_args():
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=50)
     parser.add_argument("--es_start", type=int, default=1000)
-    parser.add_argument("--disk_shard_size", type=int, default=1000)
+    parser.add_argument("--disk_shard_size", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--enc_dim", type=int, default=512)
+    parser.add_argument("--lin_dim", type=int, default=1024)
+    parser.add_argument("--head", type=int, default=8)
+    parser.add_argument("--enc_layer", type=int, default=6)
+    parser.add_argument("--lin_layer", type=int, default=4)
+    parser.add_argument("--enc_dropout", type=float, default=0.1)
+    parser.add_argument("--lin_dropout", type=float, default=0.2)
+    parser.add_argument("--period", type=int, default=30)
     parser.add_argument("--buffer_size", type=int, default=10000)
-
-    parser.add_argument("--n_layers_kmer", type=int, default=8)
-    parser.add_argument("--n_layers_sig", type=int, default=8)
-    parser.add_argument("--n_layers_merged", type=int, default=8)
-    parser.add_argument("--n_layers_final", type=int, default=4)
-
-    parser.add_argument("--d_kmer", type=int, default=256)
-    parser.add_argument("--d_signal", type=int, default=256)
-    parser.add_argument("--d_merged", type=int, default=256)
-    parser.add_argument("--d_final", type=int, default=512)
-
-    parser.add_argument("--dropout", type=float, default=0.01)
-    parser.add_argument("--kernel_size", type=int, default=5)
-
+    parser.add_argument("--kmer_size", type=int, default=5)
+    parser.add_argument("--signal_size", type=int, default=30)
+    parser.add_argument("--spectrogram_size", type=int, default=21)
+    parser.add_argument("--block_len", type=int, default=17)
+    parser.add_argument("--seq_len", type=int, default=200)
+    parser.add_argument("--t_act", type=str, default="gelu")
+    parser.add_argument("--lin_act", type=str, default="gelu")
     parser.add_argument("--lr_step", type=int, default=1000)
     parser.add_argument("--lr_interval", type=int, default=100)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--class_ratio", type=int, default=1)
+    parser.add_argument("--weight_decay", type=float, default=0.1)
+    parser.add_argument("--class_ratio", type=int, default=None)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=None)
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--prefetch_factor", type=int, default=512)
     parser.add_argument("--profiler", type=int, default=0)
-    parser.add_argument("--pin_memory", type=int, default=0)
-    parser.add_argument("--read_every", type=int, default=None)
+    parser.add_argument("--pin_memory", type=int, default=1)
+    parser.add_argument("--yield_period", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
     parser.add_argument("--soft", type=float, default=None)
     parser.add_argument("--loss", type=str, default="BCE")
     parser.add_argument("--score_feature", type=bool, default=False)
-    parser.add_argument("--load_checkpoint", type=str, default=None)
     parser.add_argument("--gpu_pool", type=int, nargs="+", default=None)
+    parser.add_argument("--cut_overlap", type=bool, default=False)
+    parser.add_argument("--load_checkpoint", type=str, default=None)
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"BERMUDA-ResNet-{args.model.split('_')[-1]}-{strfttime}"
-    if args.read_every is None:
-        args.read_every = args.disk_shard_size
+        args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
     if args.save_interval is None:
         args.save_interval = args.eval_interval
     if args.gpu_pool is None:
         args.gpu_pool = list(range(args.gpu))
+    else:
+        if len(args.gpu_pool) < args.gpu:
+            raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
     return args
 
 
@@ -105,7 +108,8 @@ class Trainer:
             save_interval: int,
             model_config: dict = None,
             soft_label: float = None,
-            score_feature: bool = False
+            score_feature: bool = False,
+            cut_overlap: bool = False
     ) -> None:
 
         self.rank = rank
@@ -146,6 +150,7 @@ class Trainer:
         self.tb_path = tb_path
         self.soft_label = soft_label
         self.score_feature = score_feature
+        self.cut_overlap = cut_overlap
 
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
@@ -174,18 +179,23 @@ class Trainer:
         src_kmer = source["kmer_token"]
         src_signal = source["signal_token"]
         src_bq = source["bq_token"]
-        src_move = source["move_token"]
+        src_pad_mask = (src_kmer == 0)
         src_target_mask = source["target_mask"]
+        src_move = source["move_token"]
+
+        if self.cut_overlap:
+            src_signal = src_signal[:,:,10:15]
 
         src_kmer = src_kmer.to(self.gpu_id)
         src_signal = src_signal.to(self.gpu_id)
         src_bq = src_bq.to(self.gpu_id)
+        src_pad_mask = src_pad_mask.to(self.gpu_id)
         src_target_mask = src_target_mask.to(self.gpu_id)
         src_move = src_move.to(self.gpu_id)
         target = target.to(torch.float32)
         target = target.to(self.gpu_id)
 
-        output = self.model(src_kmer, src_signal, src_bq, src_move, src_target_mask)
+        output = self.model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
 
         return output, target
 
@@ -218,9 +228,10 @@ class Trainer:
         dist.barrier()
         time.sleep(0.03*self.gpu_id)
         with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
-                       position=self.gpu_id, colour=colour_choice[self.gpu_id%len(colour_choice)], smoothing = 0) as self.pbar:
+                       position=self.rank, colour=colour_choice[self.rank%len(colour_choice)], smoothing = 0) as self.pbar:
 
             for source, targets in self.train_loader:
+
                 self._run_batch(source, targets)
                 self.current_interval_losses.append(self.current_batch_loss)
 
@@ -237,14 +248,17 @@ class Trainer:
                         self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_step)
                     dist.barrier()
 
-                if self.current_step % self.eval_interval == 0:
+                if self.current_step % self.eval_interval == 0 and self.current_step > 0:
                     self._run_eval()
 
-                if self.current_step % self.save_interval == 0:
+                if self.current_step % self.save_interval == 0 and self.current_step > 0:
                     dist.barrier()
                     if self.rank == 0:
-                        for name, parameter in self.model.named_parameters():
-                            self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
+                        # try:
+                        #     for name, parameter in self.model.named_parameters():
+                        #         self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
+                        # except:
+                        #     pass
                         self._save_checkpoint()
                     dist.barrier()
 
@@ -335,7 +349,7 @@ class Trainer:
             self.current_epoch = epoch
             self._run_epoch()
             if self.continue_training == 0:
-                printmessage(f"Early Stopping at Epoch {self.current_epoch}")
+                printmessage(f"Early Stopping at Epoch {self.current_epoch}", msg_type="info")
                 break
         if self.rank == 0:
             self.tb_writer.flush()
@@ -353,7 +367,7 @@ def setup_ddp(rank,world_size,gpu_id):
 
 
 def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, rank, num_replicas, buffer_size,
-                       read_every, seed, class_ratio, prefetch_factor, pin_memory, soft_label):
+                       yield_period, seed, class_ratio, prefetch_factor, pin_memory, soft_label):
 
     batch_size = batch_size
     train_pos_data_path = f"{data_path}/train/pos"
@@ -362,10 +376,10 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_neg_data_path = f"{data_path}/val/neg"
 
     train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                buffer_size, read_every, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                                buffer_size, yield_period, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
                                 prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
+                              buffer_size, yield_period, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
                               prefetch_factor = prefetch_factor, pin_memory = pin_memory, soft_label=soft_label)
 
     return train_loader, val_loader
@@ -374,17 +388,19 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
 def main_worker(rank, args_dict):
     gpu_id = args_dict["gpu_pool"][rank]
     setup_ddp(rank, args_dict["gpu"],gpu_id)
-    ResNetModel = importlib.import_module(f"model.{args_dict['model']}").ResNetModel
-    model = ResNetModel(n_layers_kmer = args_dict["n_layers_kmer"], n_layers_sig = args_dict["n_layers_sig"],
-                        n_layers_merged = args_dict["n_layers_merged"], n_layers_final = args_dict["n_layers_final"],
-                        d_kmer = args_dict["d_kmer"], d_signal = args_dict["d_signal"], d_merged = args_dict["d_merged"],
-                        d_final = args_dict["d_final"], dropout = args_dict["dropout"], kernel_size = args_dict["kernel_size"])
+    TransformerModel = importlib.import_module(f"model.{args_dict['model']}").TransformerModel
+    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
+                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
+                             t_act = args_dict["t_act"], lin_act = args_dict["lin_act"],
+                             encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
+                             kmer_size = args_dict["kmer_size"], signal_size = args_dict["signal_size"],
+                             spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"], seq_len = args_dict["seq_len"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
-        printmessage(f"Total Params: {total_params:,}")
+        printmessage(f"Total Params: {total_params:,}", msg_type="info")
 
     model = model.to(gpu_id)
 
@@ -416,6 +432,8 @@ def main_worker(rank, args_dict):
     if args_dict["load_checkpoint"] is not None:
         # scheduler.load_state_dict(save_dict["scheduler_state_dict"])
         save_dict.clear()
+
+
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
     elif args_dict["loss"] == "BCE":
@@ -434,16 +452,16 @@ def main_worker(rank, args_dict):
 
     train_loader, val_loader = prepare_dataloader(args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
                                                   args_dict["disk_shard_size"], rank, args_dict["gpu"], args_dict["buffer_size"],
-                                                  args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
+                                                  args_dict["yield_period"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch_factor"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"])
     trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
-                        args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                        args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                        args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
-                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"])
-    printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
+                      args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
+                      args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
+                      args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
+                      soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"])
+    printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.", msg_type="info")
     trainer.train(args_dict["epochs"])
-    printmessage(f"[GPU {gpu_id}] Training Loop Complete.")
+    printmessage(f"[GPU {gpu_id}] Training Loop Complete.", msg_type="info")
     dist.destroy_process_group()
     return None
 
@@ -457,12 +475,12 @@ def main_master():
     args.tb = os.path.join(args.tb, args.name)
     if args.seed is None:
         args.seed = np.random.randint(0, 10000000)
-    printmessage("Training Program Started.")
-    printmessage(f"Seed: {args.seed}")
-    printmessage(f"Using {args.gpu} GPUs.")
+    printmessage("Training Program Started.", msg_type="info")
+    printmessage(f"Seed: {args.seed}", msg_type="info")
+    printmessage(f"Using {args.gpu} GPUs.", msg_type="info")
     args_dict = vars(args)
     mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
-    printmessage(f"Training Program Complete.")
+    printmessage(f"Training Program Complete.", msg_type="success")
     return None
 
 

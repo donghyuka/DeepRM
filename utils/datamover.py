@@ -1,1 +1,0 @@
-tar cf - -C /extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/eval_data ./baeklab_v2_depth20_drach | pv | pigz -3 -p 8 | ssh -J c1 sonic@147.47.218.124 "cd /extdata2/baeklab/Hyeonseo/m6A/inference/inference_dataset ; pigz -dc -p 4 - | tar xf - "

@@ -5,6 +5,13 @@ import pandas as pd
 from utils.utils import mean_phred, oom_killer, printmessage
 
 
+import argparse, gc, os, sys, pickle, re, pod5, pysam, tqdm, glob, toml
+import multiprocessing as mp
+import numpy as np
+import pandas as pd
+from utils.utils import mean_phred, oom_killer, printmessage
+
+
 
 def create_segment_len_arr(segment_arr, sampling):
     segment_len_arr = np.array([len(x) for x in segment_arr], dtype=int)
@@ -341,106 +348,6 @@ def extract_move_worker(input_bam, pid, ncpu, bq_cutoff, signal_path_dict, signa
     return None
 
 
-def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
-    ## Extract mv tag from bam and save to separate file
-    data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
-                     "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
-    valid_count = 0
-    missing_move = 0
-    missing_bq = 0
-    low_bq = 0
-    missing_signal = 0
-    unmapped = 0
-
-    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
-        with tqdm.tqdm(total=input_bam.mapped + input_bam.unmapped, desc="Parsing BAM File") as pbar:
-            for read in input_bam:
-                pbar.update(1)
-                pbar.set_postfix({"valid": valid_count, "invalid": missing_move + missing_bq + low_bq + missing_signal + unmapped})
-                if read.is_unmapped:
-                    unmapped += 1
-                    continue
-
-                if read.has_tag("pi"):
-                    read_id = str(read.get_tag("pi"))
-                else:
-                    read_id = str(read.query_name)
-
-                try:
-                    bq = np.array(read.query_qualities, dtype=int)
-                    if mean_phred(bq) < bq_cutoff:
-                        low_bq += 1
-                        continue
-                except:
-                    missing_bq += 1
-                    continue
-
-                try:
-                    signal_path = signal_path_dict[read_id]
-                    data = data_dict[signal_path]
-                except:
-                    missing_signal += 1
-                    continue
-
-                if read.has_tag("mv"):
-                    mv = read.get_tag("mv")
-                else:
-                    missing_move += 1
-                    continue
-
-                if read.has_tag("ts"):
-                    ts = read.get_tag("ts")
-                else:
-                    ts = 0
-
-                if read.has_tag("ns"):
-                    ns = read.get_tag("ns")
-                else:
-                    ns = 0
-
-                if read.has_tag("sp"):
-                    sp = read.get_tag("sp")
-                else:
-                    sp = 0
-
-                if read.has_tag("pt"):
-                    pt = read.get_tag("pt")
-                else:
-                    pt = 0
-
-                data["mv"].append(mv)
-                data["read_id"].append(read_id)
-                data["ts"].append(ts)
-                data["ns"].append(ns)
-                data["sp"].append(sp)
-                data["pt"].append(pt)
-                data["seq"].append(str(read.query_sequence))
-                data["bq"].append(bq)
-                data["ref"].append(read.reference_name)
-                data["start"].append(read.reference_start)
-                data["cigar"].append(read.cigarstring)
-
-                valid_count += 1
-
-    printmessage(f"Valid reads: {valid_count}", msg_type="info")
-    printmessage(f"Low BQ: {low_bq}", msg_type="info")
-    printmessage(f"Missing BQ (Secondary): {missing_bq}", msg_type="info")
-    printmessage(f"Missing Signal: {missing_signal}", msg_type="info")
-    printmessage(f"Missing Move: {missing_move}", msg_type="info")
-    printmessage(f"Unmapped: {unmapped}", msg_type="info")
-
-    for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
-        move_df = pd.DataFrame.from_dict(data, orient="columns")
-        df_len = len(move_df)
-        if df_len > 0:
-            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path}")
-        del move_df
-
-    del data_dict
-
-    gc.collect()
-    return None
-
 
 INCREMENTS_CIGAR = {
     'M': [1, 1],
@@ -517,7 +424,7 @@ def get_label_pos_list(ref, start, cigar, label_df):
     return pos_tuple_list_filtered
 
 
-def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode, token_output_path,
+def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode,
                              cb_len = 21, kmer_len = 5, chunk_size = 10000, max_token_len = 200, sampling = 6, boi = "A"):
 
     trim = kmer_len//2
@@ -541,15 +448,17 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
     for signal_path in tqdm.tqdm(signal_path_arr):
         oom_killer()
 
-        out_path = f"{token_output_path}/{signal_path.split('/')[-1]}"
+        out_path = f"{seg_df_path}/token_{norm_mode}/{signal_path.split('/')[-1]}"
         if os.path.exists(out_path):
             printmessage(f"Already exists: {out_path}", msg_type="warning")
             continue
         move_path = f"{seg_df_path}/intermediates/move_df_split/{signal_path.split('/')[-1]}"
         if not os.path.exists(move_path):
+            printmessage(f"Move data not found: {move_path}", msg_type="warning")
             continue
         signal_df = pd.read_pickle(signal_path)
         if len(signal_df) == 0:
+            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
             continue
 
         move_df = pd.read_pickle(move_path)
@@ -562,7 +471,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["pos"] = pos_list
         signal_df = signal_df[signal_df["pos"].apply(lambda x: len(x) > 0)]
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            print(f"Empty signal data: {signal_path}")
             continue
         del pos_list, alignment_zip
         gc.collect()
@@ -571,11 +480,11 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
 
         if norm_mode == "normalise":
             signal_df["signal"] = signal_df.apply(lambda x: normalise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                      quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
+                                                                                          quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
 
         elif norm_mode == "standardise":
             signal_df["signal"] = signal_df.apply(lambda x: standardise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                      x["offset"], x["scale"], mean, stdev), axis=1)
+                                                                                            x["offset"], x["scale"], mean, stdev), axis=1)
 
         else:
             raise ValueError(f"Invalid norm_mode: {norm_mode}")
@@ -587,7 +496,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df.explode("pos").reset_index(drop=True)
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            print(f"Empty signal data: {signal_path}")
             continue
 
         signal_df["ref"] = signal_df["ref"].str.split(".").str[0]
@@ -598,7 +507,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            print(f"Empty signal data: {signal_path}")
             continue
 
         signal_df["label_id"] = signal_df["ref"].astype(str) + ":" + signal_df["ref_pos"].astype(str)
@@ -610,7 +519,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] <= signal_df["query_len"])]
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            print(f"Empty signal data: {signal_path}")
             continue
 
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)
@@ -643,7 +552,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         gc.collect()
 
 
-    out_path = f"{token_output_path}/last-{pid}.pkl"
+    out_path = f"{seg_df_path}/token_{norm_mode}/last-{pid}.pkl"
     ## For last chunk, append zero data and save
     if len(buffer) > 0:
         for chunk_idx in range(0, len(buffer) // chunk_size):
@@ -672,7 +581,6 @@ def parse_args():
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
     parser.add_argument("--norm_mode", "-n", type=str, required=True, help="Normalisation mode: normalise or standardise")
-    parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output files")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -773,7 +681,7 @@ def parse_toml(toml_path, norm_mode):
 def main():
     args = parse_args()
 
-    token_output_path = f"{args.output}/token_{args.norm_mode}_{args.postfix}/"
+    token_output_path = f"{args.output}/token_{args.norm_mode}/"
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
@@ -812,8 +720,8 @@ def main():
             signal_path_dict[read_id] = signal_path.split('/')[-1]
     signal_path_arr = list(index_dict.keys())
 
-    signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
-    extract_move_master(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+    # signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+    # extract_move_worker(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
 
     del signal_path_dict, index_dict
     gc.collect()
@@ -825,7 +733,7 @@ def main():
     label_df = label_df.groupby("nmid")
     for pid, signal_paths in enumerate(signal_path_arr_split):
         proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path))
+                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode))
         proc_list.append(proc)
         proc.start()
 

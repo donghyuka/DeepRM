@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate.inference_dataloader_v6 import load_dataset
+from archived.inference_dataloader_v5 import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=40000, help="Batch size")
-    parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
+    parser.add_argument("--shard", "-s", type=int, default=100000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
     parser.add_argument("--nfile", "-n", type=int, default=16, help="Number of files to load")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
@@ -120,9 +120,20 @@ def inference_worker(rank, args_dict, flush_interval = 100):
                                num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"], worker = args_dict["worker"])
 
     id_list = []
+    label_list = []
     pred_list = []
+    if "score_feature" in model_config:
+        if model_config["score_feature"]:
+            score_feature = True
+        else:
+            score_feature = False
+    else:
+        score_feature = False
+
+
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
+        data = data[0]
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
             # src_signal = data["signal_token"]
@@ -131,6 +142,9 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_move = data["move_token"].to(rank)
             src_pad_mask = (src_kmer == 0)
             src_target_mask = data["target_mask"].to(rank)
+            if score_feature:
+                ## Fill with one, shape is (batch, )
+                src_score = torch.ones(src_kmer.size(0)).to(rank)
 
         else:
             src_kmer = data["kmer_token"]
@@ -140,9 +154,14 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_move = data["move_token"]
             src_pad_mask = (src_kmer == 0)
             src_target_mask = data["target_mask"]
+            if score_feature:
+                src_score = torch.ones(src_kmer.size(0))
 
         with torch.no_grad():
-            pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
+            if score_feature:
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
+            else:
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
 
         ## if pred has additional dimension, remove it.
         if len(pred.shape) > 1:
@@ -156,26 +175,30 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         else:
             pred_list.append(pred.detach().numpy())
         id_list.append(np.array(data["label_id"]))
+        label_list.append(np.array(data["label"]))
 
 
         if idx % flush_interval == 0 and idx > 0:
             id_list = np.concatenate(id_list)
+            label_list = np.concatenate(label_list)
             pred_list = np.concatenate(pred_list)
 
-            data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
-            out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_{idx}.pkl"
+            data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list})
+            out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_{idx}.tsv"
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            data_df.to_pickle(out_path)
+            data_df.to_csv(out_path, sep='\t', index=False)
             id_list = []
+            label_list = []
             pred_list = []
 
     id_list = np.concatenate(id_list)
+    label_list = np.concatenate(label_list)
     pred_list = np.concatenate(pred_list)
 
-    data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
-    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_last.pkl"
+    data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list})
+    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_last.tsv"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    data_df.to_pickle(out_path)
+    data_df.to_csv(out_path, sep='\t', index=False)
 
     if args_dict["gpu"] > 0:
         dist.destroy_process_group()
