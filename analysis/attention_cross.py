@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from archived.inference_dataloader import load_dataset
+from archived.train_eval.inference_dataloader import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm

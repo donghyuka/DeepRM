@@ -95,6 +95,8 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     else:
         save_dict = torch.load(args_dict["model"], map_location='cpu')
     model_config = save_dict["model_config"]
+
+
     TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
@@ -117,7 +119,12 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
     data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
-                               num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"], worker = args_dict["worker"])
+                               num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"],
+                               worker = args_dict["worker"],
+                               cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
+                               kmer_len = model_config["kmer_size"],
+                               sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
+                               sig_window = model_config["kmer_size"])
 
     id_list = []
     pred_list = []

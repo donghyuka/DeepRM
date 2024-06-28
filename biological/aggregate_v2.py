@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 import glob
 from tqdm import tqdm
-from archived.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
+from archived.misc.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
 from utils.utils import is_drach, parse_refflat
 
 def parse_args():

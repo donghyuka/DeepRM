@@ -1,98 +1,25 @@
 import functools
-import numpy as np
+
 import torch
 import math
-from torch.utils.data.dataset import Dataset, IterableDataset
+from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
 import pandas as pd
 import glob
-from utils.utils import printmessage
+
+from archived.misc.segment_transcript_sample_V4 import segmented_signal_to_block, sequence_to_kmer_token, create_segment_len_arr, expand_token_to_segment, create_move_token, create_target_mask
 
 ## Based on https://discuss.pytorch.org/t/an-iterabledataset-implementation-for-chunked-data/124437 by Majid Hajiheidari
 ## Load Nanopore Dataset from Pickled Pandas DataFrame
 ## DO NOT SHUFFLE BECAUSE THIS LOADER IS FOR INFERENCE ONLY
 
-
-
-def sequence_to_kmer_token(seq, kmer):
-    ## 1. change string to array of int - 0, 1, 2, 3
-    seq = seq.upper()
-    seq = seq.replace('A', '0')
-    seq = seq.replace('C', '1')
-    seq = seq.replace('G', '2')
-    seq = seq.replace('T', '3')
-    seq = seq.replace('U', '3')
-    seq = np.array(list(seq), dtype=int)
-
-    ## 2. convert to kmer token
-    seq = [seq[i:kmer+i] for i in range(len(seq)-kmer+1)]
-    seq = np.stack(seq, axis=1)
-    quaternary = 4**np.arange(kmer).reshape(-1,1)
-    seq = np.sum(seq * quaternary, axis=0) + 1 ## 0 is reserved for padding
-    seq = seq.astype(np.int16)
-    return seq
-
-
-def create_segment_len_arr(segment_arr, sampling):
-    segment_len_arr = np.array([len(x) for x in segment_arr], dtype=int)
-    segment_len_arr = segment_len_arr // sampling
-    return segment_len_arr
-
-
-def expand_token_to_segment(token_arr, segment_len_arr):
-    token = np.repeat(token_arr, segment_len_arr)
-    return token
-
-
-def create_move_token(segment_len_arr):
-    token = np.arange(1, len(segment_len_arr)+1, dtype=np.uint8)
-    token = np.repeat(token, segment_len_arr)
-    return token
-
-
-def create_target_mask(segment_len_arr, lr_pad):
-    binary_mask = np.zeros(2*lr_pad+1, dtype=np.uint8)
-    binary_mask[lr_pad] = 1
-    binary_mask = np.repeat(binary_mask, segment_len_arr)
-    return binary_mask
-
-
-def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling, sig_window):
-    try:
-        kmer_pad = (kmer-1)//2
-        lr_pad = (sig_window-1)//2
-        l_skip = (np.sum(segment_len_arr[:kmer_pad])-lr_pad)*sampling
-        r_skip = (np.sum(segment_len_arr[-kmer_pad:])-lr_pad)*sampling
-        assert l_skip >= 0, f"Left skip is negative: {l_skip}, segment_len_arr: {segment_len_arr}"
-        assert r_skip >= 0, f"Right skip is negative: {r_skip}, segment_len_arr: {segment_len_arr}"
-        signal_segmented = np.concatenate(signal_segmented)
-        if len(signal_segmented) % sampling != 0:
-            return None
-        if r_skip > 0:
-            signal_segmented = signal_segmented[l_skip:-r_skip]
-        else:
-            signal_segmented = signal_segmented[l_skip:]
-        signal_segmented = np.lib.stride_tricks.sliding_window_view(signal_segmented, sig_window * sampling)[::sampling]
-    except:
-        return None
-    return signal_segmented
-
-
 class NanoporeDatasetIterator:
-    def __init__(self, file_paths, num_files_read_once = 1000,
-                 cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5):
+    def __init__(self, file_paths, num_files_read_once = 1000):
 
         self.file_paths = file_paths
         self.current_index = -1
         self.current_iterator = None
         self.num_files_read_once = num_files_read_once
-        self.cb_len = cb_len
-        self.kmer_len = kmer_len
-        self.sampling = sampling
-        self.sig_window = sig_window
-        self.cb_lr_pad = (cb_len-kmer_len)//2
-        self.trim = kmer_len//2
-
 
     def __iter__(self):
         return self
@@ -109,15 +36,33 @@ class NanoporeDatasetIterator:
         if "label_id" not in df.columns:
             df["label_id"] = ""
 
-        df["bq"] = df["bq"].apply(lambda x: x[self.trim:-self.trim])
-        df["segment_len_arr"] = df["signal"].apply(lambda x: create_segment_len_arr(x, self.sampling))
-        df["signal_token"] = df.apply(lambda x: segmented_signal_to_block(x["signal"], x["segment_len_arr"], self.kmer_len, self.sampling, self.sig_window), axis=1)
-        df["segment_len_arr"] = df["segment_len_arr"].apply(lambda x: x[self.trim:-self.trim])
-        df["kmer_token"] = df.apply(lambda x: expand_token_to_segment(sequence_to_kmer_token(x["motif"], self.kmer_len), x["segment_len_arr"]), axis=1)
+        cb_len = 21
+        kmer = 5
+        sampling = 5
+        sig_window = 5
+        cb_lr_pad = (cb_len-kmer)//2
+        trim = kmer//2
+
+
+        df["bq"] = df["bq"].apply(lambda x: x[trim:-trim])
+
+        df["segment_len_arr"] = df["signal_seg"].apply(lambda x: create_segment_len_arr(x, sampling))
+
+        df["signal_token"] = df.apply(lambda x: segmented_signal_to_block(x["signal_seg"], x["segment_len_arr"], kmer, sampling, sig_window), axis=1)
+
+        df["segment_len_arr"] = df["segment_len_arr"].apply(lambda x: x[trim:-trim])
+
+        df["kmer_token"] = df.apply(lambda x: expand_token_to_segment(sequence_to_kmer_token(x["motif"], kmer), x["segment_len_arr"]), axis=1)
+
+
         df["bq_token"] = df.apply(lambda x: expand_token_to_segment(x["bq"], x["segment_len_arr"]), axis=1)
+
         df["move_token"] = df["segment_len_arr"].apply(lambda x: create_move_token(x))
-        df["target_mask"] = df["segment_len_arr"].apply(lambda x: create_target_mask(x, self.cb_lr_pad))
-        df = df[["kmer_token", "bq_token", "signal_token", "move_token", "target_mask","label_id","block_id"]][df["signal_token"].notnull()].copy()
+
+        df["target_mask"] = df["segment_len_arr"].apply(lambda x: create_target_mask(x, cb_lr_pad))
+
+        df = df[["kmer_token", "bq_token", "signal_token", "move_token", "target_mask","label_id", "label"]][df["signal_token"].notnull()].copy()
+
 
         self.current_iterator = df.itertuples(index=False)
         return None
@@ -146,9 +91,9 @@ class NanoporeDatasetIterator:
                 except StopIteration:
                     raise StopIteration
 
-        source = self.nanopore_row_to_tensor(result)
+        source, target = self.nanopore_row_to_tensor(result)
 
-        return source
+        return source, target
 
     def nanopore_row_to_tensor(self, row):
         kmer_token = torch.tensor(row[0], dtype=torch.long)
@@ -157,13 +102,15 @@ class NanoporeDatasetIterator:
         move_token = torch.tensor(row[3], dtype=torch.long)
         target_mask = torch.tensor(row[4], dtype=torch.float)
         label_id = row[5]
-        block_id = row[6]
+        label =row[6]
 
         return_dict = {"kmer_token": kmer_token, "bq_token": bq_token,
                        "signal_token": signal_token, "move_token": move_token,
-                       "target_mask": target_mask, "label_id": label_id, "block_id": block_id}
+                       "target_mask": target_mask, "label_id": label_id, "label": label,}
 
-        return return_dict
+        label = torch.tensor(label, dtype=torch.long)
+
+        return return_dict, label
 
 
     ## END of BinaryClassDatasetIterator
@@ -171,7 +118,7 @@ class NanoporeDatasetIterator:
 
 class NanoporeDataset(torch.utils.data.IterableDataset):
     def __init__(self, data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 seed = 0, num_files_read_once = 1000, cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5):
+                 seed = 0, num_files_read_once = 1000):
         super(NanoporeDataset).__init__()
 
         self.data_path = data_path
@@ -193,11 +140,6 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         self.dataset_size = self.num_shard * disk_shard_size
         self.num_files_read_once = num_files_read_once
 
-        self.cb_len = cb_len
-        self.kmer_len = kmer_len
-        self.sampling = sampling
-        self.sig_window = sig_window
-
 
     def __len__(self):
         return self.dataset_size
@@ -207,11 +149,10 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         if worker_info is None:
             self.file_paths = self.file_paths[self.rank::self.num_replicas]
         else:
-            id = worker_info.id + self.rank * worker_info.num_workers
+            id = worker_info.id * self.num_replicas + self.rank
             nw = worker_info.num_workers * self.num_replicas
             self.file_paths = self.file_paths[id::nw]
-        return NanoporeDatasetIterator(self.file_paths, num_files_read_once = self.num_files_read_once,
-                                       cb_len=self.cb_len, kmer_len=self.kmer_len, sampling=self.sampling, sig_window=self.sig_window)
+        return NanoporeDatasetIterator(self.file_paths, num_files_read_once = self.num_files_read_once)
 
     def set_epoch(self, epoch: int) -> None:
         r"""
@@ -225,7 +166,6 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         self.epoch = epoch
         return None
 
-
 class NanoporeDataLoader(DataLoader):
     def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
         shuffle = False
@@ -238,15 +178,11 @@ class NanoporeDataLoader(DataLoader):
 
 
 def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 pad_to = 200, bq_clip = 40, num_files_read_once = 1, prefetch_factor = 100000, worker = 16,
-                cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5):
-
+                 pad_to = 200, bq_clip = 40, num_files_read_once = 1000, prefetch_factor = 100000):
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip)
     ## Use DataLoader to load the dataset
-    dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
-                              num_files_read_once = num_files_read_once, cb_len = cb_len, kmer_len = kmer_len,
-                              sampling = sampling, sig_window = sig_window)
-    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=worker, pin_memory=True, drop_last=False,
+    dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas, num_files_read_once = num_files_read_once)
+    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=16, pin_memory=False, drop_last=False,
                                     collate_fn = pad_collate_func, prefetch_factor=prefetch_factor)
     return dataloader
 
@@ -256,13 +192,16 @@ def pad_collate(batch, pad_to, bq_clip):
     ## Based on NanoporeDataset
     ## Transform into Batch First
 
+    label = [item[1] for item in batch]
+    target = torch.stack(label, dim=0)
+
     token_name_list = ["kmer_token", "bq_token", "signal_token","move_token", "target_mask"]
 
     source = {}
 
     ## Zero pad the followings: kmer_token, bq_token, position_token, signal_token, spectrogram_token, move_token
     for token_name in token_name_list:
-        token = [item[token_name] for item in batch]
+        token = [item[0][token_name] for item in batch]
         token = torch.nn.utils.rnn.pad_sequence(token, batch_first=True, padding_value=0)
         if pad_to is not None:
             if token.shape[1] < pad_to:
@@ -276,7 +215,8 @@ def pad_collate(batch, pad_to, bq_clip):
 
     ## clip bq
     source["bq_token"] = torch.clamp(source["bq_token"], 0, bq_clip)
-    source["label_id"] = [item["label_id"] for item in batch]
-    source["block_id"] = [item["block_id"] for item in batch]
 
-    return source
+    source["label_id"] = [item[0]["label_id"] for item in batch]
+    source["label"] = [item[0]["label"] for item in batch]
+
+    return source, target

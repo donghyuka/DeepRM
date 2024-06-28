@@ -1,3 +1,4 @@
+import gc
 
 import torch
 import os, glob
@@ -6,12 +7,11 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from archived.train_eval.inference_dataloader import load_dataset
+from archived.train_eval.inference_dataloader_v2 import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
-import gc
-import analysis.attention_model_v19 as atm
+import importlib
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
     parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
-    parser.add_argument("--batch", "-b", type=int, default=100, help="Batch size")
+    parser.add_argument("--batch", "-b", type=int, default=4000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
     parser.add_argument("--nfile", "-n", type=int, default=10, help="Number of files to load")
@@ -88,20 +88,19 @@ def run_inference(args):
     return None
 
 
-def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 8):
+def inference_worker(rank, args_dict, flush_interval = 100):
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
     else:
         save_dict = torch.load(args_dict["model"], map_location='cpu')
     model_config = save_dict["model_config"]
-    model = atm.TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
+    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
+    model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
-
-
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -110,7 +109,7 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 8):
         printmessage(f"Total Params: {total_params:,}")
     if args_dict["gpu"] > 0:
         model.to(rank)
-    model.load_state_dict(state_dict=save_dict["model_state_dict"], strict = False)
+    model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
     if args_dict["gpu"] > 0:
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
@@ -121,83 +120,99 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 8):
     id_list = []
     label_list = []
     pred_list = []
-    move_list = []
     block_id_list = []
-    attention_dict = {i: [] for i in range(attention_count)}
-    out_dir = f"{args_dict['output']}/attention/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/"
-    os.makedirs(out_dir, exist_ok=True)
+    metadata_list = []
+    genome_id_list=[]
+    if "score_feature" in model_config:
+        if model_config["score_feature"]:
+            score_feature = True
+        else:
+            score_feature = False
+    else:
+        score_feature = False
 
-    idx = 0
-
-    for idx, data in enumerate(tqdm.tqdm(data_loader, total=len(data_loader), smoothing = 0)):
+    for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
         data = data[0]
-        src_kmer = data["kmer_token"].to(rank)
-        src_signal = data["signal_token"].to(rank)
-        # src_signal = data["signal_token"][:,:,10:15].to(rank)
-        src_pad_mask = torch.eq(src_kmer, 0)
-        target_mask = data["target_mask"].to(rank)
-        src_move = data["move_token"].to(rank)
-        src_bq = data["bq_token"].to(rank)
+        if args_dict["gpu"] > 0:
+            src_kmer = data["kmer_token"].to(rank)
+            # src_signal = data["signal_token"]
+            src_signal = data["signal_token"].to(rank)
+            src_bq = data["bq_token"].to(rank)
+            src_move = data["move_token"].to(rank)
+            src_pad_mask = (src_kmer == 0)
+            src_target_mask = data["target_mask"].to(rank)
+            if score_feature:
+                    ## Fill with one, shape is (batch, )
+                    src_score = torch.ones(src_kmer.size(0)).to(rank)
 
+        else:
+            src_kmer = data["kmer_token"]
+            # src_signal = data["signal_token"]
+            src_signal = data["signal_token"]
+            src_bq = data["bq_token"]
+            src_move = data["move_token"]
+            src_pad_mask = (src_kmer == 0)
+            src_target_mask = data["target_mask"]
+            if score_feature:
+                src_score = torch.ones(src_kmer.size(0))
 
-        output, attn_list = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, target_mask)
+        with torch.no_grad():
+            if score_feature:
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask, src_score)
+            else:
+                pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
 
-        output = output.cpu().detach().numpy()
-        attn_list = [x.cpu().detach().numpy() for x in attn_list]
-        id_list.append(data["label_id"])
-        pred_list.append(output)
-        label_list.append(data["label"])
-        move_list.append(data["move_token"])
-        block_id_list.append(data["block_id"])
+        ## if pred has additional dimension, remove it.
+        if len(pred.shape) > 1:
+            target_mask_sum = src_target_mask.sum(dim = 1)
+            pred = pred * src_target_mask
+            pred = pred.sum(dim = 1)
+            pred = pred / target_mask_sum
 
-        for i, attn in enumerate(attn_list):
-            attention_dict[i].append(attn)
+        if args_dict["gpu"] > 0:
+            pred_list.append(pred.cpu().detach().numpy())
+        else:
+            pred_list.append(pred.detach().numpy())
+        id_list.append(np.array(data["label_id"]))
+        block_id_list.append(np.array(data["block_id"]))
+        genome_id_list.append(np.array(data["genome_id"]))
+        label_list.append(np.array(data["label"]))
+        metadata_list += data["metadata"]
 
         if idx % flush_interval == 0 and idx > 0:
             id_list = np.concatenate(id_list)
             label_list = np.concatenate(label_list)
             pred_list = np.concatenate(pred_list)
-            move_list = np.concatenate(move_list)
-            attn_dict = {i: np.concatenate(attention_dict[i]) for i in range(attention_count)}
             block_id_list = np.concatenate(block_id_list)
-            move_list = [x for x in move_list]
+            genome_id_list = np.concatenate(genome_id_list)
 
-            data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list, "block_id": block_id_list}
-            for i in range(attention_count):
-                data_dict[f"attention_{i}"] = [x for x in attn_dict[i]]
-
-            out_path = f"{out_dir}/inference_{rank}_{idx}.pkl"
+            data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list, "block_id": block_id_list, "genome_id": genome_id_list, "metadata": metadata_list})
+            out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_{idx}.pkl"
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            data_df = pd.DataFrame(data_dict)
             data_df.to_pickle(out_path)
+
             id_list = []
             label_list = []
             pred_list = []
-            move_list = []
             block_id_list = []
-            attention_dict = {i: [] for i in range(attention_count)}
+            metadata_list = []
+            genome_id_list = []
 
-
+            del data_df
             gc.collect()
-
 
     id_list = np.concatenate(id_list)
     label_list = np.concatenate(label_list)
     pred_list = np.concatenate(pred_list)
-    move_list = np.concatenate(move_list)
     block_id_list = np.concatenate(block_id_list)
-    attn_dict = {i: np.concatenate(attention_dict[i]) for i in range(attention_count)}
-    move_list = [x for x in move_list]
+    genome_id_list = np.concatenate(genome_id_list)
 
-    data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list, "block_id": block_id_list}
-    for i in range(attention_count):
-        data_dict[f"attention_{i}"] = [x for x in attn_dict[i]]
-
-    out_path = f"{out_dir}/inference_{rank}_{idx}.pkl"
+    data_df = pd.DataFrame({"label_id": id_list, "label": label_list, "pred": pred_list, "block_id": block_id_list, "genome_id": genome_id_list, "metadata": metadata_list})
+    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_last.pkl"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    data_df = pd.DataFrame(data_dict)
     data_df.to_pickle(out_path)
 
+    del data_df
     gc.collect()
 
     if args_dict["gpu"] > 0:

@@ -188,159 +188,6 @@ def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
 
 
 
-def extract_move_master(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
-    proc_list = []
-    manager = mp.Manager()
-    count_dict = manager.dict()
-    for key in ["valid", "low_bq", "missing_bq", "missing_signal", "missing_move", "unmapped"]:
-        count_dict[key] = manager.list()
-
-    ncpu = 32
-
-    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=32) as input_bam:
-
-        for pid in range(ncpu):
-            proc = mp.Process(target=extract_move_worker, args=(input_bam, pid, ncpu, bq_cutoff, signal_path_dict,
-                                                                signal_path_arr, intermediate_path, count_dict))
-            proc.start()
-            proc_list.append(proc)
-
-        for proc in proc_list:
-            proc.join()
-
-    gc.collect()
-
-    count_dict = {key: sum(value) for key, value in count_dict.items()}
-    manager.shutdown()
-
-    printmessage(f"Valid reads: {count_dict['valid']}", msg_type="info")
-    printmessage(f"Low BQ: {count_dict['low_bq']}", msg_type="info")
-    printmessage(f"Missing BQ (Secondary): {count_dict['missing_bq']}", msg_type="info")
-    printmessage(f"Missing Signal: {count_dict['missing_signal']}", msg_type="info")
-    printmessage(f"Missing Move: {count_dict['missing_move']}", msg_type="info")
-    printmessage(f"Unmapped: {count_dict['unmapped']}", msg_type="info")
-
-    for signal_path in signal_path_arr:
-        move_df_list = glob.glob(f"{intermediate_path}/move_df_split/{signal_path}-*.pkl")
-        move_df_list = [pd.read_pickle(x) for x in move_df_list]
-        move_df = pd.concat(move_df_list, ignore_index=True)
-        move_df.to_pickle(f"{intermediate_path}/move_df/{signal_path}.pkl")
-        for file in move_df_list:
-            os.remove(file)
-
-    del move_df_list, move_df
-
-    gc.collect()
-
-    return None
-
-
-def extract_move_worker(input_bam, pid, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path, count_dict):
-    ## Extract mv tag from bam and save to separate file
-    data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
-                     "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
-    valid_count = 0
-    missing_move = 0
-    missing_bq = 0
-    low_bq = 0
-    missing_signal = 0
-    unmapped = 0
-    total = np.ceil((input_bam.mapped + input_bam.unmapped) / ncpu).astype(int)
-
-    with tqdm.tqdm(total=total, desc="Parsing BAM File") as pbar:
-        for read_idx, read in enumerate(input_bam):
-
-            if read_idx % ncpu != pid:
-                continue
-
-            pbar.update(1)
-            pbar.set_postfix({"valid": valid_count, "invalid": missing_move + missing_bq + low_bq + missing_signal + unmapped})
-
-            if read.is_unmapped:
-                unmapped += 1
-                continue
-
-            if read.has_tag("pi"):
-                read_id = str(read.get_tag("pi"))
-            else:
-                read_id = str(read.query_name)
-
-            try:
-                bq = np.array(read.query_qualities, dtype=int)
-                if mean_phred(bq) < bq_cutoff:
-                    low_bq += 1
-                    continue
-            except:
-                missing_bq += 1
-                continue
-
-            try:
-                signal_path = signal_path_dict[read_id]
-                data = data_dict[signal_path]
-            except:
-                missing_signal += 1
-                continue
-
-            if read.has_tag("mv"):
-                mv = read.get_tag("mv")
-            else:
-                missing_move += 1
-                continue
-
-            if read.has_tag("ts"):
-                ts = read.get_tag("ts")
-            else:
-                ts = 0
-
-            if read.has_tag("ns"):
-                ns = read.get_tag("ns")
-            else:
-                ns = 0
-
-            if read.has_tag("sp"):
-                sp = read.get_tag("sp")
-            else:
-                sp = 0
-
-            if read.has_tag("pt"):
-                pt = read.get_tag("pt")
-            else:
-                pt = 0
-
-            data["mv"].append(mv)
-            data["read_id"].append(read_id)
-            data["ts"].append(ts)
-            data["ns"].append(ns)
-            data["sp"].append(sp)
-            data["pt"].append(pt)
-            data["seq"].append(str(read.query_sequence))
-            data["bq"].append(bq)
-            data["ref"].append(read.reference_name)
-            data["start"].append(read.reference_start)
-            data["cigar"].append(read.cigarstring)
-
-            valid_count += 1
-
-    count_dict["valid"].append(valid_count)
-    count_dict["low_bq"].append(low_bq)
-    count_dict["missing_bq"].append(missing_bq)
-    count_dict["missing_signal"].append(missing_signal)
-    count_dict["missing_move"].append(missing_move)
-    count_dict["unmapped"].append(unmapped)
-
-    for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
-        move_df = pd.DataFrame.from_dict(data, orient="columns")
-        df_len = len(move_df)
-        if df_len > 0:
-            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path}-{pid}.pkl")
-        del move_df
-
-    del data_dict
-
-    gc.collect()
-    return None
-
-
 def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
     ## Extract mv tag from bam and save to separate file
     data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
@@ -666,13 +513,19 @@ def parse_args():
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--chunk", "-k", type=int, default=1000, help="Chunk size")
+    parser.add_argument("--chunk", "-k", type=int, default=10000, help="Chunk size")
+    parser.add_argument("--pod5_chunk", "-j", type=int, default=1000, help="POD5 Chunk size")
     parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
     parser.add_argument("--norm_mode", "-n", type=str, required=True, help="Normalisation mode: normalise or standardise")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output files")
+    parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
+    parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
+    parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
+    parser.add_argument("--kmer_len", "-e", type=int, default=5, help="Kmer length")
+    parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
@@ -787,7 +640,7 @@ def main():
     norm_factor = parse_toml(args.toml, args.norm_mode)
     printmessage(f"Normalisation factor: {norm_factor}", msg_type="info")
 
-    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.min_size, args.max_size)
+    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
     # signal_path_arr = list(index_dict.keys())
     # gc.collect()
 
@@ -812,8 +665,8 @@ def main():
             signal_path_dict[read_id] = signal_path.split('/')[-1]
     signal_path_arr = list(index_dict.keys())
 
-    signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
-    extract_move_master(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+    # signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
 
     del signal_path_dict, index_dict
     gc.collect()
@@ -825,7 +678,8 @@ def main():
     label_df = label_df.groupby("nmid")
     for pid, signal_paths in enumerate(signal_path_arr_split):
         proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path))
+                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
+                                args.cb_len, args.kmer_len, args.chunk, args.max_token_len, args.sampling, args.boi))
         proc_list.append(proc)
         proc.start()
 
