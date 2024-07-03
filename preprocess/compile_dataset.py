@@ -135,17 +135,25 @@ def sample_and_save_df_worker(ncpu, pid, in_file_list, out_path, label_str, set_
         gc.collect()
         # orig_df["label"] = label
 
-        perfect_df = orig_df[orig_df["block_score"] == 1].copy().reset_index(drop=True)
-        perfect_df.drop("block_score", axis=1, inplace=True)
-        orig_df.drop("block_score", axis=1, inplace=True)
+        # perfect_df = orig_df[orig_df["block_score"] == 1].copy().reset_index(drop=True)
+        # perfect_df.drop("block_score", axis=1, inplace=True)
+        # orig_df.drop("block_score", axis=1, inplace=True)
 
-        score_name = "perfect"
-        save_split_df(ncpu, pid, file_id, perfect_df, out_path, label_str, set_split_dict, chunk, score_name,
-                      id_digit, buffer_dict)
 
-        score_name = "all"
-        save_split_df(ncpu, pid, file_id, orig_df, out_path, label_str, set_split_dict, chunk, score_name,
-                      id_digit, buffer_dict)
+        # semiperfect_df = orig_df[orig_df["block_score"] >= 0.7].copy().reset_index(drop=True)
+        # semiperfect_df.drop("block_score", axis=1, inplace=True)
+        #
+        # score_name = "semiperfect"
+        # save_split_df(ncpu, pid, file_id, semiperfect_df, out_path, label_str, set_split_dict, chunk, score_name,
+        #               id_digit, buffer_dict)
+
+        # score_name = "perfect"
+        # save_split_df(ncpu, pid, file_id, perfect_df, out_path, label_str, set_split_dict, chunk, score_name,
+        #               id_digit, buffer_dict)
+
+        # score_name = "all"
+        # save_split_df(ncpu, pid, file_id, orig_df, out_path, label_str, set_split_dict, chunk, score_name,
+        #               id_digit, buffer_dict)
 
         del orig_df
         gc.collect()

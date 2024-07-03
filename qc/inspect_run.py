@@ -52,9 +52,9 @@ def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
 
     ## plot read length KDE
     fig, ax = plt.subplots(figsize=(10,10))
-    read_len_max = np.percentile(read_len_arr, 98)
+    read_len_max = np.percentile(read_len_arr, 99.9)
     binrange = (0, read_len_max)
-    binwidth = 100
+    binwidth = 10
 
     sns.histplot(read_len_arr_passed, ax=ax, color="royalblue", label=f"Passed (n={len(read_len_arr_passed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step",  stat='density')
     sns.histplot(read_len_arr_failed, ax=ax, color="tomato", label=f"Failed (n={len(read_len_arr_failed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step", stat='density')
@@ -68,6 +68,7 @@ def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
     ax.set_title(f"Read Length Distribution (n={len(read_len_arr):,})")
     ax.set_xlabel("Read Length")
     ax.set_ylabel("Count")
+    ax.set_xlim(0, 1000)
     ax.legend()
     ## Vline at median
     fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
@@ -81,7 +82,7 @@ def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
 
     ## plot read length KDE
     fig, ax = plt.subplots(figsize=(10,10))
-    read_len_max = np.percentile(read_len_arr, 98)
+    read_len_max = np.percentile(read_len_arr, 99.9)
     binrange = (0, read_len_max)
     binwidth = 10
 
@@ -97,6 +98,7 @@ def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
     ax.set_title(f"Poly(A) Length Distribution (n={len(read_len_arr):,})")
     ax.set_xlabel("Poly(A) Length")
     ax.set_ylabel("Count")
+    ax.set_xlim(0, 300)
     ax.legend()
     ## Vline at median
     fig.savefig(f"{out_path}/polya_len_hist.png", dpi=300)
@@ -104,18 +106,18 @@ def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
     return None
 
 
-def plot_qual(mean_qual_arr, out_path, bq_thres = 7):
+def plot_qual(mean_qual_arr, out_path, bq_thres = 7, max_bq = 30):
     ## plot mean quality score KDE with histogram
     fig, ax = plt.subplots(figsize=(10,10))
     pass_arr = mean_qual_arr[mean_qual_arr >= bq_thres]
     fail_arr = mean_qual_arr[mean_qual_arr < bq_thres]
     ax.set_title(f"Read Mean Base Quality Distribution (n={len(mean_qual_arr):,})")
-    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, 24))
-    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, 24))
+    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, max_bq))
+    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, max_bq))
     ## vline at median
     ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
     ax.legend()
-    ax.set_xlim(0, 24)
+    ax.set_xlim(0, max_bq)
     fig.savefig(f"{out_path}/mean_qual_hist.png", dpi=300)
     plt.close(fig)
     return None
@@ -146,18 +148,14 @@ def main():
         polya_len_arr = []
         printmessage("Reading BAM file")
 
-
-
-        for read in tqdm(bam_file, total=bam_file.count()):
-            if read.is_secondary or read.is_supplementary:
+        for read in tqdm(bam_file, total = bam_file.mapped + bam_file.unmapped):
+            if read.is_secondary:
                 continue
             if read.has_tag("pi"):
                 continue
             try:
                 bq = mean_phred(np.array(read.query_qualities, dtype=int))
                 qual_arr.append(bq)
-                if bq > args.bq_thres:
-                    print(read.query_sequence[-10:])
             except:
                 continue
             try:
@@ -178,7 +176,6 @@ def main():
             pickle.dump(mean_qual_arr, f)
         with open(f"{args.out_path}/polya_len.pkl", "wb") as f:
             pickle.dump(polya_len_arr, f)
-
 
     printmessage("Plotting")
     plot_read_len_v2(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)

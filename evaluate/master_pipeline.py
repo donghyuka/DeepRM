@@ -75,15 +75,14 @@ def parse_args():
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--rename", "-r", type=str, default="", help="rename input directory")
-    parser.add_argument("--dag_cfg", "-c", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB.json", help="DAG config file")
-    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,], help="Step to run")
+    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
     parser.add_argument("--ref", "-f", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta", help="Reference path")
     args = parser.parse_args()
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
     if args.step == 0:
-        args.step = [1,2,3,4]
-    if not any(x in args.step for x in [1,2,3,4]):
+        args.step = [1,2,3]
+    if not any(x in args.step for x in [1,2,3]):
         raise ValueError(f"Invalid step argument: {args.step}")
     return args
 
@@ -101,7 +100,7 @@ def main():
     pod5_path = args.input
     raw_pileup_path = f"{wdir}/dorado_output.pileup.raw.tsv"
     pileup_path = f"{wdir}/dorado_output.pileup.filtered.pkl"
-    label_path = f"{args.output}/label/"
+    label_path = f"{args.output}/label/Baeklab.070"
     block_path = f"{args.output}/block/"
 
     os.makedirs(wdir, exist_ok=True)
@@ -152,7 +151,7 @@ def main():
     if 3 in args.step:
         ## Step 3. Run tokenize_transcript.py
         printmessage(f"[Step 3/3] Tokenize Transcript")
-        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}/Baeklab.070 -c {args.cpu} -n normalise"
+        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n normalise"
         printmessage(cmd)
         os.system(cmd)
 

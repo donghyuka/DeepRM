@@ -12,6 +12,11 @@ def parse_args():
     parser.add_argument("--cpu", "-c", type=int, default=None, help="Number of CPUs to use")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
+    parser.add_argument("--neg", type=float, default=0.10, help="Negative threshold")
+    parser.add_argument("--pos", type=float, default=0.98, help="Positive threshold")
+    parser.add_argument("--dom_neg", type=float, default=0.20, help="Dominant negative threshold")
+    parser.add_argument("--dom_pos", type=float, default=0.60, help="Dominant positive threshold")
+    parser.add_argument("--epsilon", type=float, default=1e-6, help="Epsilon value")
     args = parser.parse_args()
     if args.cpu is None:
         args.cpu = int (0.9 * mp.cpu_count())
@@ -20,7 +25,8 @@ def parse_args():
     return args
 
 
-def worker(pid, file_paths, out_path, file_per_worker):
+def worker(pid, file_paths, out_path, file_per_worker, threshold_neg = 0.10, threshold_pos = 0.98,
+           threshold_dom_neg = 0.20, threshold_dom_pos = 0.60, epsilon = 1e-6):
 
     for idx, path in enumerate(tqdm.tqdm(file_paths)):
 
@@ -32,11 +38,6 @@ def worker(pid, file_paths, out_path, file_per_worker):
             raise ValueError("Input file must be either .tsv or .pkl")
 
         # threshold = gmm_em_lda(data_df["pred"].values)
-        threshold_neg = 0.10 ## pre-calculated threshold using GMM-EM-LDA (It is too slow to calculate every time)
-        threshold_pos = 0.98
-        threshold_dom_neg = 0.50
-        threshold_dom_pos = 0.50
-        epsilon = 1e-6
 
         ## Groupby label_id and get mean of predictions
         data_df["count"] = 1
@@ -73,7 +74,9 @@ def main():
     file_per_worker = np.ceil(len(file_paths) / args.cpu).astype(int)
 
     for pid, file_paths in enumerate(file_paths_split):
-        proc = mp.Process(target=worker, args=(pid, file_paths, args.output, file_per_worker))
+        proc = mp.Process(target=worker, args=(pid, file_paths, args.output, file_per_worker,
+                                               args.neg, args.pos, args.dom_neg,
+                                               args.dom_pos, args.epsilon))
         proc.start()
         proc_list.append(proc)
     for proc in proc_list:

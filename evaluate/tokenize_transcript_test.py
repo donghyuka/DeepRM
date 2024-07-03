@@ -202,18 +202,16 @@ def extract_move_master(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path
     for key in ["valid", "low_bq", "missing_bq", "missing_signal", "missing_move", "unmapped"]:
         count_dict[key] = manager.list()
 
-    ncpu = 32
+    ncpu = 8
 
-    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=32) as input_bam:
+    for pid in range(ncpu):
+        proc = mp.Process(target=extract_move_worker, args=(bam_path, pid, ncpu, bq_cutoff, signal_path_dict,
+                                                            signal_path_arr, intermediate_path, count_dict))
+        proc.start()
+        proc_list.append(proc)
 
-        for pid in range(ncpu):
-            proc = mp.Process(target=extract_move_worker, args=(input_bam, pid, ncpu, bq_cutoff, signal_path_dict,
-                                                                signal_path_arr, intermediate_path, count_dict))
-            proc.start()
-            proc_list.append(proc)
-
-        for proc in proc_list:
-            proc.join()
+    for proc in proc_list:
+        proc.join()
 
     gc.collect()
 
@@ -242,10 +240,13 @@ def extract_move_master(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path
     return None
 
 
-def extract_move_worker(input_bam, pid, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path, count_dict):
+def extract_move_worker(bam_path, pid, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path, count_dict):
     ## Extract mv tag from bam and save to separate file
     data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
                      "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
+
+    input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=8)
+
     valid_count = 0
     missing_move = 0
     missing_bq = 0

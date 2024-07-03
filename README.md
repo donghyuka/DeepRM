@@ -1,10 +1,7 @@
-# BERMUDA
-Biological Transformer Encoder for RNA Modification Detection Using Nanopore Direct RNA Sequencing Approach
-
-![bermuda.png](docs/images/bermuda.png)
+# AIRNA
 
 ## Introduction
-BERMUDA is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
+AIRNA is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
 This repository contains the source code for training and evaluating BERMUDA.
 
 ## License
@@ -22,7 +19,7 @@ See the [LICENSE](LICENSE) file for details.
 ## Requirements
 * Python 3.8+
 * PyTorch 2.0+
-* Dorado
+* Dorado 0.7.0+
 * Scipy
 * Pandas
 * Polyleven

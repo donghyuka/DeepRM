@@ -22,12 +22,12 @@ import seaborn as sns
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-baeklab_v4_transcript_depth5_nometa_light_pileup_genomic/gene_df_final.pkl", help="Data path")
-    parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240613-184120-18-303000-token_light_v3_pileup_genomic/gene_df_final.pkl", help="Data path")
+    parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-token_normalise_drach_v2_pileup/pileup_genomic.pkl", help="Data path")
+    parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240626-093708-12-215000-token_normalise_drach_v2_pileup/pileup_genomic.pkl", help="Data path")
     parser.add_argument("--dorado1", "-d1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado_m6a_genomic/gene_df_final.pkl", help="Dorado path")
     parser.add_argument("--dorado2", "-d2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-genomic/gene_df_final.pkl", help="Dorado path")
     parser.add_argument("--m6anet", "-m", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/m6anet_genomic/gene_df_final.pkl", help="m6Anet path")
-    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.Genome.GP3.depth5_None.twm6astrict.notsampled.tsv", help="Label path")
+    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.Genomic.GP3.depth5_None.twm6astrict.drach.tsv", help="Label path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/plot", help="Output path")
     parser.add_argument("--min_depth", "-md", type=int, default=20, help="Minimum depth")
     parser.add_argument("--max_depth", "-xd", type=int, default=0, help="Maximum depth")
@@ -43,14 +43,14 @@ def parse_args():
 
 def process_label(label_path,):
     label_df = pd.read_csv(label_path, sep = "\t")
-    label_df = label_df[["genome_id", "label", "m6A_level", "5mer", "drach"]]
+    label_df = label_df[["genome_id", "label", "m6A_level", "5mer", "drach"]].copy()
+    label_df = label_df.drop_duplicates(subset="genome_id", keep="first")
     label_df.rename(columns = {"m6A_level": "dom_label"}, inplace = True)
     label_df = label_df[label_df["label"] >= 0].copy()
     label_df.set_index("genome_id", inplace = True)
     return label_df
 
-
-def plot_roc(data_df, outdir, modelname):
+def plot_roc(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize = (20,20))
 
@@ -72,7 +72,7 @@ def plot_roc(data_df, outdir, modelname):
 
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pm6a_m6anet"])
     roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'm6Anet (v0.4) (AUC = {roc_auc:.3f})', color = "goldenrod", zorder = 3)
+    ax.plot(fpr, tpr, lw=3, label=f'm6Anet (AUC = {roc_auc:.3f})', color = "goldenrod", zorder = 3)
 
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
 
@@ -82,12 +82,12 @@ def plot_roc(data_df, outdir, modelname):
     ax.set_ylabel('True Positive Rate')
     ax.set_title(f'{modelname}\nReceiver Operating Characteristic')
     ax.legend(loc="lower right")
-    plt.savefig(f"{outdir}/roc.png")
+    plt.savefig(f"{outdir}/roc_{comment}.png")
     plt.close()
     return None
 
 
-def plot_pr(data_df, outdir, modelname):
+def plot_pr(data_df, outdir, modelname ,comment=""):
     pr_baseline_level = data_df["label"].mean()
 
     plt.rcParams.update({'font.size': 24})
@@ -117,7 +117,7 @@ def plot_pr(data_df, outdir, modelname):
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pm6a_m6anet"])
     pr_auc = auc(recall, precision)
     # max_f1 = max_f1_score(data_df["label"], data_df["pm6a_m6anet"])
-    ax.plot(recall, precision, lw=3, label=f'm6Anet (v0.4) (AUC = {pr_auc:.3f})', color = "goldenrod", zorder = 3)
+    ax.plot(recall, precision, lw=3, label=f'm6Anet (AUC = {pr_auc:.3f})', color = "goldenrod", zorder = 3)
 
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -125,16 +125,16 @@ def plot_pr(data_df, outdir, modelname):
     ax.set_ylabel('Precision')
     ax.set_title(f'{modelname}\nPrecision-Recall')
     ax.legend(loc="lower left")
-    plt.savefig(f"{outdir}/pr.png")
+    plt.savefig(f"{outdir}/pr_{comment}.png")
     plt.close()
     return None
 
 
-def plot_scatter(data_df, outdir, modelname, comment):
+def plot_scatter(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, axes = plt.subplots(1,5, figsize = (100,20))
-    
-    data_df = data_df[(data_df["dom_label"] > 0) & (data_df["label"] == 1)].copy()
+
+    data_df = data_df[data_df["dom_label"] > 0]
 
     ax = axes[0]
     ax.scatter(data_df["dom_label"], data_df["dom"], s = 10, alpha = 0.5, color = "royalblue")
@@ -160,9 +160,9 @@ def plot_scatter(data_df, outdir, modelname, comment):
 
     ax = axes[2]
     ax.scatter(data_df["dom_label"], data_df["pred_dorado"], s = 10, alpha = 0.5, color = "tomato")
-    r2 = r2_score(data_df["dom_label"], data_df["pred_dorado"])
-    rho2 = spearmanr(data_df["dom_label"], data_df["pred_dorado"])[0] ** 2
-    ax.set_title(f"Dorado (v0.4), R2 = {r2:.3f}, rho2 = {rho2:.3f}")
+    r2c = r2_score(data_df["dom_label"], data_df["pred_dorado"])
+    rho2c = spearmanr(data_df["dom_label"], data_df["pred_dorado"])[0] ** 2
+    ax.set_title(f"Dorado (v0.4), R2 = {r2c:.3f}, rho2 = {rho2c:.3f}")
     z = np.polyfit(data_df["dom_label"], data_df["pred_dorado"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
@@ -170,23 +170,24 @@ def plot_scatter(data_df, outdir, modelname, comment):
 
     ax = axes[3]
     ax.scatter(data_df["dom_label"], data_df["pred_dorado_070"], s = 10, alpha = 0.5, color = "darkorange")
-    r2 = r2_score(data_df["dom_label"], data_df["pred_dorado_070"])
-    rho2 = spearmanr(data_df["dom_label"], data_df["pred_dorado_070"])[0] ** 2
-    ax.set_title(f"Dorado (v0.7), R2 = {r2:.3f}, rho2 = {rho2:.3f}")
+    r2d = r2_score(data_df["dom_label"], data_df["pred_dorado_070"])
+    rho2d = spearmanr(data_df["dom_label"], data_df["pred_dorado_070"])[0] ** 2
+    ax.set_title(f"Dorado (v0.7), R2 = {r2d:.3f}, rho2 = {rho2d:.3f}")
     z = np.polyfit(data_df["dom_label"], data_df["pred_dorado_070"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
     ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
 
     ax = axes[4]
-    ax.scatter(data_df["dom_label"], data_df["dom_m6anet"], s = 10, alpha = 0.5, color = "goldenrod")
-    r2 = r2_score(data_df["dom_label"], data_df["dom_m6anet"])
-    rho2 = spearmanr(data_df["dom_label"], data_df["dom_m6anet"])[0] ** 2
-    ax.set_title(f"m6Anet (v0.4), R2 = {r2:.3f}, rho2 = {rho2:.3f}")
-    z = np.polyfit(data_df["dom_label"], data_df["dom_m6anet"], 1)
+    ax.scatter(data_df["dom"], data_df["dom_070"], s = 10, alpha = 0.5, color = "goldenrod")
+    r2 = r2_score(data_df["dom"], data_df["dom_070"])
+    rho2 = spearmanr(data_df["dom"], data_df["dom_070"])[0] ** 2
+    ax.set_title(f"AIRNA v0.4 vs. v0.7, R2 = {r2:.3f}, rho2 = {rho2:.3f}")
+    z = np.polyfit(data_df["dom"], data_df["dom_070"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
     ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
+
 
     for ax in axes:
         ax.set_xlim([0.0, 1.0])
@@ -194,13 +195,18 @@ def plot_scatter(data_df, outdir, modelname, comment):
         ax.set_xlabel('GLORI DoM')
         ax.set_ylabel('Predicted DoM')
 
+    ax = axes[4]
+    ax.set_xlabel('DoM AIRNA (v0.4)')
+    ax.set_ylabel('DoM AIRNA (v0.7)')
+
+
     fig.suptitle(f"{modelname}")
-    plt.savefig(f"{outdir}/scatter-{comment}.png")
+    plt.savefig(f"{outdir}/scatter_{comment}.png")
     plt.close()
     return r2
 
 
-def plot_histogram_site(data_df, outdir, modelname):
+def plot_histogram_site(data_df, outdir, modelname, comment=""):
     ## Plot histogram of predictions
     plt.rcParams.update({'font.size': 24})
     fig, axes = plt.subplots(1, 2, figsize = (40,20))
@@ -211,7 +217,7 @@ def plot_histogram_site(data_df, outdir, modelname):
     sns.kdeplot(data_df["pm6a_070"], ax = ax, label = "AIRNA (v0.7)", color = "teal", lw = 3, fill=False)
     sns.kdeplot(data_df["pred_dorado"], ax = ax, label = "Dorado (v0.4)", color = "tomato", lw = 3, fill=False)
     sns.kdeplot(data_df["pred_dorado_070"], ax = ax, label = "Dorado (v0.7)", color = "darkorange", lw = 3, fill=False)
-    sns.kdeplot(data_df["pm6a_m6anet"], ax = ax, label = "m6Anet (v0.4)", color = "goldenrod", lw = 3, fill=False)
+    sns.kdeplot(data_df["pm6a_m6anet"], ax = ax, label = "m6Anet", color = "goldenrod", lw = 3, fill=False)
     ax.set_xlabel("p(m6A) Prediction")
     ax.set_ylabel("Count")
     ax.legend()
@@ -223,7 +229,7 @@ def plot_histogram_site(data_df, outdir, modelname):
     sns.kdeplot(data_df["dom_070"], ax = ax, label = "AIRNA (v0.7)", color = "teal", lw = 3, fill=False)
     sns.kdeplot(data_df["pred_dorado"], ax = ax, label = "Dorado (v0.4)", color = "tomato", lw = 3, fill=False)
     sns.kdeplot(data_df["pred_dorado_070"], ax = ax, label = "Dorado (v0.7)", color = "darkorange", lw = 3, fill=False)
-    sns.kdeplot(data_df["dom_m6anet"], ax = ax, label = "m6Anet (v0.4)", color = "goldenrod", lw = 3, fill=False)
+    sns.kdeplot(data_df["dom_m6anet"], ax = ax, label = "m6Anet", color = "goldenrod", lw = 3, fill=False)
     sns.kdeplot(data_df["dom_label"], ax = ax, label = "GLORI", color = "slategrey", lw = 3, fill=False)
     ax.set_xlabel("DoM Prediction")
     ax.set_ylabel("Count")
@@ -231,12 +237,12 @@ def plot_histogram_site(data_df, outdir, modelname):
 
     fig.suptitle(f"{modelname}")
 
-    plt.savefig(f"{outdir}/hist_site.png")
+    plt.savefig(f"{outdir}/hist_site_{comment}.png")
     plt.close()
     return None
 
 
-def plot_calibration(data_df, outdir, modelname):
+def plot_calibration(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize = (20,20))
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
@@ -259,7 +265,7 @@ def plot_calibration(data_df, outdir, modelname):
 
     p_true, p_pred = calibration_curve(data_df["label"], data_df["pm6a_m6anet"], n_bins = 10)
     ece = np.abs(p_true - p_pred).mean()
-    ax.plot(p_pred, p_true, lw=3, label=f'm6Anet (v0.4) (ECE = {ece:.3f})', color = "goldenrod", zorder = 1)
+    ax.plot(p_pred, p_true, lw=3, label=f'm6Anet (ECE = {ece:.3f})', color = "goldenrod", zorder = 1)
 
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -267,9 +273,10 @@ def plot_calibration(data_df, outdir, modelname):
     ax.set_ylabel('Fraction of Positives')
     ax.set_title(f'{modelname}\nCalibration Curve')
     ax.legend(loc="lower right")
-    plt.savefig(f"{outdir}/calibration.png")
+    plt.savefig(f"{outdir}/calibration_{comment}.png")
     plt.close()
     return None
+
 
 
 def main():
@@ -277,6 +284,10 @@ def main():
     modelname = "-".join(args.input2.split("/")[-2].split("-")[:7])
     outdir = f"{args.output}/{modelname}-genomic"
 
+    label_df = process_label(args.label)
+    label_df.to_pickle(args.label.replace(".tsv", ".pkl"))
+    label_df = pd.read_pickle(args.label.replace(".tsv", ".pkl"))
+    printmessage(f"Label count                  : {len(label_df):,}")
     dorado_pred = pd.read_pickle(args.dorado1)
     dorado_pred = dorado_pred[["dom", "count_dom"]].copy()
     dorado_pred.rename(columns = {"dom": "pred_dorado", "count_dom": "count_dorado"}, inplace = True)
@@ -296,10 +307,7 @@ def main():
     data_df_2 = data_df_2[["pm6a", "dom", "count_pm6a", "count_dom"]].copy()
     data_df_2.rename(columns = {"pm6a": "pm6a_070", "dom": "dom_070", "count_pm6a": "count_pm6a_070", "count_dom": "count_dom_070"}, inplace = True)
     printmessage(f"AIRNA v0.7 prediction count  : {len(data_df_2):,}")
-    label_df = process_label(args.label)
-    label_df.to_pickle(args.label.replace(".tsv", ".pkl"))
-    label_df = pd.read_pickle(args.label.replace(".tsv", ".pkl"))
-    printmessage(f"Label count                  : {len(label_df):,}")
+
 
     data_df = pd.concat([data_df_1, data_df_2, dorado_pred, dorado_pred2, m6anet_pred], axis = 1)
     data_df = data_df.join(label_df, how = "right")
@@ -310,23 +318,35 @@ def main():
     printmessage("Data merged")
 
     os.makedirs(outdir, exist_ok = True)
-    data_df.to_pickle(f"{outdir}/infenrence_{modelname}.pkl")
+    data_df.to_pickle(f"{outdir}/inference_{modelname}.pkl")
     printmessage(f"Data saved to {outdir}")
 
     data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
 
-    data_df = data_df[data_df["count_pm6a"] >= 20].copy()
-    data_df = data_df[data_df["drach"]].copy()
-
-    plot_roc(data_df, outdir, modelname)
+    data_df_selected = data_df[data_df["count_pm6a"] >= 20].copy()
+    comment = "_043_depth_20"
+    plot_roc(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted ROC")
-    plot_pr(data_df, outdir, modelname)
+    plot_pr(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted PR")
-    plot_scatter(data_df, outdir, modelname,"")
+    plot_scatter(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted scatter")
-    plot_histogram_site(data_df, outdir, modelname)
+    plot_histogram_site(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted histogram")
-    plot_calibration(data_df, outdir, modelname)
+    plot_calibration(data_df_selected, outdir, modelname, comment)
+    printmessage("Plotted calibration")
+
+    data_df_selected = data_df[data_df["count_pm6a_070"] >= 20].copy()
+    comment = "_070_depth_20"
+    plot_roc(data_df_selected, outdir, modelname, comment)
+    printmessage("Plotted ROC")
+    plot_pr(data_df_selected, outdir, modelname, comment)
+    printmessage("Plotted PR")
+    plot_scatter(data_df_selected, outdir, modelname, comment)
+    printmessage("Plotted scatter")
+    plot_histogram_site(data_df_selected, outdir, modelname, comment)
+    printmessage("Plotted histogram")
+    plot_calibration(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted calibration")
 
     return None

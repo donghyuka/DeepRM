@@ -6,15 +6,14 @@ import numpy as np
 import multiprocessing as mp
 import os
 from tqdm import tqdm
-from archived.misc.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
+from utils.convert_dorado_genomic import transcript_to_chromosomal_coordinate
 from utils.utils import parse_refflat
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--data", type=str, required=True, help="Data path")
-    args.add_argument("--output", type=str, required=True, help="Output path")
-    args.add_argument("--label", type=str, required=True, help="Label path")
+    args.add_argument("--cpu", "-c", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
+    args.add_argument("--input", "-i", type=str, required=True, help="Data path")
+    args.add_argument("--output", "-o", type=str, required=True, help="Output path")
     args = args.parse_args()
     os.makedirs(args.output, exist_ok=True)
     return args
@@ -66,16 +65,9 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
 
     return None
 
-def load_split_data(data_path, output_path, label_path, cpu):
+def load_split_data(data_path, cpu):
     data_df = pd.read_pickle(data_path)
     print(data_df)
-
-    label_df = pd.read_csv(label_path, sep="\t")
-
-    label_df = label_df[["id","5mer", "drach", "depth"]]
-    label_df.rename({"id":"label_id"}, axis=1, inplace=True)
-    data_df = data_df.merge(label_df, how="left", on="label_id")
-    data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
 
     geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
     geneid_table.rename({"transcript_id":"gene"}, axis=1, inplace=True)
@@ -83,8 +75,6 @@ def load_split_data(data_path, output_path, label_path, cpu):
     data_df.dropna(inplace=True)
 
     print(data_df)
-
-    data_df.to_pickle(output_path + "/data_df.pkl")
 
     data_df = data_df.groupby("gene_id")
     ## sort by size
@@ -110,7 +100,7 @@ def main():
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    df_list_split = load_split_data(args.data, args.output, args.label, args.cpu)
+    df_list_split = load_split_data(args.input, args.cpu)
     refflat_df = parse_refflat(drop_y=True, drop_m=True)
     for pid, df in enumerate(df_list_split):
         proc = mp.Process(target=worker, args=(df, refflat_df, collect_list))
@@ -138,8 +128,7 @@ def main():
 
     print(gene_df)
 
-    gene_df.to_pickle(args.output + "/gene_df_final.pkl")
-    gene_df.to_csv(args.output + "/gene_df_final.tsv", sep="\t", index=False)
+    gene_df.to_pickle(args.output + "/pileup_genomic.pkl")
     gc.collect()
 
     return None

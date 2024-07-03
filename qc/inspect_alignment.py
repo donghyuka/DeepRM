@@ -178,9 +178,6 @@ def main():
     if run_flag:
         os.makedirs(args.output, exist_ok=True)
 
-        # printmessage("Aligning BAM file")
-        # aln_bam_path = align_bam(args)
-
         printmessage("Extracting CIGAR string")
         cigar_list = extract_cigar(args)
         with open(f"{args.output}/cigar_list.pkl", "wb") as f:

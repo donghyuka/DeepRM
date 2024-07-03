@@ -261,10 +261,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    # for gp_cutoff in [3,4]:
-    #     for filter_adjacent, adjacent_strict in [(False, False), (True, False), (True, True)]:
-    #         for filter_no_m6a, no_m6a_strict in [(False, False), (True, False), (True, True)]:
-    #             main(gp_cutoff=gp_cutoff, filter_adjacent=filter_adjacent, adjacent_strict=adjacent_strict,
-    #                  filter_no_m6a=filter_no_m6a, no_m6a_strict=no_m6a_strict)
-

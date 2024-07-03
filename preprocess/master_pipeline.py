@@ -75,8 +75,9 @@ def parse_args():
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--rename", "-r", type=str, default="", help="rename input directory")
-    parser.add_argument("--dag_cfg", "-c", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB.json", help="DAG config file")
-    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,], help="Step to run")
+    parser.add_argument("--dag_cfg", "-c", type=str, default=None, help="DAG config file")
+    parser.add_argument("--boi", "-x", type=str, default="A", help="Base of Interest")
+    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
 
     args = parser.parse_args()
     if not os.path.exists(args.input):
@@ -85,6 +86,19 @@ def parse_args():
         args.step = [1,2,3,4]
     if not any(x in args.step for x in [1,2,3,4]):
         raise ValueError(f"Invalid step argument: {args.step}")
+
+    if args.dag_cfg is None:
+        if args.boi == "A":
+            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_A.json"
+        elif args.boi == "C":
+            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_C.json"
+        elif args.boi == "G":
+            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_G.json"
+        elif args.boi == "U":
+            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_U.json"
+        else:
+            raise ValueError(f"Invalid base of interest: {args.boi}")
+
     return args
 
 def main():
@@ -113,7 +127,7 @@ def main():
             args.batch = f"-b {args.batch}"
         else:
             args.batch = ""
-        cmd = f"{args.dorado}/bin/dorado basecaller--chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
         printmessage(cmd)
         os.system(cmd)
         cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"

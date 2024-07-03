@@ -302,7 +302,8 @@ def main():
     del return_list
     gc.collect()
 
-    label_name = f"Baeklab.070.Genome.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
+
+    label_name = f"Genomic.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
     if filter_adjacent:
         label_name += f".adj{adjacent_distance}"
         if adjacent_strict:
@@ -313,24 +314,14 @@ def main():
             label_name += "strict"
 
     datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-    datid_df.to_csv(f"{args.out}/{label_name}.notsampled.tsv", sep='\t', index=False)
+    datid_df.to_csv(f"{args.out}.{label_name}.tsv", sep='\t', index=False)
 
-    # datid_df_s = sample_eval_data(datid_df.copy(), drach = False, ratio = sample_ratio)
-    # datid_df_s.to_csv(f"{args.out}/{label_name}.sampled.tsv", sep='\t', index=False)
-    # datid_df_s = sample_eval_data(datid_df.copy(), drach = True)
-    # datid_df_s.to_csv(f"{args.out}/{label_name}.notsampled.drach.tsv", sep='\t', index=False)
-    # datid_df_s = sample_eval_data(datid_df.copy(), drach = False, ratio = False, non_drach = True)
-    # datid_df_s.to_csv(f"{args.out}/{label_name}.notsampled.nondrach.tsv", sep='\t', index=False)
+    drach_df = datid_df[datid_df["drach"]]
+    drach_df.to_csv(f"{args.out}.{label_name}.drach.tsv", sep='\t', index=False)
 
     return None
 
 
 if __name__ == "__main__":
     main()
-
-    # for gp_cutoff in [3,4]:
-    #     for filter_adjacent, adjacent_strict in [(False, False), (True, False), (True, True)]:
-    #         for filter_no_m6a, no_m6a_strict in [(False, False), (True, False), (True, True)]:
-    #             main(gp_cutoff=gp_cutoff, filter_adjacent=filter_adjacent, adjacent_strict=adjacent_strict,
-    #                  filter_no_m6a=filter_no_m6a, no_m6a_strict=no_m6a_strict)
 

@@ -452,7 +452,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["block_id"] = signal_df["read_id"] + ":" + signal_df["query_pos"].astype(str)
         signal_df["start_pos"] = signal_df["query_pos"] - cb_half_len
         signal_df["end_pos"] = signal_df["query_pos"] + cb_half_len + 1
-        signal_df["query_len"] = signal_df["seq"].apply(len) - signal_df["pt"]
+        # signal_df["query_len"] = signal_df["seq"].apply(len) - signal_df["pt"]
+        signal_df["query_len"] = signal_df["seq"].apply(len)
 
         signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] <= signal_df["query_len"])]
 

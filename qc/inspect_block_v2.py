@@ -89,7 +89,7 @@ def bq_plot(block_df_dict, color_dict, output, sample):
     ax.set_xlabel("Position")
     ax.set_ylabel("Mean Base Quality")
     ax.legend()
-    plt.savefig(f"{output}/bq_plot.png", dpi=300)
+    plt.savefig(f"{output}/bq_plot_extended.png", dpi=300)
     return None
 
 
@@ -113,11 +113,12 @@ def parse_args():
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
     parser.add_argument("--penalty", "-p", type=int, default=10, help="Penalty cutoff")
     parser.add_argument("--block", "-k", type=str, required=True, nargs="+", help="Block file")
+    parser.add_argument("--bam", "-b", type=str, required=True, nargs="+", help="BAM file")
     parser.add_argument("--name", "-n", type=str, required=True, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
     parser.add_argument("--sample", "-s", type=int, default=int(1e+6), help="Sampling fraction")
     args = parser.parse_args()
-    assert len(args.block) == len(args.name) == len(args.type)
+    assert len(args.block) == len(args.name) == len(args.type) == len(args.bam)
     assert all([os.path.exists(b) for b in args.block])
     return args
 
@@ -158,6 +159,20 @@ def plot_violin(block_df_dict, color_dict, output):
     return None
 
 
+def parse_bam(bam_path):
+    read_id_list = []
+    bq_list = []
+    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=16)  as bam:
+        for record in tqdm(bam, total = bam.mapped + bam.unmapped):
+            bq = np.array(record.query_qualities, dtype=int)
+            read_id_list.append(record.query_name)
+            bq_list.append(bq)
+
+    alignment_df = pd.DataFrame({"read_id": read_id_list, "bq": bq_list})
+    print(alignment_df)
+
+    return alignment_df
+
 
 def main():
     args = parse_args()
@@ -167,43 +182,37 @@ def main():
     cool_color_list = ["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"]
     modified_name_list = ["m6A", "m7G", "m5C", "pseU", "Gm", "m1A"]
 
-    block_df_dict = {}
-    perfect_block_df_dict = {}
     color_dict = {}
+    bam_dict = {}
 
-    for block, name, block_type in zip(args.block, args.name, args.type):
+    for bam, name, block_type in zip(args.bam, args.name, args.type):
         block_name = f"{name} ({block_type})"
-        # block_df = pd.read_pickle(block)
-        # block_df["block_score"] = block_df["penalty"].apply(lambda x: 1-(x/args.penalty))
-        # perfect_block_df = block_df[block_df["penalty"] == 0]
-        # perfect_block_df = perfect_block_df.sample(args.sample).copy()
-        # perfect_block_df_dict[block_name] = perfect_block_df
-        # block_df = block_df.sample(args.sample).copy()
-        # block_df_dict[block_name] = block_df
-
         if block_type in modified_name_list:
             color = warm_color_list.pop(0)
         else:
             color = cool_color_list.pop(0)
         color_dict[block_name] = color
+        # bam_dict[block_name] = parse_bam(bam)
 
-    # with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
-    #     pickle.dump(block_df_dict, f)
-    #
-    # with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
-    #     pickle.dump(perfect_block_df_dict, f)
-    #
-    # block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
-    #
-    # block_score_distribution(block_df_dict, color_dict, args.output)
-    # bq_plot(perfect_block_df_dict, color_dict, args.output, args.sample)
-    # motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    # motif_composition(perfect_block_df_dict, color_dict, args.output)
+    # with open(f"{args.output}/bam_dict.pkl", "wb") as f:
+    #     pickle.dump(bam_dict, f)
 
-    with open(f"{args.output}/perfect_block_df_dict.pkl", "rb") as f:
-        perfect_block_df_dict = pickle.load(f)
+    bam_dict = pickle.load(open(f"{args.output}/bam_dict.pkl", "rb"))
+    perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
 
-    plot_violin(perfect_block_df_dict, color_dict, args.output)
+    for block_name, block_df in perfect_block_df_dict.items():
+        bam_df = bam_dict[block_name]
+        block_df = block_df[["read_id","pos_RM"]].copy()
+        block_df = block_df.merge(bam_df, on="read_id", how="left")
+        print(block_df)
+        block_df["bq"] = block_df.apply(lambda x: x["bq"][x["pos_RM"]-16:x["pos_RM"]+17], axis=1)
+        print(block_df)
+        perfect_block_df_dict[block_name] = block_df
+
+    with open(f"{args.output}/perfect_block_df_dict_extended.pkl", "wb") as f:
+        pickle.dump(perfect_block_df_dict, f)
+
+    bq_plot(perfect_block_df_dict, color_dict, args.output, args.sample)
 
     return None
 

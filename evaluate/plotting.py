@@ -22,12 +22,12 @@ import seaborn as sns
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-baeklab_v4_transcript_depth5_nometa_light_pileup/pileup.pkl", help="Data path")
+    parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-token_normalise_drach_v2_pileup/pileup.pkl", help="Data path")
     parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240613-184120-18-303000-token_light_v3_pileup/pileup.pkl", help="Data path")
     parser.add_argument("--dorado1", "-d1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado_m6a/dorado_m6a_basecalled.pileup.bed", help="Dorado path")
     parser.add_argument("--dorado2", "-d2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.bed", help="Dorado path")
     parser.add_argument("--m6anet", "-m", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/m6anet/output/data.site_proba.csv", help="m6Anet path")
-    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.GP3.depth5_None.twm6astrict.tsv", help="Label path")
+    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.GP3.depth5_None.twm6astrict.drach.tsv", help="Label path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/plot", help="Output path")
     parser.add_argument("--min_depth", "-md", type=int, default=20, help="Minimum depth")
     parser.add_argument("--max_depth", "-xd", type=int, default=0, help="Maximum depth")
@@ -68,11 +68,11 @@ def process_dorado_inferece(data_path):
     data_df = data_df[[0, 1, 4, 9]]
     data_df.columns = ["nmid", "pos", "depth", "pred_dorado"]
     data_df["depth"] = data_df["depth"].astype(int)
-    # data_df = data_df[data_df["depth"] >= 10].copy()
     data_df["pred_dorado"] = data_df["pred_dorado"].str.split(" ").str[1].astype(float) / 100
     data_df["label_id"] = data_df["nmid"].str.split(".").str[0] + ":" + data_df["pos"]
     data_df = data_df[["label_id", "pred_dorado","depth"]].copy()
     data_df.rename(columns = {"depth": "dorado_count"}, inplace = True)
+    data_df.to_pickle(data_path.replace(".bed", ".pkl"))
     return data_df
 
 
@@ -90,7 +90,7 @@ def process_label(label_path, min_depth, max_depth):
     return label_df
 
 
-def plot_roc(data_df, outdir, modelname):
+def plot_roc(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize = (20,20))
 
@@ -122,12 +122,12 @@ def plot_roc(data_df, outdir, modelname):
     ax.set_ylabel('True Positive Rate')
     ax.set_title(f'{modelname}\nReceiver Operating Characteristic')
     ax.legend(loc="lower right")
-    plt.savefig(f"{outdir}/roc.png")
+    plt.savefig(f"{outdir}/roc_{comment}.png")
     plt.close()
     return None
 
 
-def plot_pr(data_df, outdir, modelname):
+def plot_pr(data_df, outdir, modelname ,comment=""):
     pr_baseline_level = data_df["label"].mean()
 
     plt.rcParams.update({'font.size': 24})
@@ -165,12 +165,12 @@ def plot_pr(data_df, outdir, modelname):
     ax.set_ylabel('Precision')
     ax.set_title(f'{modelname}\nPrecision-Recall')
     ax.legend(loc="lower left")
-    plt.savefig(f"{outdir}/pr.png")
+    plt.savefig(f"{outdir}/pr_{comment}.png")
     plt.close()
     return None
 
 
-def plot_scatter(data_df, outdir, modelname):
+def plot_scatter(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, axes = plt.subplots(1,5, figsize = (100,20))
     
@@ -241,12 +241,12 @@ def plot_scatter(data_df, outdir, modelname):
 
 
     fig.suptitle(f"{modelname}")
-    plt.savefig(f"{outdir}/scatter.png")
+    plt.savefig(f"{outdir}/scatter_{comment}.png")
     plt.close()
     return r2
 
 
-def plot_histogram_site(data_df, outdir, modelname):
+def plot_histogram_site(data_df, outdir, modelname, comment=""):
     ## Plot histogram of predictions
     plt.rcParams.update({'font.size': 24})
     fig, axes = plt.subplots(1, 2, figsize = (40,20))
@@ -277,12 +277,12 @@ def plot_histogram_site(data_df, outdir, modelname):
 
     fig.suptitle(f"{modelname}")
 
-    plt.savefig(f"{outdir}/hist_site.png")
+    plt.savefig(f"{outdir}/hist_site_{comment}.png")
     plt.close()
     return None
 
 
-def plot_calibration(data_df, outdir, modelname):
+def plot_calibration(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize = (20,20))
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
@@ -313,7 +313,7 @@ def plot_calibration(data_df, outdir, modelname):
     ax.set_ylabel('Fraction of Positives')
     ax.set_title(f'{modelname}\nCalibration Curve')
     ax.legend(loc="lower right")
-    plt.savefig(f"{outdir}/calibration.png")
+    plt.savefig(f"{outdir}/calibration_{comment}.png")
     plt.close()
     return None
 
@@ -321,13 +321,14 @@ def plot_calibration(data_df, outdir, modelname):
 def main():
     args = parse_args()
     modelname = "-".join(args.input2.split("/")[-2].split("-")[:7])
-    outdir = f"{args.output}/{modelname}"
+    outdir = f"{args.output}/{modelname}-v2"
 
     dorado_pred = process_dorado_inferece(args.dorado1)
     printmessage(f"Dorado v0.4 prediction count: {len(dorado_pred)}")
     dorado_pred2 = process_dorado_inferece(args.dorado2)
     printmessage(f"Dorado v0.7 prediction count: {len(dorado_pred2)}")
-    dorado_pred2.rename(columns = {"pred_dorado": "pred_dorado_070", "dorado_count": "dorado_count_070"}, inplace = True)
+    dorado_pred2.rename(columns = {"pred_dorado": "pred_dorado_070", "count_dorado": "count_dorado_070"}, inplace = True)
+
     m6anet_pred = process_m6anet_inferece(args.m6anet)
     printmessage(f"m6Anet prediction count: {len(m6anet_pred)}")
     data_df_1 = pd.read_pickle(args.input1)
@@ -353,59 +354,33 @@ def main():
     printmessage(f"Data saved to {outdir}")
 
     data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
-    print(data_df[["count_dom_070", "dorado_count_070"]].head(50))
-    data_df = data_df[data_df["count_pm6a"] >= 20].copy()
-    data_df = data_df[data_df["drach"]].copy()
 
-    plot_roc(data_df, outdir, modelname)
+    print(data_df.columns)
+
+    data_df_selected = data_df[data_df["count_pm6a"] >= 20].copy()
+    comment = "_043_depth_20"
+    plot_roc(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted ROC")
-    plot_pr(data_df, outdir, modelname)
+    plot_pr(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted PR")
-    plot_scatter(data_df, outdir, modelname)
+    plot_scatter(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted scatter")
-    plot_histogram_site(data_df, outdir, modelname)
+    plot_histogram_site(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted histogram")
-    plot_calibration(data_df, outdir, modelname)
+    plot_calibration(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted calibration")
 
-    return None
-
-
-def main2():
-    args = parse_args()
-    modelname = "-".join(args.input2.split("/")[-2].split("-")[:7])
-    outdir = f"{args.output}/{modelname}"
-
-    # data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
-    # data_df.drop(columns = ["pm6a_070", "dom_070", "count_pm6a_070", "count_dom_070"], inplace = True)
-    # data_df = data_df[data_df["drach"]].copy()
-    # data_df.to_pickle(f"{outdir}/inference_drach_{modelname}.pkl")
-    #
-    # data_df = pd.read_pickle(f"{outdir}/inference_drach_{modelname}.pkl")
-    # data_df_2 = pd.read_pickle(args.input2)
-    # data_df_2.rename(columns = {"pm6a": "pm6a_070", "dom": "dom_070", "count_pm6a": "count_pm6a_070", "count_dom": "count_dom_070"}, inplace = True)
-    #
-    # data_df = data_df.merge(data_df_2, on = "label_id", how = "left")
-    # del data_df_2
-    # gc.collect()
-    # data_df.fillna(0, inplace = True)
-    # print(data_df)
-    #
-    # data_df.to_pickle(f"{outdir}/inference_drach_070_{modelname}.pkl")
-
-    data_df = pd.read_pickle(f"{outdir}/inference_drach_070_{modelname}.pkl")
-
-    data_df = data_df[(data_df["count_pm6a"] >= 20) & (data_df["count_pm6a_070"] >= 20)].copy()
-
-    plot_roc(data_df, outdir, modelname)
+    data_df_selected = data_df[data_df["count_pm6a_070"] >= 20].copy()
+    comment = "_070_depth_20"
+    plot_roc(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted ROC")
-    plot_pr(data_df, outdir, modelname)
+    plot_pr(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted PR")
-    plot_scatter(data_df, outdir, modelname, "drach")
+    plot_scatter(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted scatter")
-    plot_histogram_site(data_df, outdir, modelname)
+    plot_histogram_site(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted histogram")
-    plot_calibration(data_df, outdir, modelname)
+    plot_calibration(data_df_selected, outdir, modelname, comment)
     printmessage("Plotted calibration")
 
     return None
