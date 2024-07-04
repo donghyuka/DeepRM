@@ -1,9 +1,7 @@
 import math
-import os
-from typing import Tuple
 import torch
 from torch import nn, Tensor
-import torch.nn.functional as F
+import utils.activations as acts
 
 class TransformerModel(nn.Module):
 
@@ -128,8 +126,17 @@ class RegressionHead(nn.Module):
             return nn.ReLU()
         elif activation == "gelu":
             return nn.GELU()
+        elif activation == "swish":
+            return acts.Swish()
+        elif activation == "swiglu":
+            return acts.SwiGLU()
+        elif activation == "silu":
+            return nn.SiLU()
+        elif activation == "elu":
+            return nn.ELU()
 
-        raise RuntimeError(f"activation should be relu/gelu, not {activation}")
+        raise RuntimeError(f"The following activation function is not supported: {activation}")
+
 
     ## END OF RegressionHead
 

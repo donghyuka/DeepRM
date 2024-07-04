@@ -5,9 +5,8 @@ import os, glob
 import argparse
 import numpy as np
 import pandas as pd
-from postprocess.dataloader_inference_site import load_dataset
+from postprocess.evaluate.dataloader_inference import load_dataset
 from utils.utils import printmessage
-import torch.multiprocessing as mp
 import tqdm
 import importlib
 

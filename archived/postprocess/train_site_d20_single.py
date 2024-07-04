@@ -1,5 +1,5 @@
 import torch
-from postprocess.dataloader_site import load_dataset, NanoporeDataLoader
+from postprocess.train.dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import argparse
 import os
@@ -9,7 +9,7 @@ import numpy as np
 from utils.utils import printmessage
 import importlib
 import torchmetrics as tm
-import postprocess.custom_loss as clf
+import postprocess.train.custom_loss as clf
 from datetime import datetime
 
 

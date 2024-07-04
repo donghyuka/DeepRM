@@ -26,15 +26,15 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
-      <webServer id="3afbbc27-1cd2-4149-abcd-af53d0906288" name="Genome1">
-        <fileTransfer accessType="SFTP" host="210.117.217.150" port="7777" sshConfigId="545d4533-4dd2-412d-a5f3-67f82832cead" sshConfig="Genome1">
+      <webServer id="79eb2e34-ba0b-4bfb-baa2-c781f640e47c" name="BIOSCI">
+        <fileTransfer accessType="SFTP" host="147.47.52.151" port="7777" sshConfigId="aa53bcb9-0d3d-4ba5-a27f-b67c050e8cf0" sshConfig="BIOSCI">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
         </fileTransfer>
       </webServer>
-      <webServer id="79eb2e34-ba0b-4bfb-baa2-c781f640e47c" name="BIOSCI">
-        <fileTransfer accessType="SFTP" host="114.110.135.154" port="22" sshConfigId="f98bed4e-6d7d-401c-b11c-3e9a6d416f10" sshConfig="AICA-A100" keyPair="true">
+      <webServer id="3afbbc27-1cd2-4149-abcd-af53d0906288" name="Genome1">
+        <fileTransfer accessType="SFTP" host="210.117.217.150" port="7777" sshConfigId="545d4533-4dd2-412d-a5f3-67f82832cead" sshConfig="Genome1">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
@@ -49,6 +49,7 @@
           <name value="SNU-BIO" />
           <name value="Deep1" />
           <name value="AICA-A100" />
+          <name value="BIOSCI" />
           <name value="Genome1" />
         </servers>
       </group>

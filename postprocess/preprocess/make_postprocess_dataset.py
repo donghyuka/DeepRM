@@ -11,6 +11,7 @@ import gc
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument("--input", "-i", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-baeklab_v5_genome_drach", help="Source path")
+    args.add_argument("--realign", "-r", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/realign_meta/output", help="Source path")
     args.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_v14", help="Output path")
     args.add_argument("--min_depth", "-m", type=int, default=5, help="Minimum depth")
     args.add_argument("--max_depth", "-x", type=int, default=20, help="Maximum depth")
@@ -22,7 +23,20 @@ def main():
     args = parse_args()
     input_files = glob.glob(f"{args.input}/*.pkl")
     source_df = pd.concat([pd.read_pickle(f) for f in input_files])
+    source_df["read_id"] = source_df["block_id"].apply(lambda x: x.split(":")[0])
+    source_df["block_label_id"] = source_df["read_id"] + ":" + source_df["label_id"]
+
+    realign_files = glob.glob(f"{args.realign}/*.pkl")
+    realign_df = pd.concat([pd.read_pickle(f) for f in realign_files])
+
     print(source_df)
+    print(realign_df)
+    realign_df = realign_df.rename(columns={"error": "realigned_error"})
+    source_df = source_df.merge(realign_df, on = "block_label_id", how = "inner")
+    source_df.drop(columns=["block_label_id"], inplace=True)
+
+    print(source_df)
+
     cols_list = ["motif", "mapq", "flag", "pi", "read_bq", "block_bq", "base_bq", "error", "query_pos",
                  "query_len", "left_soft_clip"]
     for col in cols_list:
@@ -38,15 +52,17 @@ def main():
     source_df["flag"] = source_df["flag"].astype(int)
     source_df["mapq"] = np.clip(source_df["mapq"] / 60, 0, 1)
     source_df[["read_bq","block_bq","base_bq"]] = np.clip(source_df[["read_bq","block_bq","base_bq"]] / 40, 0, 1)
-    source_df[["query_pos","query_len"]] = np.clip(source_df[["query_pos","query_len"]] / 4000, 0, 1)
+    source_df[["query_pos","query_len"]] = np.clip(source_df[["query_pos","query_len"]] / 5000, 0, 1)
     source_df["left_soft_clip"] = np.clip(source_df["left_soft_clip"] / 100, 0, 1)
     source_df = source_df.sort_values("pred", ascending=False)
 
     source_df.to_pickle(f"{args.output}/source.pkl")
 
-    source_df = source_df.groupby("label_id")
+    source_df = pd.read_pickle(f"{args.output}/source.pkl")
+
     label_id_unique = source_df["label_id"].unique()
     label_id_unique = np.random.permutation(label_id_unique)
+    source_df = source_df.groupby("label_id")
 
     train_df_dict = {}
     val_df_dict = {}
@@ -55,17 +71,11 @@ def main():
     idx = 0
 
     for label_id in tqdm.tqdm(label_id_unique):
-        try:
-            df = source_df.get_group(label_id)
-        except:
-            continue
 
-        print(df)
-
+        df = source_df.get_group(label_id)
         undersample_flag = False
 
         label = df["label"].iloc[0]
-
 
         depth = len(df)
 

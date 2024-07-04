@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from postprocess.dataloader_site import load_dataset, NanoporeDataLoader
+from postprocess.train.dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import argparse
