@@ -140,8 +140,6 @@ def main():
     args = parse_args()
     dorado_pred = pd.read_csv(args.dorado, sep = "\t")
     print(dorado_pred)
-    data_dict = {"model": [], "r2": [], "rho2": []}
-    # for data_path in tqdm(glob.glob(f"{args.input}/*/")):
     if True:
         data_path = args.input
         data_paths = glob.glob(f"{data_path}/*.tsv")
@@ -153,20 +151,8 @@ def main():
         modelname = modelname.split("/")[-1]
         outdir = os.path.join(args.output, modelname)
         data_df = process_inferece(data_df_original.copy(), dorado_pred)
-        r2, rho2 = plot_scatter(data_df, outdir, modelname)
+        plot_scatter(data_df, outdir, modelname)
         plot_boxplot(data_df, outdir, modelname)
-        data_dict["model"].append(modelname)
-        data_dict["r2"].append(r2)
-        data_dict["rho2"].append(rho2)
-    data_df = pd.DataFrame(data_dict)
-    data_df["model"] = data_df["model"].apply(lambda x: "-".join(x.split("-")[:-1]))
-    data_df.to_csv(f"/extdata4/baeklab/Hyeonseo/m6A/postprocess/checkpoint_summary/evaluation.tsv", sep = "\t", index = False)
-    print(data_df)
-    summary_df = pd.read_csv(f"/extdata4/baeklab/Hyeonseo/m6A/postprocess/checkpoint_summary/Postprocess-ResNet-20240515-120946.tsv", sep = "\t")
-    summary_df["model"] = summary_df["path"].apply(lambda x: x.split("/")[-1][:-3])
-    summary_df = summary_df.merge(data_df, how = "inner", on = "model")
-    print(summary_df)
-    summary_df.to_csv(f"/extdata4/baeklab/Hyeonseo/m6A/postprocess/checkpoint_summary/Postprocess-ResNet-20240515-120946-R2.tsv", sep = "\t", index = False)
 
     return None
 

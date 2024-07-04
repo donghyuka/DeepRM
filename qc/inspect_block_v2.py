@@ -89,7 +89,7 @@ def bq_plot(block_df_dict, color_dict, output, sample):
     ax.set_xlabel("Position")
     ax.set_ylabel("Mean Base Quality")
     ax.legend()
-    plt.savefig(f"{output}/bq_plot_extended.png", dpi=300)
+    plt.savefig(f"{output}/bq_plot_extended_v2.png", dpi=300)
     return None
 
 

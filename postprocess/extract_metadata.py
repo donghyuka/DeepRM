@@ -156,7 +156,7 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
     return None
 
 
-def trim_scale_segment_signal(signal,move,sp,ts,ns,offset,scale,mean,stdev):
+def standardise_trim_segment_signal(signal,move,sp,ts,ns,offset,scale,mean,stdev):
     signal = signal[sp:]
     signal_len = len(signal)
     if ns == 0:
@@ -167,6 +167,34 @@ def trim_scale_segment_signal(signal,move,sp,ts,ns,offset,scale,mean,stdev):
     signal = np.flip(signal, axis=0)
     signal = (signal + offset) * scale
     signal = (signal - mean) / stdev
+
+    stride = move[0]
+    move = move[1:]
+    move_idx = np.where(move == 1)[0][1:] * stride
+    move_idx = len(signal) - move_idx
+    move_idx = np.flip(move_idx, axis=0)
+    signal = np.array_split(signal, move_idx)
+    if len(signal) == 0:
+        return None
+    return signal
+
+
+def normalise_trim_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shift_mult, scale_mult):
+    signal = signal[sp:]
+    signal_len = len(signal)
+    if ns == 0:
+        ns = signal_len
+    signal = signal[ts:ns]
+    if len(signal) == 0:
+        return None
+    signal = np.flip(signal, axis=0)
+
+    quantile_a_value = np.quantile(signal, quantile_a)
+    quantile_b_value = np.quantile(signal, quantile_b)
+
+    q_shift = max(10.0, shift_mult * (quantile_a_value + quantile_b_value))
+    q_scale = max(1.0, scale_mult * (quantile_b_value - quantile_a_value))
+    signal = (signal - q_shift) / q_scale
 
     stride = move[0]
     move = move[1:]
@@ -192,18 +220,33 @@ def get_left_soft_clip(cigar):
     return left_soft_clip
 
 
-def segment_normalize_signal(seg_df_path, signal_path_arr, label_df, pid, norm_factor, cb_len = 21, chunk_size = 10000, boi = "A"):
+def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode, token_output_path,
+                             cb_len = 21, kmer_len = 5, chunk_size = 10000, max_token_len = 200, sampling = 6, boi = "A"):
 
-    mean, stdev = norm_factor
+
+    trim = kmer_len//2
+    mean, stdev, quantile_a, quantile_b, shift_mult, scale_mult = None, None, None, None, None, None
+
+    if norm_mode == "normalise":
+        shift_mult = norm_factor["shift_mult"]
+        scale_mult = norm_factor["scale_mult"]
+        quantile_a = norm_factor["quantile_a"]
+        quantile_b = norm_factor["quantile_b"]
+    elif norm_mode == "standardise":
+        mean = norm_factor["mean"]
+        stdev = norm_factor["stdev"]
+    else:
+        raise ValueError(f"Invalid norm_mode: {norm_mode}")
+
+
     cb_half_len = cb_len//2
-
     buffer = []
-
 
     for signal_path in tqdm.tqdm(signal_path_arr):
         oom_killer()
 
-        out_path = f"{seg_df_path}/metadata/{signal_path.split('/')[-1]}"
+        out_path = f"{token_output_path}/{signal_path.split('/')[-1]}"
+
         if os.path.exists(out_path):
             printmessage(f"Already exists: {out_path}", msg_type="warning")
             continue
@@ -235,8 +278,14 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, label_df, pid, norm_f
         gc.collect()
 
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
-        signal_df["signal"] = signal_df.apply(lambda x: trim_scale_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                  x["offset"], x["scale"], mean, stdev), axis=1)
+
+        if norm_mode == "normalise":
+            signal_df["signal"] = signal_df.apply(lambda x: normalise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
+                                                                                          quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
+
+        elif norm_mode == "standardise":
+            signal_df["signal"] = signal_df.apply(lambda x: standardise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
+                                                                                            x["offset"], x["scale"], mean, stdev), axis=1)
 
         signal_df = signal_df[["read_id", "ref", "bq", "seq", "ref_pos", "query_pos", "error", "label", "dom",
                                "mapq", "flag", "pi", "left_soft_clip", "signal"]].copy()
@@ -276,6 +325,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, label_df, pid, norm_f
                                "mapq", "flag", "pi", "read_bq", "block_bq", "base_bq",
                                "error", "query_pos", "query_len", "left_soft_clip"]].copy()
 
+        gc.collect()
+
         if len(buffer) > 0:
             signal_df = pd.concat([buffer, signal_df], ignore_index=True)
             buffer = []
@@ -295,7 +346,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, label_df, pid, norm_f
 
         gc.collect()
 
-    out_path = f"{seg_df_path}/metadata/last-{pid}.pkl"
+
+    out_path = f"{token_output_path}/last-{pid}.pkl"
     ## For last chunk, append zero data and save
     if len(buffer) > 0:
         for chunk_idx in range(0, len(buffer) // chunk_size):
@@ -307,6 +359,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, label_df, pid, norm_f
             chunk.to_pickle(f"{out_path.split('.')[0]}-last.pkl")
 
     return None
+
 
 
 def ref_pos_to_query_pos(ref_pos_list, cigar, start_pos, query_len, md_tag, cb_pad = 10):
@@ -379,7 +432,11 @@ def ref_pos_to_query_pos(ref_pos_list, cigar, start_pos, query_len, md_tag, cb_p
 
 def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
     ref = ref.split(".")[0]
-    label_df = label_df[label_df["nmid"] == ref]
+
+    try:
+        label_df = label_df.get_group(ref)
+    except KeyError:
+        return None, None, None, None, None
 
     if len(label_df) == 0:
         return None, None, None, None, None
@@ -403,7 +460,6 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
 
 
 def parse_args():
-    ## Usage: "python segment_normalize_signal.py --cpu {args.thread} --pod5 {pod5_path} --bam {bam_path} --block {block_path} --output {signal_path}"
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
@@ -413,81 +469,119 @@ def parse_args():
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument("--chunk", "-k", type=int, default=1000, help="Chunk size")
+    parser.add_argument("--pod5_chunk", "-j", type=int, default=1000, help="POD5 Chunk size")
     parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
-    parser.add_argument("--toml", "-t", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.0/model/rna004_130bps_sup@v5.0.0/config.toml", help="Dorado Model TOML file")
+    parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
+    parser.add_argument("--norm_mode", "-n", type=str, required=True, help="Normalisation mode: normalise or standardise")
+    parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output files")
+    parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
+    parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
+    parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
+    parser.add_argument("--kmer_len", "-e", type=int, default=5, help="Kmer length")
+    parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
     if not os.path.exists(args.bam):
         raise FileNotFoundError(f"BAM file {args.bam} does not exist")
-    # if os.path.exists(args.output) and len(os.listdir(args.output)) > 0:
-    #     raise FileExistsError(f"Output directory {args.output} already exists and is not empty")
     if args.wdir is None:
         args.wdir = f"{args.output}/intermediates/"
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(args.wdir, exist_ok=True)
+    if args.toml is None:
+        if args.norm_mode == "standardise":
+            args.toml = "/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.2/model/rna004_130bps_sup@v5.0.0/config.toml"
+        elif args.norm_mode == "normalise":
+            args.toml = "/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml"
+        else:
+            raise ValueError(f"Invalid norm_mode: {args.norm_mode}")
+
     return args
 
 
+def parse_toml(toml_path, norm_mode):
 
-#
-#
-# def parse_toml(toml_path):
-#     norm_factor_default = {}
-#     norm_factor_default["quantile_a"] = 0.2
-#     norm_factor_default["quantile_b"] = 0.8
-#     norm_factor_default["shift_mult"] = 0.48
-#     norm_factor_default["scale_mult"] = 0.59
-#
-#     if not os.path.exists(toml_path):
-#         printmessage(f"TOML file {toml_path} does not exist", msg_type="warning")
-#         printmessage("Using default values for standardisation.", msg_type="warning")
-#         return norm_factor_default
-#
-#     toml_dict = toml.load(toml_path)
-#     if "normalisation" not in toml_dict:
-#         printmessage("normalisation section not found in the TOML file. Check Dorado model version.", msg_type="error", error=ValueError)
-#         printmessage("Using default values for standardisation.", msg_type="warning")
-#         return norm_factor_default
-#
-#     printmessage("Normalisation parameters found in TOML file.", msg_type="info")
-#
-#     std_dict = toml_dict["normalisation"]
-#     norm_factor = {}
-#     norm_factor["quantile_a"] = std_dict.get("quantile_a")
-#     norm_factor["quantile_b"] = std_dict.get("quantile_b")
-#     norm_factor["shift_mult"] = std_dict.get("shift_multiplier")
-#     norm_factor["scale_mult"] = std_dict.get("scale_multiplier")
-#
-#     ## sanitize
-#     for key in norm_factor.keys():
-#         if norm_factor[key] is None:
-#             printmessage(f"Key {key} not found in TOML file. Falling back to default value.", msg_type="warning")
-#             norm_factor[key] = norm_factor_default[key]
-#
-#     return norm_factor
+    if norm_mode == "normalise":
+        norm_factor_default = {}
+        norm_factor_default["quantile_a"] = 0.2
+        norm_factor_default["quantile_b"] = 0.8
+        norm_factor_default["shift_mult"] = 0.48
+        norm_factor_default["scale_mult"] = 0.59
 
+        if not os.path.exists(toml_path):
+            printmessage(f"TOML file {toml_path} does not exist", msg_type="warning")
+            printmessage("Using default values for standardisation.", msg_type="warning")
+            return norm_factor_default
 
-def parse_toml(toml_path):
-    if not os.path.exists(toml_path):
-        printmessage(f"TOML file {toml_path} does not exist", msg_type="error", error=FileNotFoundError)
-    toml_dict = toml.load(toml_path)
-    if "standardisation" not in toml_dict:
-        printmessage("Standardisation section not found in the TOML file. Check Dorado model version.", msg_type="error", error=ValueError)
-    std_dict = toml_dict["standardisation"]
-    if not std_dict["standardise"]:
-        printmessage("Standardisation is not enabled in the TOML file. Check Dorado model version.", msg_type="error", error=ValueError)
-    norm_factor = (std_dict["mean"], std_dict["stdev"])
-    printmessage(f"Standardisation values loaded from TOML: {norm_factor}", msg_type="info")
+        toml_dict = toml.load(toml_path)
+        if "normalisation" not in toml_dict:
+            printmessage("normalisation section not found in the TOML file. Check Dorado model version.", msg_type="warning")
+            printmessage("Using default values for normalisation.", msg_type="warning")
+            return norm_factor_default
+
+        printmessage("Normalisation parameters found in TOML file.", msg_type="info")
+
+        std_dict = toml_dict["normalisation"]
+        norm_factor = {}
+        norm_factor["quantile_a"] = std_dict.get("quantile_a")
+        norm_factor["quantile_b"] = std_dict.get("quantile_b")
+        norm_factor["shift_mult"] = std_dict.get("shift_multiplier")
+        norm_factor["scale_mult"] = std_dict.get("scale_multiplier")
+
+        ## sanitize
+        for key in norm_factor.keys():
+            if norm_factor[key] is None:
+                printmessage(f"Key {key} not found in TOML file. Falling back to default value.", msg_type="warning")
+                norm_factor[key] = norm_factor_default[key]
+
+    elif norm_mode == "standardise":
+
+        norm_factor_default = {}
+        norm_factor_default["mean"] = 80.8758975922949
+        norm_factor_default["stdev"] = 17.26975967138176
+
+        if not os.path.exists(toml_path):
+            printmessage(f"TOML file {toml_path} does not exist", msg_type="warning")
+            printmessage("Using default values for standardisation.", msg_type="warning")
+            return norm_factor_default
+
+        toml_dict = toml.load(toml_path)
+        if "standardisation" not in toml_dict:
+            printmessage("standardisation section not found in the TOML file. Check Dorado model version.", msg_type="warning")
+            printmessage("Using default values for standardisation.", msg_type="warning")
+            return norm_factor_default
+
+        printmessage("Normalisation parameters found in TOML file.", msg_type="info")
+
+        std_dict = toml_dict["standardisation"]
+
+        if not std_dict["standardise"]:
+            printmessage("Standardisation is not enabled in the TOML file. Check Dorado model version.", msg_type="warning")
+            printmessage("Using default values for standardisation.", msg_type="warning")
+            return norm_factor_default
+
+        norm_factor = {}
+        norm_factor["mean"] = std_dict.get("mean")
+        norm_factor["stdev"] = std_dict.get("stdev")
+
+        ## sanitize
+        for key in norm_factor.keys():
+            if norm_factor[key] is None:
+                printmessage(f"Key {key} not found in TOML file. Falling back to default value.", msg_type="warning")
+                norm_factor[key] = norm_factor_default[key]
+
+    else:
+        printmessage(f"Mode {norm_mode} not recognised. Should be either 'normalise' or 'standardise'.", msg_type="error")
+        raise ValueError()
+
     return norm_factor
 
 
 def main():
     args = parse_args()
-
-    token_output_path = f"{args.output}/metadata/"
+    token_output_path = f"{args.output}/token_{args.norm_mode}_{args.postfix}/"
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
@@ -498,11 +592,7 @@ def main():
     os.makedirs(signal_raw_path, exist_ok=True)
     os.makedirs(f"{intermediate_path}/meta_df_split", exist_ok=True)
 
-    if args.toml is not None:
-        norm_factor = parse_toml(args.toml)
-    else:
-        printmessage("No TOML file provided. Using default values for standardisation.", msg_type="warning")
-        norm_factor = (80.8758975922949, 17.26975967138176) ## Default values for rna004_130bps_sup@v5.0.0_m6A@v1
+    norm_factor = parse_toml(args.toml, args.norm_mode)
 
     # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.min_size, args.max_size)
     # signal_path_arr = list(index_dict.keys())
@@ -529,7 +619,7 @@ def main():
             signal_path_dict[read_id] = signal_path.split('/')[-1]
     signal_path_arr = list(index_dict.keys())
 
-    signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+    # signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
     # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
 
     del signal_path_dict, index_dict
@@ -539,9 +629,11 @@ def main():
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
 
     proc_list = []
+    label_df = label_df.groupby("nmid")
     for pid, signal_paths in enumerate(signal_path_arr_split):
         proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, label_df, pid, norm_factor))
+                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
+                                args.cb_len, args.kmer_len, args.chunk, args.max_token_len, args.sampling, args.boi))
         proc_list.append(proc)
         proc.start()
 

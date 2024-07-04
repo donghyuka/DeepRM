@@ -341,7 +341,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
         gc.collect()
 
         signal_df["block_score"] = signal_df["penalty"].apply(lambda x: 1-(x/max_penalty))
-        # signal_df["block_id"] = signal_df["read_id"] + "-" + signal_df["block_id"].astype(str)
+        # signal_df["block_id"] = signal_df["read_id"] + "-" + signal_df["block_id"].astype(str) ## Removed to reduce file size
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["bq"] = signal_df["bq"].apply(lambda x: x[trim:-trim])
 
@@ -366,6 +366,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
 
         signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x[trim:-trim])
 
+        ## Moved to train.dataloader since it reduces I/O overhead during training.
         # signal_df["kmer_token"] = signal_df["motif"].apply(lambda x: sequence_to_kmer_token(x, kmer))
         # signal_df["kmer_token"] = signal_df.apply(lambda x: expand_token_to_segment(x["kmer_token"], x["segment_len_arr"]), axis=1)
         # signal_df["bq_token"] = signal_df.apply(lambda x: expand_token_to_segment(x["bq"].astype(np.uint8), x["segment_len_arr"]), axis=1)
@@ -395,7 +396,6 @@ def parse_args():
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
-    ## /extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml
     parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
