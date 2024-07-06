@@ -16,10 +16,11 @@ from utils.utils import mean_phred, printmessage
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--in", dest="bam_path", type=str, required=True, help="Input bam file")
-    args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
-    args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--bq", dest="bq_thres", type=int, default=7, help="Base quality threshold")
+    args.add_argument("--in", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
+    args.add_argument("--out","-o", dest="out_path", type=str, required=True, help="Output directory")
+    args.add_argument("--cpu","-c", dest="cpu", type=int, default=8, help="Number of CPUs")
+    args.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
+    args.add_argument("--bb", "-b", dest="bb_length", type=int, default=87, help="BB length")
     args = args.parse_args()
     return args
 
@@ -45,7 +46,7 @@ def plot_read_len(read_len_arr, out_path):
     return None
 
 
-def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
+def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length):
 
     read_len_arr_passed = read_len_arr[mean_qual_arr >= bq_thres]
     read_len_arr_failed = read_len_arr[mean_qual_arr < bq_thres]
@@ -56,13 +57,18 @@ def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
     binrange = (0, read_len_max)
     binwidth = 10
 
+    if bb_length is not None:
+        for i in (2,3,4,5, 6):
+            ligate_length = bb_length * i
+            ax.axvline(ligate_length, color="grey", linestyle="-", linewidth=2)
+
     sns.histplot(read_len_arr_passed, ax=ax, color="royalblue", label=f"Passed (n={len(read_len_arr_passed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step",  stat='density')
     sns.histplot(read_len_arr_failed, ax=ax, color="tomato", label=f"Failed (n={len(read_len_arr_failed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step", stat='density')
 
     ## Median
-    ax.axvline(np.median(read_len_arr_passed), color="black", linestyle="--", linewidth=2)
+    ax.axvline(np.median(read_len_arr_passed), color="royalblue", linestyle="--", linewidth=2)
     ax.text(np.median(read_len_arr_passed), 0.9 * ax.get_ylim()[1], f"Passed median = {np.median(read_len_arr_passed):.0f}", color="black")
-    ax.axvline(np.median(read_len_arr_failed), color="black", linestyle="--", linewidth=2)
+    ax.axvline(np.median(read_len_arr_failed), color="tomato", linestyle="--", linewidth=2)
     ax.text(np.median(read_len_arr_failed), 0.8 * ax.get_ylim()[1], f"Failed median = {np.median(read_len_arr_failed):.0f}", color="black")
 
     ax.set_title(f"Read Length Distribution (n={len(read_len_arr):,})")
@@ -70,6 +76,10 @@ def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path):
     ax.set_ylabel("Count")
     ax.set_xlim(0, 1000)
     ax.legend()
+
+    ## Peak Detection
+
+
     ## Vline at median
     fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
     plt.close(fig)
@@ -112,8 +122,10 @@ def plot_qual(mean_qual_arr, out_path, bq_thres = 7, max_bq = 30):
     pass_arr = mean_qual_arr[mean_qual_arr >= bq_thres]
     fail_arr = mean_qual_arr[mean_qual_arr < bq_thres]
     ax.set_title(f"Read Mean Base Quality Distribution (n={len(mean_qual_arr):,})")
-    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,})", binwidth=0.1, binrange=(0, max_bq))
-    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,})", binwidth=0.1, binrange=(0, max_bq))
+    pass_percent = len(pass_arr) / len(mean_qual_arr) * 100
+    fail_percent = len(fail_arr) / len(mean_qual_arr) * 100
+    sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,}, {pass_percent:.2f}%)", binwidth=0.1, binrange=(0, max_bq))
+    sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,}, {fail_percent:.2f}%)", binwidth=0.1, binrange=(0, max_bq))
     ## vline at median
     ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
     ax.legend()
@@ -126,6 +138,8 @@ def plot_qual(mean_qual_arr, out_path, bq_thres = 7, max_bq = 30):
 def main():
     args = parse_args()
 
+    load_success = False
+
     if os.path.exists(args.out_path):
         printmessage("Output directory already exists. Attempting to load pickle")
         try:
@@ -135,11 +149,12 @@ def main():
                 mean_qual_arr = pickle.load(f)
             with open(f"{args.out_path}/polya_len.pkl", "rb") as f:
                 polya_len_arr = pickle.load(f)
+            load_success = True
         except:
             printmessage("Pickle loading failed. Re-run with a different output directory")
-            return None
+            load_success = False
 
-    else:
+    if not load_success:
         os.makedirs(args.out_path, exist_ok=True)
 
         bam_file = pysam.AlignmentFile(args.bam_path, "rb", check_sq=False, threads=args.cpu)
@@ -178,7 +193,7 @@ def main():
             pickle.dump(polya_len_arr, f)
 
     printmessage("Plotting")
-    plot_read_len_v2(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
+    plot_read_len_v2(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
     plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
     plot_polya_len(polya_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
 

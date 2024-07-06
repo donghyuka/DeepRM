@@ -5,6 +5,8 @@ import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 
+## AIRNA_V3: Same as transformer_prototype_v19, with BQ Feature Removed.
+
 class TransformerModel(nn.Module):
 
     def __init__(self, d_model: int, n_heads: int, d_ff: int,

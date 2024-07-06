@@ -118,7 +118,7 @@ class CNNModel(torch.nn.Module):
         layers.append(torch.nn.Conv2d(in_channels=3, out_channels=hidden_dim, kernel_size=(1,1), stride=1, padding="same"))
         for i in range(num_err_layers):
             layers.append(ResidualBlock2D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                           stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         layers.append(self.activation)
         layers.append(torch.nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=(1,input_width), stride=(1,input_width), padding="valid"))
@@ -127,10 +127,10 @@ class CNNModel(torch.nn.Module):
 
         ## Metadata Module
         layers = []
-        layers.append(torch.nn.Conv1d(in_channels=7, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
+        layers.append(torch.nn.Conv1d(in_channels=10, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_meta_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         self.metadata_module = MaskedSequential(*layers)
 
@@ -139,7 +139,7 @@ class CNNModel(torch.nn.Module):
         layers.append(torch.nn.Conv1d(in_channels=1, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_pred_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         self.pred_module = MaskedSequential(*layers)
 
@@ -150,7 +150,7 @@ class CNNModel(torch.nn.Module):
         layers.append(torch.nn.Conv1d(in_channels=hidden_dim*3, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_output_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         layers.append(self.activation)
         layers.append(torch.nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim // 4, kernel_size=kernel_size, stride=1, padding="same"))
@@ -185,7 +185,7 @@ class CNNModel(torch.nn.Module):
 
         return None
 
-    def forward(self, error, metadata, pred, mask):
+    def forward(self, error, re_error, metadata, pred, mask):
         error = error.permute(0, 3, 1, 2).contiguous()
         metadata = torch.permute(metadata, (0, 2, 1)).contiguous()
         pred = torch.permute(pred, (0, 2, 1)).contiguous()

@@ -23,10 +23,10 @@ import seaborn as sns
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-token_normalise_drach_v2_pileup/pileup.pkl", help="Data path")
-    parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240613-184120-18-303000-token_light_v3_pileup/pileup.pkl", help="Data path")
+    parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-token_normalise_drach_v2_pileup/pileup.pkl", help="Data path")
     parser.add_argument("--dorado1", "-d1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado_m6a/dorado_m6a_basecalled.pileup.bed", help="Dorado path")
     parser.add_argument("--dorado2", "-d2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.bed", help="Dorado path")
-    parser.add_argument("--m6anet", "-m", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/m6anet/output/data.site_proba.csv", help="m6Anet path")
+    parser.add_argument("--m6anet", "-m", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/m6anet/old/output/data.site_proba.csv", help="m6Anet path")
     parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.GP3.depth5_None.twm6astrict.drach.tsv", help="Label path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/plot", help="Output path")
     parser.add_argument("--min_depth", "-md", type=int, default=20, help="Minimum depth")
@@ -63,27 +63,29 @@ def process_m6anet_inferece(data_path):
 def process_dorado_inferece(data_path):
     if data_path is None:
         return None
-    data_df = pd.read_csv(data_path, quoting = 3, sep = "\t", header = None, dtype=str)
-    ## Keep column 0, 1, 4, 9
-    data_df = data_df[[0, 1, 4, 9]]
-    data_df.columns = ["nmid", "pos", "depth", "pred_dorado"]
-    data_df["depth"] = data_df["depth"].astype(int)
-    data_df["pred_dorado"] = data_df["pred_dorado"].str.split(" ").str[1].astype(float) / 100
-    data_df["label_id"] = data_df["nmid"].str.split(".").str[0] + ":" + data_df["pos"]
-    data_df = data_df[["label_id", "pred_dorado","depth"]].copy()
-    data_df.rename(columns = {"depth": "dorado_count"}, inplace = True)
-    data_df.to_pickle(data_path.replace(".bed", ".pkl"))
+    if os.path.exists(data_path.replace(".bed", ".drach.pkl")):
+        data_df = pd.read_pickle(data_path.replace(".bed", ".drach.pkl"))
+    elif os.path.exists(data_path.replace(".bed", ".pkl")):
+        data_df = pd.read_pickle(data_path.replace(".bed", ".pkl"))
+    else:
+        data_df = pd.read_csv(data_path, quoting = 3, sep = "\t", header = None, dtype=str)
+        ## Keep column 0, 1, 4, 9
+        data_df = data_df[[0, 1, 4, 9]]
+        data_df.columns = ["nmid", "pos", "depth", "pred_dorado"]
+        data_df["depth"] = data_df["depth"].astype(int)
+        data_df["pred_dorado"] = data_df["pred_dorado"].str.split(" ").str[1].astype(float) / 100
+        data_df["label_id"] = data_df["nmid"].str.split(".").str[0] + ":" + data_df["pos"]
+        data_df = data_df[["label_id", "pred_dorado","depth"]].copy()
+        data_df.rename(columns = {"depth": "dorado_count"}, inplace = True)
+        data_df.to_pickle(data_path.replace(".bed", ".pkl"))
+
     return data_df
 
 
-def process_label(label_path, min_depth, max_depth):
+def process_label(label_path):
 
     label_df = pd.read_csv(label_path, sep = "\t")
-    if max_depth is None or  max_depth == 0:
-        label_df = label_df[label_df["depth"] >= min_depth].copy()
-    else:
-        label_df = label_df[(label_df["depth"] >= min_depth) & (label_df["depth"] <= max_depth)].copy()
-    label_df = label_df[["id", "label", "m6A_level", "5mer", "drach"]]
+    label_df = label_df[["id", "depth", "label", "m6A_level", "5mer", "drach"]]
     label_df.rename(columns = {"id": "label_id","m6A_level": "dom_label"}, inplace = True)
     label_df = label_df[label_df["label"] >= 0].copy()
 
@@ -318,26 +320,49 @@ def plot_calibration(data_df, outdir, modelname, comment=""):
     return None
 
 
+def save_dorado_drach():
+    args = parse_args()
+
+    dorado_pred2 = process_dorado_inferece(args.dorado2)
+    label_df = process_label(args.label)
+    printmessage(f"Label count: {len(label_df)}")
+
+    dorado_pred2 = dorado_pred2.merge(label_df, on = "label_id", how = "right")
+    dorado_pred2.fillna(0, inplace = True)
+    dorado_pred2 = dorado_pred2[dorado_pred2["drach"]].copy()
+    dorado_pred2 = dorado_pred2[["label_id", "pred_dorado", "dorado_count"]].copy()
+    print(dorado_pred2)
+
+    dorado_pred2.to_pickle(args.dorado2.replace(".bed", ".drach.pkl"))
+
+    return None
+
+
 def main():
     args = parse_args()
     modelname = "-".join(args.input2.split("/")[-2].split("-")[:7])
-    outdir = f"{args.output}/{modelname}-v2"
+    outdir = f"{args.output}/{modelname}-D{args.min_depth}"
 
     dorado_pred = process_dorado_inferece(args.dorado1)
     printmessage(f"Dorado v0.4 prediction count: {len(dorado_pred)}")
+    print(dorado_pred)
     dorado_pred2 = process_dorado_inferece(args.dorado2)
     printmessage(f"Dorado v0.7 prediction count: {len(dorado_pred2)}")
     dorado_pred2.rename(columns = {"pred_dorado": "pred_dorado_070", "count_dorado": "count_dorado_070"}, inplace = True)
+    print(dorado_pred2)
 
     m6anet_pred = process_m6anet_inferece(args.m6anet)
     printmessage(f"m6Anet prediction count: {len(m6anet_pred)}")
     data_df_1 = pd.read_pickle(args.input1)
+    print(data_df_1)
     printmessage(f"AIRNA v0.4 prediction count: {len(data_df_1)}")
     data_df_2 = pd.read_pickle(args.input2)
     printmessage(f"AIRNA v0.7 prediction  count: {len(data_df_2)}")
     data_df_2.rename(columns = {"pm6a": "pm6a_070", "dom": "dom_070", "count_pm6a": "count_pm6a_070", "count_dom": "count_dom_070"}, inplace = True)
-    label_df = process_label(args.label, args.min_depth, args.max_depth)
+    print(data_df_2)
+    label_df = process_label(args.label)
     printmessage(f"Label count: {len(label_df)}")
+    print(label_df)
 
     data_df = data_df_1.merge(data_df_2, on = "label_id", how = "outer")
     data_df = data_df.merge(dorado_pred, on = "label_id", how = "outer")
@@ -355,7 +380,10 @@ def main():
 
     data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
 
-    print(data_df.columns)
+    if args.max_depth is None or args.max_depth == 0:
+        data_df = data_df[data_df["depth"] >= args.min_depth].copy()
+    else:
+        data_df = data_df[(data_df["depth"] >= args.min_depth) & (data_df["depth"] <= args.max_depth)].copy()
 
     data_df_selected = data_df[data_df["count_pm6a"] >= 20].copy()
     comment = "_043_depth_20"
@@ -384,7 +412,6 @@ def main():
     printmessage("Plotted calibration")
 
     return None
-
 
 if __name__ == "__main__":
     main()

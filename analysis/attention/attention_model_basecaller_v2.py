@@ -1,10 +1,7 @@
 import math
-import os
-from typing import Tuple
 import torch
 from torch import nn, Tensor
-import torch.nn.functional as F
-from analysis.attention_model import TransformerEncoderWithWeight, TransformerEncoderLayerWithWeight
+from analysis.attention.attention_model import TransformerEncoderWithWeight, TransformerEncoderLayerWithWeight
 
 class TransformerModel(nn.Module):
 

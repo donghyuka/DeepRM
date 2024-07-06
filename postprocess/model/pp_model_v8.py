@@ -118,19 +118,37 @@ class CNNModel(torch.nn.Module):
         layers.append(torch.nn.Conv2d(in_channels=3, out_channels=hidden_dim, kernel_size=(1,1), stride=1, padding="same"))
         for i in range(num_err_layers):
             layers.append(ResidualBlock2D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                           stride=1, padding="same", activation="silu", dropout=dropout_rate))
-
-        layers.append(self.activation)
-        layers.append(torch.nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=(1,input_width), stride=(1,input_width), padding="valid"))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         self.error_module = MaskedSequential(*layers)
 
+        ## Realigned Error Module
+        layers = []
+        layers.append(torch.nn.Conv2d(in_channels=3, out_channels=hidden_dim, kernel_size=(1,1), stride=1, padding="same"))
+        for i in range(num_err_layers):
+            layers.append(ResidualBlock2D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
+
+        self.re_error_module = MaskedSequential(*layers)
+
+        ## Common Error Module
+        layers = []
+        layers.append(torch.nn.Conv2d(in_channels=hidden_dim*2, out_channels=hidden_dim*2, kernel_size=(1,1), stride=1, padding="same"))
+        for i in range(num_err_layers):
+            layers.append(ResidualBlock2D(kernel_size=kernel_size, in_channels=hidden_dim*2, out_channels=hidden_dim*2,
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
+
+        layers.append(self.activation)
+        layers.append(torch.nn.Conv2d(in_channels=hidden_dim*2, out_channels=hidden_dim*2, kernel_size=(1,input_width), stride=(1,input_width), padding="valid"))
+
+        self.cm_error_module = MaskedSequential(*layers)
+
         ## Metadata Module
         layers = []
-        layers.append(torch.nn.Conv1d(in_channels=7, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
+        layers.append(torch.nn.Conv1d(in_channels=10, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_meta_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         self.metadata_module = MaskedSequential(*layers)
 
@@ -139,18 +157,27 @@ class CNNModel(torch.nn.Module):
         layers.append(torch.nn.Conv1d(in_channels=1, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_pred_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         self.pred_module = MaskedSequential(*layers)
+
+        ## Meta_Pred Module
+        layers = []
+        layers.append(torch.nn.Conv1d(in_channels=hidden_dim*2, out_channels=hidden_dim*2, kernel_size=1, stride=1, padding="same"))
+        for i in range(num_meta_layers):
+            layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim*2, out_channels=hidden_dim*2,
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
+
+        self.meta_pred_module = MaskedSequential(*layers)
 
         ## Output Module
 
         layers = []
         layers.append(self.activation)
-        layers.append(torch.nn.Conv1d(in_channels=hidden_dim*3, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
+        layers.append(torch.nn.Conv1d(in_channels=hidden_dim*4, out_channels=hidden_dim, kernel_size=1, stride=1, padding="same"))
         for i in range(num_output_layers):
             layers.append(ResidualBlock1D(kernel_size=kernel_size, in_channels=hidden_dim, out_channels=hidden_dim,
-                                                             stride=1, padding="same", activation="silu", dropout=dropout_rate))
+                                          stride=1, padding="same", activation="silu", dropout=dropout_rate))
 
         layers.append(self.activation)
         layers.append(torch.nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim // 4, kernel_size=kernel_size, stride=1, padding="same"))
@@ -186,15 +213,20 @@ class CNNModel(torch.nn.Module):
         return None
 
     def forward(self, error, re_error, metadata, pred, mask):
-        metadata = metadata[:, :, :7]
         error = error.permute(0, 3, 1, 2).contiguous()
+        re_error = re_error.permute(0, 3, 1, 2).contiguous()
         metadata = torch.permute(metadata, (0, 2, 1)).contiguous()
         pred = torch.permute(pred, (0, 2, 1)).contiguous()
         mask = mask.permute(0, 2, 1).contiguous()
-        error = self.error_module(error, mask.unsqueeze(3)).squeeze(3)
+        error = self.error_module(error, mask.unsqueeze(3))
+        re_error = self.re_error_module(re_error, mask.unsqueeze(3))
+        cm_error = torch.cat([error, re_error], dim=1)
+        cm_error = self.cm_error_module(cm_error, mask.unsqueeze(3)).squeeze(3)
         metadata = self.metadata_module(metadata, mask)
         pred = self.pred_module(pred, mask)
-        x = torch.cat([error, metadata, pred], dim=1)
+        meta_pred = torch.cat([metadata, pred], dim=1)
+        meta_pred = self.meta_pred_module(meta_pred, mask)
+        x = torch.cat([cm_error, meta_pred], dim=1)
         x = self.output_module(x, mask)
         depth = mask.shape[2] / torch.sum(mask, dim = 2, keepdim = False)
         depth = self.depth_module(depth)

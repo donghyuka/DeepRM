@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 import pickle
 import argparse
+from utils.utils import printmessage
 
 def motif_cdf(block_df_dict, color_dict, output):
 
@@ -63,12 +64,12 @@ def motif_composition(block_df_dict, color_dict,  output):
     return None
 
 
-def bq_plot(block_df_dict, color_dict, output, sample):
+def bq_plot(block_df_dict, color_dict, output):
     ## Plot the distribution of base quality. Plot position-wise mean with CI95.
 
     stat_dict = {}
     for block_name, block_df in block_df_dict.items():
-        block_df = block_df.sample(sample)
+        block_df = block_df.sample(int(1e+4))
         bq_arr = np.stack(block_df["bq"].values, axis=0)
         bq_mean = np.mean(bq_arr, axis=0)
         bq_std = np.std(bq_arr, axis=0)
@@ -165,44 +166,52 @@ def main():
 
     warm_color_list = ["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"]
     cool_color_list = ["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"]
-    modified_name_list = ["m6A", "m7G", "m5C", "pseU", "Gm", "m1A"]
+    modified_name_list = ["m6A", "m7G", "m5C", "pseU", "Gm", "m1A", "I"]
 
     block_df_dict = {}
     perfect_block_df_dict = {}
     color_dict = {}
-
     for block, name, block_type in zip(args.block, args.name, args.type):
         block_name = f"{name} ({block_type})"
-        # block_df = pd.read_pickle(block)
-        # block_df["block_score"] = block_df["penalty"].apply(lambda x: 1-(x/args.penalty))
-        # perfect_block_df = block_df[block_df["penalty"] == 0]
-        # perfect_block_df = perfect_block_df.sample(args.sample).copy()
-        # perfect_block_df_dict[block_name] = perfect_block_df
-        # block_df = block_df.sample(args.sample).copy()
-        # block_df_dict[block_name] = block_df
-
         if block_type in modified_name_list:
             color = warm_color_list.pop(0)
         else:
             color = cool_color_list.pop(0)
         color_dict[block_name] = color
 
-    # with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
-    #     pickle.dump(block_df_dict, f)
-    #
-    # with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
-    #     pickle.dump(perfect_block_df_dict, f)
-    #
-    # block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
-    #
-    # block_score_distribution(block_df_dict, color_dict, args.output)
-    # bq_plot(perfect_block_df_dict, color_dict, args.output, args.sample)
-    # motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    # motif_composition(perfect_block_df_dict, color_dict, args.output)
+    load_success = False
 
-    with open(f"{args.output}/perfect_block_df_dict.pkl", "rb") as f:
-        perfect_block_df_dict = pickle.load(f)
+    if os.path.exists(args.output):
+        printmessage("Output directory already exists. Attempting to load pickle")
+        try:
+            block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
+            perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
+            load_success = True
+        except:
+            printmessage("Pickle loading failed. Re-run with a different output directory")
+            load_success = False
 
+    if not load_success:
+        for block, name, block_type in zip(args.block, args.name, args.type):
+            block_name = f"{name} ({block_type})"
+            block_df = pd.read_pickle(block)
+            block_df["block_score"] = block_df["penalty"].apply(lambda x: 1-(x/args.penalty))
+            perfect_block_df = block_df[block_df["penalty"] == 0]
+            perfect_block_df = perfect_block_df.sample(args.sample).copy()
+            perfect_block_df_dict[block_name] = perfect_block_df
+            block_df = block_df.sample(args.sample).copy()
+            block_df_dict[block_name] = block_df
+
+        with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
+            pickle.dump(block_df_dict, f)
+
+        with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
+            pickle.dump(perfect_block_df_dict, f)
+
+    block_score_distribution(block_df_dict, color_dict, args.output)
+    bq_plot(perfect_block_df_dict, color_dict, args.output)
+    motif_cdf(perfect_block_df_dict, color_dict, args.output)
+    motif_composition(perfect_block_df_dict, color_dict, args.output)
     plot_violin(perfect_block_df_dict, color_dict, args.output)
 
     return None

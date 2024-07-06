@@ -35,36 +35,40 @@ class NanoporeDatasetIterator:
         self.current_index += 1
         if self.current_index >= len(self.data_indices):
             raise StopIteration
-        source, target, id = self.df_to_tensor(self.df_dict[self.data_keys[self.data_indices[self.current_index]]], self.bag_size)
-        return source, target, id
+        source, target = self.df_to_tensor(self.df_dict[self.data_keys[self.data_indices[self.current_index]]], self.bag_size)
+        return source, target
 
-    def df_to_tensor(self, df, pad_to, max_insertion=10):
+    def df_to_tensor(self, df, pad_to):
 
         df = df.dropna(axis=0)
         len_df = len(df)
 
-        error_arr = np.stack(df["error"].to_numpy(), axis=0) ## 21, 3
-        metadata_arr = df[["pi","flag","mapq","depth","read_bq","block_bq","base_bq"]].to_numpy() ## 4
+        error_arr = np.stack(df["error"].to_numpy(), axis=0).transpose(0, 2, 1) ## 21, 3
+        re_error_arr = np.stack(df["realigned_error"].to_numpy(), axis=0) ## 21, 3
+        metadata_arr = df[["pi","flag","mapq","depth","read_bq","block_bq","base_bq",
+                           "query_pos", "query_len", "left_soft_clip"]].to_numpy() ## 7 + 3
 
         pred_arr = df["pred"].to_numpy()
         m6a_level = df["m6a_level"].iloc[0]
 
-        error_arr = np.clip(error_arr, 0, max_insertion)
         error_arr = torch.tensor(error_arr, dtype=torch.float32)
+        re_error_arr = torch.tensor(re_error_arr, dtype=torch.float32)
         metadata_arr = torch.tensor(metadata_arr, dtype=torch.float32)
         pred_arr = torch.tensor(pred_arr, dtype=torch.float32).unsqueeze(1)
-
         label_tensor = torch.tensor([m6a_level,], dtype=torch.float32)
-        id = df["label_id"].iloc[0]
+
+        label_id = df["label_id"].iloc[0]
 
         if len_df < pad_to:
             error_arr = torch.cat([error_arr, torch.zeros(pad_to - len_df, 21, 3)], dim = 0)
-            metadata_arr = torch.cat([metadata_arr, torch.zeros(pad_to - len_df, 7)], dim = 0)
+            re_error_arr = torch.cat([re_error_arr, torch.zeros(pad_to - len_df, 21, 3)], dim = 0)
+            metadata_arr = torch.cat([metadata_arr, torch.zeros(pad_to - len_df, 10)], dim = 0)
             pred_arr = torch.cat([pred_arr, torch.zeros(pad_to - len_df, 1)], dim = 0)
             mask_arr = torch.cat([torch.ones((len_df,1), dtype=torch.float32), torch.zeros((pad_to - len_df,1), dtype=torch.float32)], dim = 0)
 
         elif len_df > pad_to:
             error_arr = error_arr[:pad_to]
+            re_error_arr = re_error_arr[:pad_to]
             metadata_arr = metadata_arr[:pad_to]
             pred_arr = pred_arr[:pad_to]
             mask_arr = torch.ones((pad_to,1), dtype=torch.float32)
@@ -72,9 +76,9 @@ class NanoporeDatasetIterator:
         else:
             mask_arr = torch.ones((len_df,1), dtype=torch.float32)
 
-        source_tensor = (error_arr, metadata_arr, pred_arr, mask_arr)
+        source_tensor = (label_id, error_arr, re_error_arr, metadata_arr, pred_arr, mask_arr)
 
-        return source_tensor, label_tensor, id
+        return source_tensor, label_tensor
 
 class NanoporeDataset(torch.utils.data.IterableDataset):
     def __init__(self, data, batch_size, rank, world_size, shuffle, seed, bag_size):
@@ -103,28 +107,32 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
 
 def collate_fn(batch):
     error_list = []
+    re_error_list = []
     metadata_list = []
     pred_list = []
     target_list = []
     mask_list = []
     id_list = []
-    for source, target, id in batch:
-        error, metadata, pred, mask = source
+
+    for source, target in batch:
+        label_id, error, re_error, metadata, pred, mask = source
         error_list.append(error)
+        re_error_list.append(re_error)
         metadata_list.append(metadata)
         pred_list.append(pred)
         mask_list.append(mask)
         target_list.append(target)
-        id_list.append(id)
+        id_list.append(label_id)
+
     error_tensor = torch.stack(error_list, dim = 0)
+    re_error_tensor = torch.stack(re_error_list, dim = 0)
     metadata_tensor = torch.stack(metadata_list, dim = 0)
     pred_tensor = torch.stack(pred_list, dim = 0)
     mask_tensor = torch.stack(mask_list, dim = 0)
     target_tensor = torch.stack(target_list, dim = 0)
-    id_tensor = np.array(id_list)
 
-    source_tensor = (error_tensor, metadata_tensor, pred_tensor, mask_tensor)
-    return source_tensor, target_tensor, id_tensor
+    source_tensor = (id_list, error_tensor, re_error_tensor, metadata_tensor, pred_tensor, mask_tensor)
+    return source_tensor, target_tensor
 
 
 class NanoporeDataLoader(torch.utils.data.DataLoader):

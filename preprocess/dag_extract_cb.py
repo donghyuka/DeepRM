@@ -405,13 +405,23 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
 
     print(block_df)
 
-    ## print stats
+    ## print stats and log
+
+    log = []
+    log.append(f"Total number of passed reads: {record_cnt:,}")
+    log.append(f"Total number of context blocks: {len(block_df):,}")
+    log.append(f"Context blocks per read: {len(block_df) / record_cnt:.2f}")
+    log.append(block_df["score"].describe())
+    log.append(block_df["penalty"].describe())
+
+    log_path = f"{output}/log.txt"
+    with open(log_path, "w") as log_file:
+        for line in log:
+            log_file.write(f"{line}\n")
+
     print("=============================================")
-    printmessage(f"Total number of passed reads: {record_cnt:,}")
-    printmessage(f"Total number of context blocks: {len(block_df):,}")
-    printmessage(f"Context blocks per read: {len(block_df) / record_cnt:.2f}")
-    print(block_df["score"].describe())
-    print(block_df["penalty"].describe())
+    for line in log:
+        printmessage(line)
     print("=============================================")
 
     block_df.to_pickle(output)

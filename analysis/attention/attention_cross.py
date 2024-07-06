@@ -11,7 +11,7 @@ from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import gc
-import analysis.attention_model_basecaller_v2 as atm
+import analysis.attention.attention_model_v48 as atm
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -88,7 +88,7 @@ def run_inference(args):
     return None
 
 
-def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10):
+def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 9):
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
@@ -96,10 +96,10 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
         save_dict = torch.load(args_dict["model"], map_location='cpu')
     model_config = save_dict["model_config"]
     model = atm.TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
-                             n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
-                             t_act = model_config["t_act"], lin_act = model_config["lin_act"],
-                             encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
-                             kmer_size = 5, signal_size = 25, spectrogram_size = 21, block_len = 17, seq_len=200)
+                                 n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
+                                 t_act = model_config["t_act"], lin_act = model_config["lin_act"],
+                                 encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
+                                 kmer_size = 5, signal_size = 5, spectrogram_size = 21, block_len = 17, seq_len=200)
 
 
     if rank == 0:
@@ -122,7 +122,6 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
     label_list = []
     pred_list = []
     move_list = []
-    block_id_list = []
     attention_dict = {i: [] for i in range(attention_count)}
     out_dir = f"{args_dict['output']}/attention/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/"
     os.makedirs(out_dir, exist_ok=True)
@@ -132,14 +131,14 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
     for idx, data in enumerate(tqdm.tqdm(data_loader, total=len(data_loader), smoothing = 0)):
         data = data[0]
         src_kmer = data["kmer_token"].to(rank)
-        src_signal = data["signal_token"].to(rank)
-        # src_signal = data["signal_token"][:,:,10:15].to(rank)
+        src_signal = data["signal_token"][:,:,10:15].to(rank)
         src_pad_mask = torch.eq(src_kmer, 0)
-        src_target_mask = data["target_mask"].to(rank)
+        target_mask = data["target_mask"].to(rank)
         src_move = data["move_token"].to(rank)
         src_bq = data["bq_token"].to(rank)
 
-        output, attn_list = model(src_signal, src_pad_mask, src_target_mask)
+
+        output, attn_list = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, target_mask)
 
         output = output.cpu().detach().numpy()
         attn_list = [x.cpu().detach().numpy() for x in attn_list]
@@ -147,7 +146,6 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
         pred_list.append(output)
         label_list.append(data["label"])
         move_list.append(data["move_token"])
-        block_id_list.append(data["block_id"])
 
         for i, attn in enumerate(attn_list):
             attention_dict[i].append(attn)
@@ -158,14 +156,13 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
             pred_list = np.concatenate(pred_list)
             move_list = np.concatenate(move_list)
             attn_dict = {i: np.concatenate(attention_dict[i]) for i in range(attention_count)}
-            block_id_list = np.concatenate(block_id_list)
             move_list = [x for x in move_list]
 
-            data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list, "block_id": block_id_list}
+            data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list}
             for i in range(attention_count):
                 data_dict[f"attention_{i}"] = [x for x in attn_dict[i]]
 
-            out_path = f"{out_dir}/inference_{rank}_{idx}.pkl"
+            out_path = f"{out_dir}/inference/inference_{rank}_{idx}.pkl"
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             data_df = pd.DataFrame(data_dict)
             data_df.to_pickle(out_path)
@@ -173,7 +170,6 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
             label_list = []
             pred_list = []
             move_list = []
-            block_id_list = []
             attention_dict = {i: [] for i in range(attention_count)}
 
 
@@ -184,15 +180,14 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10)
     label_list = np.concatenate(label_list)
     pred_list = np.concatenate(pred_list)
     move_list = np.concatenate(move_list)
-    block_id_list = np.concatenate(block_id_list)
     attn_dict = {i: np.concatenate(attention_dict[i]) for i in range(attention_count)}
     move_list = [x for x in move_list]
 
-    data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list, "block_id": block_id_list}
+    data_dict = {"label_id": id_list, "label": label_list, "prediction": pred_list, "move": move_list}
     for i in range(attention_count):
         data_dict[f"attention_{i}"] = [x for x in attn_dict[i]]
 
-    out_path = f"{out_dir}/inference_{rank}_{idx}.pkl"
+    out_path = f"{out_dir}/inference/inference_{rank}_{idx}.pkl"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     data_df = pd.DataFrame(data_dict)
     data_df.to_pickle(out_path)

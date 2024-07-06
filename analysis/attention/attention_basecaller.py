@@ -11,7 +11,7 @@ from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import gc
-import analysis.attention_model_v19 as atm
+import analysis.attention.attention_model_basecaller_v2 as atm
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -88,7 +88,7 @@ def run_inference(args):
     return None
 
 
-def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 8):
+def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 10):
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
@@ -135,12 +135,11 @@ def inference_worker(rank, args_dict, flush_interval = 10, attention_count = 8):
         src_signal = data["signal_token"].to(rank)
         # src_signal = data["signal_token"][:,:,10:15].to(rank)
         src_pad_mask = torch.eq(src_kmer, 0)
-        target_mask = data["target_mask"].to(rank)
+        src_target_mask = data["target_mask"].to(rank)
         src_move = data["move_token"].to(rank)
         src_bq = data["bq_token"].to(rank)
 
-
-        output, attn_list = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, target_mask)
+        output, attn_list = model(src_signal, src_pad_mask, src_target_mask)
 
         output = output.cpu().detach().numpy()
         attn_list = [x.cpu().detach().numpy() for x in attn_list]

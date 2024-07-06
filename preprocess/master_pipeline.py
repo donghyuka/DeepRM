@@ -141,13 +141,14 @@ def main():
         ## step 2. Run dag_extract_cb.py
         printmessage(f"[Step 2/3] Running DAG-based CB Extraction")
         cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
+
         printmessage(cmd)
         os.system(cmd)
 
     if 3 in args.step:
         ## Step 3. Run segment_normalize_signal.py
         printmessage(f"[Step 3/3] Running Signal Segmentation, Normalization, and FFT")
-        cmd = f"python -m preprocess.segment_normalize_signal --skip_intermediate --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {toml_path}"
+        cmd = f"python -m preprocess.segment_normalize_signal --save_intermediateq --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {toml_path}"
         printmessage(cmd)
         os.system(cmd)
 

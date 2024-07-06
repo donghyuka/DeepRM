@@ -1,9 +1,6 @@
 import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from postprocess.train.dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
 import argparse
 import os
 import time
@@ -12,6 +9,8 @@ import numpy as np
 from utils.utils import printmessage
 import importlib
 import torchmetrics as tm
+import postprocess.train.custom_loss as clf
+from datetime import datetime
 
 
 def parse_args():
@@ -21,9 +20,9 @@ def parse_args():
     parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_v14")
-    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
-    parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
+    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_v11")
+    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/model")
+    parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/tensorboard")
     parser.add_argument("--model", type=str, default="cnn_model_v1")
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=100000)
@@ -43,7 +42,7 @@ def parse_args():
     parser.add_argument("--pin_memory", type=int, default=0)
     parser.add_argument("--read_every", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
-    parser.add_argument("--loss", type=str, default="MSE")
+    parser.add_argument("--loss", type=str, default="Fuchsia")
     parser.add_argument("--gpu_pool", type=int, nargs="+", default=None)
     parser.add_argument("--load_checkpoint", type=str, default=None)
     parser.add_argument("--input_height", type=int, default=20)
@@ -56,14 +55,17 @@ def parse_args():
     parser.add_argument("--num_output_layers", type=int, default=4)
     parser.add_argument("--dropout_rate", type=float, default=0.1)
     parser.add_argument("--kernel_size", type=int, default=5)
-
-    strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
+
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
+    if args.seed is None:
+        args.seed = np.random.randint(0, 100000000)
+    seedstring = str(args.seed).zfill(8)
+    strfttime = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     if args.name is None:
-        args.name = f"Postprocess-ResNet-D20-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"Postprocess-ResNet-{args.model.split('_')[-1]}-D20-{args.loss}-{strfttime}-{seedstring}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:
@@ -163,13 +165,14 @@ class Trainer:
         return sources, targets
 
     def _feed_model(self, source, target):
-        error, metadata, pred, mask = source
+        error, re_error, metadata, pred, mask = source
         error = error.to(self.gpu_id)
+        re_error = re_error.to(self.gpu_id)
         metadata = metadata.to(self.gpu_id)
         pred = pred.to(self.gpu_id)
         mask = mask.to(self.gpu_id)
         target = target.to(self.gpu_id)
-        output = self.model(error, metadata, pred, mask)
+        output = self.model(error, re_error, metadata, pred, mask)
         return output, target
 
 
@@ -182,7 +185,7 @@ class Trainer:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
         self.current_batch_loss = loss.item()
-        dist.barrier()
+
         time.sleep(0.001*self.gpu_id)
         evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
         evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items()])
@@ -199,7 +202,7 @@ class Trainer:
         self.train_loader.set_epoch(self.current_epoch)
         self.val_loader.set_epoch(self.current_epoch)
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
-        dist.barrier()
+
         time.sleep(0.03*self.gpu_id)
         with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
                        position=self.rank, colour=colour_choice[self.rank%len(colour_choice)], smoothing = 0) as self.pbar:
@@ -212,28 +215,23 @@ class Trainer:
                     current_interval_loss = np.mean(self.current_interval_losses)
                     self.current_interval_losses = []
                     ## ALL REDUCE LOSS
-                    dist.barrier()
+
                     current_interval_loss = torch.tensor(current_interval_loss).to(self.gpu_id)
-                    dist.all_reduce(current_interval_loss, op=dist.ReduceOp.SUM)
+
                     self.current_interval_loss = current_interval_loss / self.num_gpu
                     if self.rank == 0:
                         self.tb_writer.add_scalar("Loss", self.current_interval_loss, self.current_step)
                         self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_step)
-                    dist.barrier()
+
 
                 if self.current_step % self.eval_interval == 0 and self.current_step > 0:
                     self._run_eval()
 
                 if self.current_step % self.save_interval == 0 and self.current_step > 0:
-                    dist.barrier()
+
                     if self.rank == 0:
-                        try:
-                            for name, parameter in self.model.named_parameters():
-                                self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
-                        except:
-                            pass
                         self._save_checkpoint()
-                    dist.barrier()
+
 
                 if self.current_step % self.lr_interval == 0:
                     if self.scheduler.__class__.__name__ == "ReduceLROnPlateau":
@@ -244,6 +242,13 @@ class Trainer:
 
                 self.current_batch += 1
                 self.current_step += 1
+
+
+            ## Loop Ends
+
+            self._run_eval()
+            if self.rank == 0:
+                self._save_checkpoint()
 
         return None
 
@@ -273,13 +278,11 @@ class Trainer:
             metric_dict[metric_name] = metric
 
         ## ALL REDUCE LOSS and METRICS
-        dist.barrier()
+
         val_loss = torch.tensor(val_loss).to(self.gpu_id)
-        dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
         val_loss = val_loss / self.num_gpu
         for key, value in metric_dict.items():
             metric = value.clone().detach().to(self.gpu_id)
-            dist.all_reduce(metric, op=dist.ReduceOp.SUM)
             metric_dict[key] = metric / self.num_gpu
         self.current_val_loss = val_loss
         self.current_val_metric_dict = metric_dict
@@ -288,7 +291,7 @@ class Trainer:
             self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_step)
             for key, value in metric_dict.items():
                 self.tb_writer.add_scalar(f"Val_{key}", value, self.current_step)
-        dist.barrier()
+
 
         self.model.train()
         return None
@@ -300,7 +303,7 @@ class Trainer:
             ## Save Model if Improved
             self.best_val_loss = self.current_val_loss
             self.best_val_loss_epoch = self.current_epoch
-            torch.save({'model_state_dict': self.model.module.state_dict(),
+            torch.save({'model_state_dict': self.model.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
                         'scheduler_state_dict': self.scheduler.state_dict(),
                         'val_loss': self.current_val_loss,
@@ -320,7 +323,7 @@ class Trainer:
 
     def train(self, max_epochs: int):
         for epoch in range(max_epochs):
-            dist.barrier()
+
             self.current_epoch = epoch
             self._run_epoch()
             if self.continue_training == 0:
@@ -333,19 +336,11 @@ class Trainer:
     ## END of Class NanoporeTrainer
 
 
-def setup_ddp(rank,world_size,gpu_id, port):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = str(port)
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(gpu_id)
-    return None
-
-
 def prepare_dataloader(seed, data_path, batch_size, eval_batch_size, rank, world_size, pin_memory, bag_size):
 
     batch_size = batch_size
-    train_data_path = f"{data_path}/train_pred_positive.pkl"
-    val_data_path = f"{data_path}/val_pred_positive.pkl"
+    train_data_path = f"{data_path}/train.pkl"
+    val_data_path = f"{data_path}/val.pkl"
     num_workers = 1
     prefetch_factor = None
 
@@ -359,9 +354,7 @@ def prepare_dataloader(seed, data_path, batch_size, eval_batch_size, rank, world
 
 def main_worker(rank, args_dict):
     gpu_id = args_dict["gpu_pool"][rank]
-    port = 12355 + args_dict["gpu_pool"][0]
-    setup_ddp(rank, args_dict["gpu"],gpu_id, port)
-    CNNModel = importlib.import_module(f"postprocess.{args_dict['model']}").CNNModel
+    CNNModel = importlib.import_module(f"postprocess.model.{args_dict['model']}").CNNModel
     model = CNNModel(input_height = args_dict["input_height"],
                      input_width = args_dict["input_width"],
                      hidden_dim = args_dict["hidden_dim"],
@@ -371,7 +364,7 @@ def main_worker(rank, args_dict):
                      num_pred_layers = args_dict["num_pred_layers"],
                      num_output_layers = args_dict["num_output_layers"],
                      dropout_rate = args_dict["dropout_rate"],
-                        kernel_size = args_dict["kernel_size"])
+                     kernel_size = args_dict["kernel_size"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -386,8 +379,6 @@ def main_worker(rank, args_dict):
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
     else:
         save_dict = {}
-
-    model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
@@ -412,12 +403,38 @@ def main_worker(rank, args_dict):
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
-    elif args_dict["loss"] == "BCE":
-        loss_func = torch.nn.BCELoss()
-    elif args_dict["loss"] == "BCEWL":
-        loss_func = torch.nn.BCEWithLogitsLoss()
-    elif args_dict["loss"] == "CE":
-        loss_func = torch.nn.CrossEntropyLoss()
+    elif args_dict["loss"] == "MAE":
+        loss_func = torch.nn.L1Loss()
+    elif args_dict["loss"] == "SmoothL1":
+        loss_func = torch.nn.SmoothL1Loss()
+    elif args_dict["loss"] == "Huber":
+        loss_func = torch.nn.HuberLoss()
+    elif args_dict["loss"] == "Fuchsia":
+        loss_func = clf.CustomLossFuchsia()
+    elif args_dict["loss"] == "Cyclamen":
+        loss_func = clf.CustomLossCyclamen()
+    elif args_dict["loss"] == "Foxglove":
+        loss_func = clf.CustomLossFoxglove()
+    elif args_dict["loss"] == "Hydrangea":
+        loss_func = clf.CustomLossHydrangea()
+    elif args_dict["loss"] == "Iris":
+        loss_func = clf.CustomLossIris()
+    elif args_dict["loss"] == "Sage":
+        loss_func = clf.CustomLossSage()
+    elif args_dict["loss"] == "Asparagus":
+        loss_func = clf.CustomLossAsparagus()
+    elif args_dict["loss"] == "Brassica":
+        loss_func = clf.CustomLossBrassica()
+    elif args_dict["loss"] == "Clover":
+        loss_func = clf.CustomLossClover()
+    elif args_dict["loss"] == "Dracena":
+        loss_func = clf.CustomLossDracena()
+    elif args_dict["loss"] == "Echeveria":
+        loss_func = clf.CustomLossEcheveria()
+    elif args_dict["loss"] == "Freesia":
+        loss_func = clf.CustomLossFreesia()
+
+
     else:
         raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
 
@@ -432,7 +449,6 @@ def main_worker(rank, args_dict):
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {gpu_id}] Training Loop Complete.")
-    dist.destroy_process_group()
     return None
 
 
@@ -443,15 +459,11 @@ def main_master():
     os.makedirs(os.path.join(args.tb, args.name), exist_ok=True)
     args.output = os.path.join(args.output, args.name)
     args.tb = os.path.join(args.tb, args.name)
-    if args.seed is None:
-        args.seed = np.random.randint(0, 10000000)
     printmessage("Training Program Started.")
     printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
-    if args.seed is None:
-        args.seed = np.random.randint(0, 10000000)
     printmessage(f"Seed: {args.seed}")
-    mp.spawn(main_worker, nprocs=args.gpu, args=(args_dict,))
+    main_worker(0, args_dict)
     printmessage(f"Training Program Complete.")
     return None
 

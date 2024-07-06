@@ -5,11 +5,8 @@ import os, glob
 import argparse
 import numpy as np
 import pandas as pd
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from postprocess.evaluate.dataloader_inference import load_dataset
 from utils.utils import printmessage
-import torch.multiprocessing as mp
 import tqdm
 import importlib
 
@@ -23,11 +20,11 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
-    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
+    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_070324/test.pkl", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/inference/", help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=512, help="Batch size")
-    parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
-    parser.add_argument("--bag_size", "-s", type=int, default=200, help="Bag size")
+    parser.add_argument("--gpu", "-g", type=int, default=1, help="GPU device")
+    parser.add_argument("--bag_size", "-s", type=int, default=20, help="Bag size")
 
     args = parser.parse_args()
     return args
@@ -50,9 +47,6 @@ def setup_ddp(rank,world_size):
         return None
 
     else:
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12355'
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
         torch.cuda.set_device(rank)
 
     return None
@@ -62,7 +56,7 @@ def run_inference(args):
     args_dict = vars(args)
     printmessage("Inference Program Started.")
     if args_dict["gpu"] > 0:
-        printmessage(f"Using {args.gpu} GPUs.")
+        printmessage(f"Using GPU {args.gpu}.")
     else:
         printmessage("Using CPU.")
 
@@ -81,15 +75,17 @@ def run_inference(args):
     args_dict["model"] = model_list
     if args_dict["data"].endswith("/"):
         args_dict["data"] = args_dict["data"][:-1]
-    mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict,))
+    inference_worker(args.gpu, args_dict)
     return None
 
 
-def inference_worker(rank, args_dict):
-    setup_ddp(rank, args_dict["gpu"])
+def inference_worker(gpu, args_dict):
 
+    torch.cuda.set_device(gpu)
+
+    rank = 0
     seed = 0
-    world_size = args_dict["gpu"]
+    world_size = 1
     data_path = args_dict["data"]
     eval_batch_size = args_dict["batch"]
     bag_size = args_dict["bag_size"]
@@ -98,14 +94,14 @@ def inference_worker(rank, args_dict):
     prefetch_factor = 10
 
     data_loader = load_dataset(seed, rank, world_size, data_path, eval_batch_size, num_workers, pin_memory,
-                              False, prefetch_factor, bag_size, shuffle=False)
+                               False, prefetch_factor, bag_size, shuffle=False)
 
     for model_path in args_dict["model"]:
         if rank == 0:
             printmessage(f"Running inference: {model_path}")
-        save_dict = torch.load(model_path, map_location=f'cuda:{rank}')
+        save_dict = torch.load(model_path, map_location={'cuda:0': f'cuda:{rank}'})
         model_config = save_dict["model_config"]
-        CNNModel = importlib.import_module(f"postprocess.{model_config['model']}").CNNModel
+        CNNModel = importlib.import_module(f"postprocess.model.{model_config['model']}").CNNModel
         model = CNNModel(input_height=model_config["input_height"],
                          input_width=model_config["input_width"],
                          hidden_dim=model_config["hidden_dim"],
@@ -126,28 +122,23 @@ def inference_worker(rank, args_dict):
             model.to(rank)
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
         save_dict.clear()
-        if args_dict["gpu"] > 0:
-            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
         model.eval()
 
         label_list = []
         pred_list = []
 
         for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
-            source, target, id = data
-            error, metadata, pred, mask = source
+            source, target = data
+            id, error, re_error, metadata, pred, mask = source
             error = error.to(rank)
+            re_error = re_error.to(rank)
             metadata = metadata.to(rank)
             pred = pred.to(rank)
             mask = mask.to(rank)
-            target = target.detach().numpy()
-            output = model(error, metadata, pred, mask).cpu().detach().numpy()
+            output = model(error, re_error, metadata, pred, mask).cpu().detach().numpy()
 
             if len(output.shape) > 1:
                 output = output[:, 0]
-
-            if len(target.shape) > 1:
-                target = target[:, 0]
 
             pred_list.append(output)
             label_list.append(id)
@@ -161,11 +152,6 @@ def inference_worker(rank, args_dict):
 
         del data_df
         gc.collect()
-
-        dist.barrier()
-
-    if args_dict["gpu"] > 0:
-        dist.destroy_process_group()
 
     return None
 

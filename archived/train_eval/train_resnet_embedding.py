@@ -12,7 +12,7 @@ import tqdm
 import numpy as np
 from utils.utils import printmessage
 import importlib
-from model.transformer_basecaller_embedding import TransformerModel
+from archived.model.transformer_basecaller_embedding import TransformerModel
 
 
 def parse_args():
