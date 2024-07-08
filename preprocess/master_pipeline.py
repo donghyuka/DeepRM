@@ -1,65 +1,57 @@
-
-
-import os, argparse
+import os, argparse, glob, math
 from utils.utils import printmessage
 
 
 def restructure_directory(args):
-    ## Check if pod5 files exist
-    pod5_list = os.listdir(args.input)
-    pod5_list = [i for i in pod5_list if i.endswith(".pod5")]
+    basename = os.path.basename(args.input)
+    if not basename == args.name:
+        printmessage(f"Renaming {basename} to {args.name}")
+        os.rename(args.input, os.path.join(os.path.dirname(args.input), args.name))
+        args.input = str(os.path.join(os.path.dirname(args.input), args.name))
 
-    if len(pod5_list) == 0:
-        printmessage(f"No pod5 files found in {args.input}. Attempting directory restructuring.")
-
-        if args.rename == "":
-            raise ValueError(f"No pod5 files found in {args.input}. Please specify --rename argument")
-
-        rename_path = os.path.join(os.path.dirname(args.input), args.rename)
-        os.rename(args.input, rename_path)
-        args.input = rename_path
-
-        ## check if input directory has a single subdirectory
-        subdir_list = os.listdir(args.input)
-        if len(subdir_list) != 1:
-            raise ValueError(f"Input directory {args.input} contains multiple subdirectories.")
-
-        subdir_path = os.path.join(args.input, subdir_list[0])
-        rename_path = os.path.join(args.input, args.rename)
-        os.rename(subdir_path, rename_path)
-        args.input = rename_path
-
-        ## check if input directory has "pod5_pass", "pod5_fail", "pod5_skip" subdirectories
-        subdir_list = os.listdir(args.input)
-        if not any(x in subdir_list for x in ["pod5_pass", "pod5_fail", "pod5_skip"]):
-            if "pod5" in subdir_list:
-                pass
-            else:
-                raise ValueError(f"Input directory {args.input} does not contain pod5_pass and pod5_fail subdirectories.")
-
+    if not os.path.exists(f"{args.input}/{args.name}"):
+        if len(os.listdir(args.input)) == 1:
+            old_path = os.path.join(args.input, os.listdir(args.input)[0])
+            printmessage(f"Moving {old_path} to {args.input}/{args.name}")
+            os.rename(old_path, os.path.join(args.input, args.name))
+            args.input = str(os.path.join(args.input, args.name))
         else:
-            os.makedirs(f"{args.input}/pod5", exist_ok=True)
+            raise ValueError(f"Input directory {args.input} contains more than one directory. Please restructure the input directory manually.")
+    else:
+        args.input = str(os.path.join(args.input, args.name))
 
-            ## move pod5 files to pod5 directory
-            for subdir in ["pod5_pass", "pod5_fail", "pod5_skip"]:
-                subdir_path = os.path.join(args.input, subdir)
-                if os.path.exists(subdir_path):
-                    cmd = f"mv {subdir_path}/*.pod5 {args.input}/pod5/"
-                    os.system(cmd)
+    if not os.path.exists(f"{args.input}/raw"):
+        if len(os.listdir(args.input)) == 1:
+            old_path = os.path.join(args.input, os.listdir(args.input)[0])
+            printmessage(f"Moving {old_path} to {args.input}/raw")
+            os.rename(old_path, os.path.join(args.input, "raw"))
+            args.pod5 = str(os.path.join(args.input, "raw"))
+        else:
+            raise ValueError(f"Input directory {args.input} contains more than one directory. Please restructure the input directory manually.")
+    else:
+        args.pod5 = str(os.path.join(args.input, "raw"))
 
-            ## check if empty directories remain
-            for subdir in ["pod5_pass", "pod5_fail", "pod5_skip"]:
-                subdir_path = os.path.join(args.input, subdir)
-                if os.path.exists(subdir_path):
-                    if len(os.listdir(subdir_path)) == 0:
-                        os.rmdir(subdir_path)
+    ## Check if there are any pod5 directories
+    pod5_dirs = glob.glob(f'{args.pod5}/pod5*/')
+    if len(pod5_dirs) == 0:
+        raise FileNotFoundError(f"Input directory {args.pod5} does not contain any pod5 directories")
 
-        ## set input directory to pod5 directory
-        args.input = f"{args.input}/pod5"
-        printmessage(f"Input directory restructured to {args.input}")
+    ## merge them all into a single directory
+    args.pod5 = os.path.join(args.pod5, "pod5")
+
+    if not os.path.exists(args.pod5):
+        os.makedirs(args.pod5)
+        for pod5_dir in pod5_dirs:
+            for file in os.listdir(pod5_dir):
+                os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
+            os.rmdir(pod5_dir)
 
     else:
-        pass
+        pod5_dirs = [x for x in pod5_dirs if os.path.basename(x[:-1]) != "pod5"]
+        for pod5_dir in pod5_dirs:
+            for file in os.listdir(pod5_dir):
+                os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
+            os.rmdir(pod5_dir)
 
     return None
 
@@ -67,57 +59,117 @@ def restructure_directory(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     num_cpu = os.cpu_count()
-    parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--out", "-o", dest = "output", type=str, required=True, help="Output directory")
+    parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
+    parser.add_argument("--out", "-o", dest = "output", type=str, default = None, help="Output directory")
     parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.2", help="Dorado path")
-    parser.add_argument("--cpu", "-t", type=int, default=120, help="Number of threads")
+    parser.add_argument("--cpu", "-t", type=int, default= int(math.floor(num_cpu * 0.95)), help="Number of CPUs")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
-    parser.add_argument("--rename", "-r", type=str, default="", help="rename input directory")
+    parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
     parser.add_argument("--dag_cfg", "-c", type=str, default=None, help="DAG config file")
-    parser.add_argument("--boi", "-x", type=str, default="A", help="Base of Interest")
+    parser.add_argument("--base", "-x", type=str, default=None, help="Base of Interest")
     parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
-
+    parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
+    parser.add_argument("--toml", "-m", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml", help="Dorado TOML file")
     args = parser.parse_args()
+    return args
+
+
+def autoconfig(args):
+    if args.input.endswith("/"):
+        args.input = args.input[:-1]
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
     if args.step == 0:
         args.step = [1,2,3,4]
     if not any(x in args.step for x in [1,2,3,4]):
         raise ValueError(f"Invalid step argument: {args.step}")
+    if args.name is None:
+        basename = os.path.basename(args.input)
+        if not basename.startswith(args.run_prefix):
+            basename = basename.split('[')[-1].split(']')[0]
+            if not basename.startswith(args.run_prefix):
+                raise ValueError(f"Cannot automatically detect run name. Supply --name option manually.")
+            else:
+                args.name = basename
+        else:
+            args.name = basename
+    if args.base is None:
+        basename = os.path.basename(args.input)
+        if not basename.startswith(args.run_prefix):
+            try:
+                basename = basename.split('-')[1].split('_')[0]
+                args.base = basename
+            except:
+                raise ValueError(f"Cannot automatically detect base of interest. Supply --base option manually.")
+        else:
+            final_summary_path = glob.glob(f"{args.input}/**/final_summary*.txt", recursive=True)
+            if len(final_summary_path) != 1:
+                raise ValueError(f"Cannot automatically detect base of interest. Supply --base option manually.")
+            else:
+                with open(final_summary_path[0], "r") as f:
+                    found = False
+                    for line in f:
+                        if line.startswith("sample_id"):
+                            basename = line.strip().split("=")[1]
+                            basename = basename.split('-')[1].split('_')[0]
+                            found = True
+                            break
+                    if not found:
+                        raise ValueError(f"Cannot automatically detect base of interest. Supply --base option manually.")
+                args.base = basename
+
+    if args.base in ["A", "C", "G", "U"]:
+        args.base = f"c{args.base}"
+
+    restructure_directory(args)
+    if args.output is None:
+        args.output = f"{args.input}/result"
+    os.makedirs(args.output, exist_ok=True)
+
+    canonical_base = get_canonical_base(args.base)
+    args.canonical_base = canonical_base
 
     if args.dag_cfg is None:
-        if args.boi == "A":
-            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_A.json"
-        elif args.boi == "C":
-            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_C.json"
-        elif args.boi == "G":
-            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_G.json"
-        elif args.boi == "U":
-            args.dag_cfg = "/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_U.json"
-        else:
-            raise ValueError(f"Invalid base of interest: {args.boi}")
+        args.dag_cfg = f"/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_{args.canonical_base}.json"
+        if not os.path.exists(args.dag_cfg):
+            raise FileNotFoundError(f"DAG config file {args.dag_cfg} does not exist")
+
+    printmessage(f"POD5 directory: {args.pod5}")
+    printmessage(f"Output directory: {args.output}")
+    printmessage(f"Run Name: {args.name}")
+    printmessage(f"Base of Interest: {args.base}")
+
+    os.makedirs(args.output, exist_ok=True)
 
     return args
 
+def get_canonical_base(base):
+    modification_dict = {"A": ["cA", "m6A", "m1A", "Am", "I"],
+                         "C": ["cC", "m5C", "hm5C", "Cm"],
+                         "G": ["cG", "m7G", "m1G", "Gm"],
+                         "U": ["cU", "m5U", "Um", "pseU"]}
+
+    for k, v in modification_dict.items():
+        if base in v:
+            return k
+
+    raise ValueError(f"Invalid base argument: {base}")
+
+
+
 def main():
     args = parse_args()
-
-    printmessage(f"Input directory: {args.input}")
-    printmessage(f"Output directory: {args.output}")
-    restructure_directory(args)
-    os.makedirs(args.output, exist_ok=True)
+    args = autoconfig(args)
 
     wdir = f"{args.output}/intermediates/"
     bam_path = f"{wdir}/dorado_output.bam"
-    pod5_path = args.input
     block_df_path = f"{wdir}/block_df.pkl"
     signal_path = f"{wdir}/segmented_tokenized/"
     dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v5.0.0"
-    toml_path = "/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml"
-    # signal_block_path = f"{signal_path}/block"
-    # token_path = f"{args.output}/token"
+    qc_path = f"{args.output}/qc/"
+
     os.makedirs(wdir, exist_ok=True)
 
     if 1 in args.step:
@@ -127,7 +179,7 @@ def main():
             args.batch = f"-b {args.batch}"
         else:
             args.batch = ""
-        cmd = f"{args.dorado}/bin/dorado basecaller --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {bam_path}"
         printmessage(cmd)
         os.system(cmd)
         cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"
@@ -136,19 +188,24 @@ def main():
         cmd = f"samtools index -@ {args.cpu} {bam_path}"
         printmessage(cmd)
         os.system(cmd)
+        cmd = f"python -m qc.inspect_run -i {bam_path} -o {qc_path}"
+        printmessage(cmd)
+        os.system(cmd)
 
     if 2 in args.step:
         ## step 2. Run dag_extract_cb.py
         printmessage(f"[Step 2/3] Running DAG-based CB Extraction")
         cmd = f"python -m preprocess.dag_extract_cb --cpu {args.cpu} --input {bam_path} --output {block_df_path} --rbq {args.qcut} --cfg {args.dag_cfg}"
-
+        printmessage(cmd)
+        os.system(cmd)
+        cmd = f"python -m qc.inspect_block -o {qc_path} -k {block_df_path} -t {args.base}"
         printmessage(cmd)
         os.system(cmd)
 
     if 3 in args.step:
         ## Step 3. Run segment_normalize_signal.py
         printmessage(f"[Step 3/3] Running Signal Segmentation, Normalization, and FFT")
-        cmd = f"python -m preprocess.segment_normalize_signal --save_intermediateq --cpu {args.cpu} --pod5 {pod5_path} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {toml_path}"
+        cmd = f"python -m preprocess.segment_normalize_signal --keep_intermediate --cpu {args.cpu} --pod5 {args.pod5} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {args.toml}"
         printmessage(cmd)
         os.system(cmd)
 

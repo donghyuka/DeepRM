@@ -183,7 +183,10 @@ def main():
 
     warm_color_list = ["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"]
     cool_color_list = ["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"]
-    modified_name_list = ["m6A", "m7G", "m5C", "pseU", "Gm", "m1A", "I"]
+    modified_name_list = ["m6A", "m1A", "Am", "I",
+                          "m5C", "hm5C", "Cm",
+                          "m7G", "m1G", "Gm",
+                          "m5U", "Um", "pseU"]
 
     block_df_dict = {}
     perfect_block_df_dict = {}
