@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from utils.activations import get_activation_fn
 
 
+## AIRNA_V1: Same as transformer_prototype_v19
+
 class TransformerModel(nn.Module):
 
     def __init__(self, d_model: int, n_heads: int, d_ff: int,
@@ -16,10 +18,15 @@ class TransformerModel(nn.Module):
         super().__init__()
 
         ## Embedding Initialization
+        signal_embedding_layers = []
+        for i in range(4):
+            signal_embedding_layers.append(nn.Linear(signal_size, d_model))
+            signal_embedding_layers.append(nn.LayerNorm(d_model))
+            signal_embedding_layers.append(get_activation_fn(t_act))
+
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
-        self.signal_embedding = nn.Linear(signal_size, d_model)
+        self.signal_embedding = nn.Sequential(signal_embedding_layers)
         self.bq_embedding = nn.Embedding(max_bq+1, d_model)
-        self.embedding_dropout = nn.Dropout(encoder_dropout)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
 
         ## Encoder Initialization
@@ -55,7 +62,6 @@ class TransformerModel(nn.Module):
 
         ## add all embeddings and dropout
         final_embedding = torch.stack([kmer_embedding, signal_embedding, bq_embedding, pos_encoding], dim = 0).sum(dim = 0)
-        final_embedding = self.embedding_dropout(final_embedding)
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## apply regression head to each token:
@@ -124,4 +130,6 @@ class RegressionHead(nn.Module):
                 if layer.bias is not None:
                     layer.bias.data.zero_()
         return None
+
     ## END OF RegressionHead
+

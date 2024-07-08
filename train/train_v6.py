@@ -72,7 +72,7 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"BERMUDA-Proto-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"AIRNA-{args.model.split('_')[-1]}-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:

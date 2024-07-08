@@ -27,6 +27,7 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
     df["pm6a"] = np.log10(1-df["pm6a"]) * df["count_pm6a"]
     df["pos"] = df["label_id"].apply(lambda x: x.split(":")[1]).astype(int)
     df["coding"] = df["gene"].apply(lambda x: x.startswith("NM"))
+    df["depth"] = 1
 
     df = df.groupby("gene")
 
@@ -57,7 +58,7 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
         local_collect.append(gene_df)
 
     gene_df = pd.concat(local_collect)
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum",
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first",  "count_m6a": "sum",
                                                 "count_ca": "sum", "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first",
                                                 "depth": "sum", "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
@@ -68,7 +69,7 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
 def load_split_data(data_path, cpu):
     data_df = pd.read_pickle(data_path)
     print(data_df)
-
+    data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
     geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
     geneid_table.rename({"transcript_id":"gene"}, axis=1, inplace=True)
     data_df = data_df.merge(geneid_table, how="left", on="gene")
@@ -116,19 +117,19 @@ def main():
 
     gc.collect()
 
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum", "count_ca": "sum",
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum", "count_ca": "sum",
                                                 "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first", "depth": "sum",
                                                 "coding": "max"})
 
     gene_df["pm6a"] = 1 - 10**(gene_df["pm6a"] / gene_df["count_pm6a"])
     gene_df["dom"] = gene_df["count_m6a"] / (gene_df["count_m6a"] + gene_df["count_ca"])
     gene_df["count_dom"] = gene_df["count_m6a"] + gene_df["count_ca"]
-    gene_df = gene_df[["genome_id", "gene_id", "dom", "pm6a", "drach", "depth", "count_dom", "count_pm6a", "coding"]].copy()
+    gene_df = gene_df[["genome_id", "gene_id", "dom", "pm6a", "depth", "count_dom", "count_pm6a", "coding"]].copy()
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
     print(gene_df)
 
-    gene_df.to_pickle(args.output + "/pileup_genomic.pkl")
+    gene_df.to_pickle(args.output)
     gc.collect()
 
     return None

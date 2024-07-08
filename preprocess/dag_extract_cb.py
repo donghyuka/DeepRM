@@ -405,7 +405,9 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
 
     print(block_df)
 
-    ## print stats and log
+    block_df.to_pickle(output)
+
+    block_df = pd.read_pickle(output)
 
     log = []
     log.append(f"Total number of passed reads: {record_cnt:,}")
@@ -414,7 +416,7 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
     log.append(block_df["score"].describe())
     log.append(block_df["penalty"].describe())
 
-    log_path = f"{output}/log.txt"
+    log_path = f"{os.path.dirname(output)}/log.txt"
     with open(log_path, "w") as log_file:
         for line in log:
             log_file.write(f"{line}\n")
@@ -423,8 +425,6 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
     for line in log:
         printmessage(line)
     print("=============================================")
-
-    block_df.to_pickle(output)
 
     printmessage(f"Saved context blocks to {output}.")
 
@@ -461,7 +461,7 @@ def parse_args():
     parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
     parser.add_argument("--min", dest="min_read_length", type=int, default=0)
     parser.add_argument("--sample", dest="sample", type=int, default=None)
-
+    parser.add_argument("--keep", dest="keep_intermediate", type=bool, default=False)
     parser.add_argument("--cfg", dest="config", type=str, default=None)
     parser.add_argument("--resume", dest="resume", type=str, default=None, help="Continue from previous run. Provide the path to the previous output.")
 
@@ -500,7 +500,8 @@ def main():
     else:
         flush_path = f"{base_path}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
         os.makedirs(flush_path, exist_ok=True)
-        # atexit.register(os.system, f"rm -r {flush_path}")
+        if not args.keep_intermediate:
+            atexit.register(os.system, f"rm -r {flush_path}")
 
     args_dict = vars(args)
     extract_blocks_from_read_list(**args_dict, flush_path=flush_path)

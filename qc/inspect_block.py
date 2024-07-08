@@ -112,16 +112,33 @@ def block_score_distribution(block_df_dict, color_dict, output):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
+    parser.add_argument("--intermediate", "-i", type=str, nargs="+", default = None,  help="Intermediate files prefix")
     parser.add_argument("--penalty", "-p", type=int, default=10, help="Penalty cutoff")
     parser.add_argument("--block", "-k", type=str, required=True, nargs="+", help="Block file")
-    parser.add_argument("--name", "-n", type=str, required=True, nargs="+", help="Block name")
+    parser.add_argument("--name", "-n", type=str, default = None, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
     parser.add_argument("--sample", "-s", type=int, default=int(1e+6), help="Sampling fraction")
     args = parser.parse_args()
-    assert len(args.block) == len(args.name) == len(args.type)
+    assert len(args.block) == len(args.type)
     assert all([os.path.exists(b) for b in args.block])
+    if args.intermediate is not None:
+        assert len(args.intermediate) == len(args.block)
+        assert all([os.path.exists(i) for i in args.intermediate])
+    else:
+        intermediate = []
+        for path in args.block:
+            parent_dir = os.path.dirname(os.path.dirname(path))
+            intermediate.append(f"{parent_dir}/qc/block_df_dict.pkl")
+        args.intermediate = intermediate
+    if args.name is not None:
+        assert len(args.name) == len(args.block)
+    else:
+        name = []
+        for path in args.block:
+            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(path)))
+            name.append(os.path.basename(parent_dir))
+        args.name = name
     return args
-
 
 def plot_violin(block_df_dict, color_dict, output):
     cb_len = 21
@@ -171,6 +188,7 @@ def main():
     block_df_dict = {}
     perfect_block_df_dict = {}
     color_dict = {}
+
     for block, name, block_type in zip(args.block, args.name, args.type):
         block_name = f"{name} ({block_type})"
         if block_type in modified_name_list:
@@ -180,16 +198,40 @@ def main():
         color_dict[block_name] = color
 
     load_success = False
+    output_file_exists = False
 
     if os.path.exists(args.output):
-        printmessage("Output directory already exists. Attempting to load pickle")
+        printmessage("Output directory already exists. Attempting to load pickle.")
         try:
             block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
             perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
             load_success = True
+            output_file_exists = True
+            printmessage("Pickle loading successful.")
         except:
-            printmessage("Pickle loading failed. Re-run with a different output directory")
+            printmessage("Pickle loading from output directory failed.")
             load_success = False
+            output_file_exists = False
+            block_df_dict = {}
+            perfect_block_df_dict = {}
+
+    if not load_success:
+        printmessage("Attempting to load intermediate files.")
+        try:
+            for intermediate in args.intermediate:
+                block_df_dict_run = pickle.load(open(intermediate, "rb"))
+                perfect_block_df_dict_run = pickle.load(open(intermediate.replace("block_df_dict", "perfect_block_df_dict"), "rb"))
+                block_df_dict.update(block_df_dict_run)
+                perfect_block_df_dict.update(perfect_block_df_dict_run)
+            load_success = True
+            output_file_exists = False
+            printmessage("Pickle loading successful.")
+        except:
+            printmessage("Pickle loading failed.")
+            load_success = False
+            output_file_exists = False
+            block_df_dict = {}
+            perfect_block_df_dict = {}
 
     if not load_success:
         for block, name, block_type in zip(args.block, args.name, args.type):
@@ -202,6 +244,7 @@ def main():
             block_df = block_df.sample(args.sample).copy()
             block_df_dict[block_name] = block_df
 
+    if not output_file_exists:
         with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
             pickle.dump(block_df_dict, f)
 

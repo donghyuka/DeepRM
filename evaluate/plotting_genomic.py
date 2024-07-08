@@ -25,9 +25,9 @@ def parse_args():
     parser.add_argument("--input1", "-i1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240404-092850-26-221000-token_normalise_drach_v2_pileup/pileup_genomic.pkl", help="Data path")
     parser.add_argument("--input2", "-i2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/inference/BERMUDA-Proto-v19-20240626-093708-12-215000-token_normalise_drach_v2_pileup/pileup_genomic.pkl", help="Data path")
     parser.add_argument("--dorado1", "-d1", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado_m6a_genomic/gene_df_final.pkl", help="Dorado path")
-    parser.add_argument("--dorado2", "-d2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-genomic/gene_df_final.pkl", help="Dorado path")
+    parser.add_argument("--dorado2", "-d2", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-genomic/gene_df_final.drach.pkl", help="Dorado path")
     parser.add_argument("--m6anet", "-m", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/m6anet_genomic/gene_df_final.pkl", help="m6Anet path")
-    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.Genomic.GP3.depth5_None.twm6astrict.drach.tsv", help="Label path")
+    parser.add_argument("--label", "-l", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.Genomic.GP3.depth5_None.twm6astrict.drach.pkl", help="Label path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/plot", help="Output path")
     parser.add_argument("--min_depth", "-md", type=int, default=20, help="Minimum depth")
     parser.add_argument("--max_depth", "-xd", type=int, default=0, help="Maximum depth")
@@ -284,9 +284,10 @@ def main():
     modelname = "-".join(args.input2.split("/")[-2].split("-")[:7])
     outdir = f"{args.output}/{modelname}-genomic"
 
-    label_df = process_label(args.label)
-    label_df.to_pickle(args.label.replace(".tsv", ".pkl"))
-    label_df = pd.read_pickle(args.label.replace(".tsv", ".pkl"))
+    # label_df = process_label(args.label)
+    # label_df.to_pickle(args.label.replace(".tsv", ".pkl"))
+
+    label_df = pd.read_pickle(args.label)
     printmessage(f"Label count                  : {len(label_df):,}")
     dorado_pred = pd.read_pickle(args.dorado1)
     dorado_pred = dorado_pred[["dom", "count_dom"]].copy()
@@ -350,6 +351,7 @@ def main():
     printmessage("Plotted calibration")
 
     return None
+
 
 
 

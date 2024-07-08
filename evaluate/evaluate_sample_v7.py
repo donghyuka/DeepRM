@@ -83,6 +83,10 @@ def run_inference(args):
         printmessage(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
+        out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
+        print(out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        args_dict_model["out_dir"] = out_dir
         mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
     return None
 
@@ -173,8 +177,7 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             block_id_list = np.concatenate(block_id_list)
 
             data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
-            out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_{idx}.pkl"
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
             data_df.to_pickle(out_path)
             id_list = []
             pred_list = []
@@ -185,8 +188,7 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     block_id_list = np.concatenate(block_id_list)
 
     data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
-    out_path = f"{args_dict['output']}/inference/{args_dict['model'].split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}/inference_{rank}_last.pkl"
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
 
     if args_dict["gpu"] > 0:
