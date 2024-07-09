@@ -64,12 +64,13 @@ def motif_composition(block_df_dict, color_dict,  output):
     return None
 
 
-def bq_plot(block_df_dict, color_dict, output):
+def bq_plot(block_df_dict, color_dict, output, sample=int(1e+4), comment=""):
     ## Plot the distribution of base quality. Plot position-wise mean with CI95.
 
     stat_dict = {}
     for block_name, block_df in block_df_dict.items():
-        block_df = block_df.sample(int(1e+4))
+        if sample is not None:
+            block_df = block_df.sample(sample)
         bq_arr = np.stack(block_df["bq"].values, axis=0)
         bq_mean = np.mean(bq_arr, axis=0)
         bq_std = np.std(bq_arr, axis=0)
@@ -90,7 +91,7 @@ def bq_plot(block_df_dict, color_dict, output):
     ax.set_xlabel("Position")
     ax.set_ylabel("Mean Base Quality")
     ax.legend()
-    plt.savefig(f"{output}/bq_plot.png", dpi=300)
+    plt.savefig(f"{output}/bq_plot{comment}.png", dpi=300)
     return None
 
 
@@ -254,11 +255,25 @@ def main():
         with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
             pickle.dump(perfect_block_df_dict, f)
 
-    block_score_distribution(block_df_dict, color_dict, args.output)
-    bq_plot(perfect_block_df_dict, color_dict, args.output)
-    motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    motif_composition(perfect_block_df_dict, color_dict, args.output)
-    plot_violin(perfect_block_df_dict, color_dict, args.output)
+
+    motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]
+
+    for block_name, block_df in perfect_block_df_dict.items():
+        block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
+        perfect_block_df_dict[block_name] = block_df
+
+    for motif in motif_list:
+        motif_block_df_dict= {}
+        for block_name, block_df in perfect_block_df_dict.items():
+            motif_block_df = block_df[block_df["motif"] == motif].copy()
+            motif_block_df_dict[block_name] = motif_block_df
+        print(motif_block_df_dict)
+        bq_plot(motif_block_df_dict, color_dict, args.output, sample=None, comment=f"-{motif}")
+        # plot_violin(perfect_block_df_dict, color_dict, args.output)
+
+    # motif_cdf(perfect_block_df_dict, color_dict, args.output)
+    # motif_composition(perfect_block_df_dict, color_dict, args.output)
+    # block_score_distribution(block_df_dict, color_dict, args.output)
 
     return None
 

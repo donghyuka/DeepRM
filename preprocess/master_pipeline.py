@@ -20,38 +20,44 @@ def restructure_directory(args):
     else:
         args.input = str(os.path.join(args.input, args.name))
 
-    if not os.path.exists(f"{args.input}/raw"):
-        if len(os.listdir(args.input)) == 1:
-            old_path = os.path.join(args.input, os.listdir(args.input)[0])
-            printmessage(f"Moving {old_path} to {args.input}/raw")
-            os.rename(old_path, os.path.join(args.input, "raw"))
-            args.pod5 = str(os.path.join(args.input, "raw"))
+    if 1 in args.step or 3 in args.step:
+
+        if not os.path.exists(f"{args.input}/raw"):
+            if len(os.listdir(args.input)) == 1:
+                old_path = os.path.join(args.input, os.listdir(args.input)[0])
+                printmessage(f"Moving {old_path} to {args.input}/raw")
+                os.rename(old_path, os.path.join(args.input, "raw"))
+                args.raw_path = str(os.path.join(args.input, "raw"))
+            else:
+                raise ValueError(f"Input directory {args.input} contains more than one directory. Please restructure the input directory manually.")
         else:
-            raise ValueError(f"Input directory {args.input} contains more than one directory. Please restructure the input directory manually.")
+            args.raw_path = str(os.path.join(args.input, "raw"))
+
+        ## Check if there are any pod5 directories
+        pod5_dirs = glob.glob(f'{args.pod5}/pod5*/')
+        if len(pod5_dirs) == 0:
+            raise FileNotFoundError(f"Input directory {args.raw_path} does not contain any pod5 directories")
+
+        ## merge them all into a single directory
+        args.pod5 = os.path.join(args.raw_path, "pod5")
+
+        if not os.path.exists(args.pod5):
+            os.makedirs(args.pod5)
+            for pod5_dir in pod5_dirs:
+                for file in os.listdir(pod5_dir):
+                    os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
+                os.rmdir(pod5_dir)
+
+        else:
+            pod5_dirs = [x for x in pod5_dirs if os.path.basename(x[:-1]) != "pod5"]
+            for pod5_dir in pod5_dirs:
+                for file in os.listdir(pod5_dir):
+                    os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
+                os.rmdir(pod5_dir)
+
     else:
-        args.pod5 = str(os.path.join(args.input, "raw"))
-
-    ## Check if there are any pod5 directories
-    pod5_dirs = glob.glob(f'{args.pod5}/pod5*/')
-    if len(pod5_dirs) == 0:
-        raise FileNotFoundError(f"Input directory {args.pod5} does not contain any pod5 directories")
-
-    ## merge them all into a single directory
-    args.pod5 = os.path.join(args.pod5, "pod5")
-
-    if not os.path.exists(args.pod5):
-        os.makedirs(args.pod5)
-        for pod5_dir in pod5_dirs:
-            for file in os.listdir(pod5_dir):
-                os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
-            os.rmdir(pod5_dir)
-
-    else:
-        pod5_dirs = [x for x in pod5_dirs if os.path.basename(x[:-1]) != "pod5"]
-        for pod5_dir in pod5_dirs:
-            for file in os.listdir(pod5_dir):
-                os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
-            os.rmdir(pod5_dir)
+        args.pod5 = ""
+        args.raw_path = ""
 
     return None
 
@@ -133,8 +139,11 @@ def autoconfig(args):
 
     if args.dag_cfg is None:
         args.dag_cfg = f"/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_{args.canonical_base}.json"
-        if not os.path.exists(args.dag_cfg):
-            raise FileNotFoundError(f"DAG config file {args.dag_cfg} does not exist")
+    else:
+        args.dag_cfg = f"{args.dag_cfg}/240202_87BB_{args.canonical_base}.json"
+
+    if not os.path.exists(args.dag_cfg):
+        raise FileNotFoundError(f"DAG config file {args.dag_cfg} does not exist")
 
     printmessage(f"POD5 directory: {args.pod5}")
     printmessage(f"Output directory: {args.output}")
