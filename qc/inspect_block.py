@@ -255,8 +255,16 @@ def main():
         with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
             pickle.dump(perfect_block_df_dict, f)
 
+    bq_plot(perfect_block_df_dict, color_dict, args.output)
+    plot_violin(perfect_block_df_dict, color_dict, args.output)
+    motif_cdf(perfect_block_df_dict, color_dict, args.output)
+    motif_composition(perfect_block_df_dict, color_dict, args.output)
+    block_score_distribution(block_df_dict, color_dict, args.output)
 
-    motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]
+    return None
+
+
+def plot_motif(perfect_block_df_dict, color_dict, args, motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]):
 
     for block_name, block_df in perfect_block_df_dict.items():
         block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
@@ -269,13 +277,11 @@ def main():
             motif_block_df_dict[block_name] = motif_block_df
         print(motif_block_df_dict)
         bq_plot(motif_block_df_dict, color_dict, args.output, sample=None, comment=f"-{motif}")
-        # plot_violin(perfect_block_df_dict, color_dict, args.output)
-
-    # motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    # motif_composition(perfect_block_df_dict, color_dict, args.output)
-    # block_score_distribution(block_df_dict, color_dict, args.output)
+        plot_violin(perfect_block_df_dict, color_dict, args.output)
 
     return None
+
+
 
 if __name__ == "__main__":
     main()

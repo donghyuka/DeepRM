@@ -1,5 +1,8 @@
 ## Modified from: https://github.com/AlexanderVNikitin/tsgm/blob/main/tsgm/models/augmentations.py
-## Modified from:
+## Original code by: Alexander Nikitin
+## Modified for PyTorch.
+## Drift augmentation modified from: https://github.com/arundo/tsaug/blob/master/src/tsaug/_augmenter/drift.py
+## Trned augmentation modified from: https://github.com/timeseriesAI/tsai/blob/main/tsai/data/transforms.py
 
 
 import math
@@ -7,14 +10,12 @@ import numpy as np
 import numpy.typing as npt
 import random
 import scipy.interpolate
-from dtaidistance import dtw_barycenter
 from typing import List, Dict, Any, Optional, Tuple, Union
-from tensorflow.python.types.core import TensorLike
-
 import logging
+from torch import Tensor
+import torch
 
-
-AugmentationOutput = Union[TensorLike, Tuple[TensorLike, TensorLike]]
+AugmentationOutput = Union[Tensor, Tuple[Tensor, Tensor]]
 
 
 logger = logging.getLogger("augmentations")
@@ -28,12 +29,12 @@ class BaseAugmenter:
     ) -> None:
         self.per_channel = per_feature
 
-    def _get_seeds(self, total_num: int, n_seeds: int) -> TensorLike:
-        seeds_idx = np.random.choice(range(total_num), size=n_seeds, replace=True)
+    def _get_seeds(self, total_num: int, n_seeds: int) -> Tensor:
+        seeds_idx = torch.randint(0, total_num, (n_seeds,))
         return seeds_idx
 
     def generate(
-            self, X: TensorLike, y: Optional[TensorLike] = None, n_samples: int = 1
+            self, X: Tensor, y: Optional[Tensor] = None, n_samples: int = 1
     ) -> AugmentationOutput:
         raise NotImplementedError
 
@@ -74,19 +75,12 @@ class GaussianNoise(BaseAugmenter):
     ) -> None:
         super(GaussianNoise, self).__init__(per_feature)
 
-    def generate(self, X: TensorLike, y: Optional[TensorLike] = None, n_samples: int = 1,
-                 mean: float = 0, variance: float = 1.0,) -> AugmentationOutput:
+    def generate(self, X: Tensor, mean: float = 0, variance: float = 1.0,) -> AugmentationOutput:
         """
         Generate synthetic data with Gaussian noise.
 
         :param X: Input data tensor of shape (n_data, n_timesteps, n_features).
-        :type X: TensorLike
-
-        :param y: Optional labels tensor. If provided, labels will also be returned
-        :type y: Optional[TensorLike]
-
-        :param n_samples: Number of augmented samples to generate. Default is 1.
-        :type n_samples: int
+        :type X: Tensor
 
         :param mean: The mean of the noise. Default is 0.
         :type mean: float
@@ -95,146 +89,22 @@ class GaussianNoise(BaseAugmenter):
         :type variance: float
 
         :return: Augmented data tensor of shape (n_samples, n_timesteps, n_features) and optionally augmented labels if 'y' is provided.
-        :rtype: Union[TensorLike, Tuple[TensorLike, TensorLike]]
+        :rtype: Union[Tensor, Tuple[Tensor, Tensor]]
         """
-        seeds_idx = self._get_seeds(total_num=X.shape[0], n_seeds=n_samples)
+        seeds_idx = self._get_seeds(total_num=X.shape[0])
 
         sigma = variance**0.5
         has_labels = y is not None
         if self.per_channel:
-            gauss = np.random.normal(
-                mean, sigma, (n_samples, X.shape[1], X.shape[2])
-            )
+            gauss = torch.normal(mean, sigma, (n_samples, X.shape[1], X.shape[2]))
         else:
-            gauss = np.random.normal(mean, sigma, (n_samples, X.shape[1]))
-            gauss = np.expand_dims(gauss, -1)
+            gauss = torch.normal(mean, sigma, (n_samples, X.shape[1], 1))
         synthetic_X = X[seeds_idx] + gauss
         if has_labels:
             synthetic_y = y[seeds_idx]
-            return np.array(synthetic_X), np.array(synthetic_y)
+            return synthetic_X, synthetic_y
         else:
-            return np.array(synthetic_X)
-
-
-class SliceAndShuffle(BaseAugmenter):
-    """Slice the time series in k pieces and create a new time series by shuffling.
-    Args:
-        per_feature (bool): if set to True, each time series is sliced independently.
-            Otherwise, all features are sliced in the same way. Default: True
-    """
-
-    def __init__(
-            self,
-            per_feature: bool = False,
-    ) -> None:
-        super(SliceAndShuffle, self).__init__(per_feature)
-
-    def generate(self, X: TensorLike, y: Optional[TensorLike] = None, n_samples: int = 1, n_segments: int = 2) -> AugmentationOutput:
-        """
-        Generate synthetic data using Slice-And-Shuffle strategy. Slices are randomly selected.
-
-        :param X: Input data tensor of shape (n_data, n_timesteps, n_features).
-        :type X: TensorLike
-
-        :param y: Optional labels tensor. If provided, labels will also be returned
-        :type y: Optional[TensorLike]
-
-        :param n_segments: The number of slices, default is 2.
-        :type n_segments: int
-
-        :param n_samples: Number of augmented samples to generate. Default is 1.
-        :type n_samples: int
-
-        :return: Augmented data tensor of shape (n_samples, n_timesteps, n_features) and optionally augmented labels if 'y' is provided.
-        :rtype: Union[TensorLike, Tuple[TensorLike, TensorLike]]
-        """
-        assert 0 < n_segments <= X.shape[1]
-
-        seeds_idx = self._get_seeds(total_num=X.shape[0], n_seeds=n_samples)
-
-        synthetic_data = []
-        has_labels = y is not None
-        if has_labels:
-            new_labels = []
-        for i in seeds_idx:
-            sequence = X[i]
-            if self.per_channel:
-                raise NotImplementedError(
-                    "SliceAndShuffle separately by feature is not supported yet."
-                )
-            else:
-                # Randomly pick n_segments-1 points where to slice
-                idxs = np.random.randint(0, sequence.shape[0], size=n_segments - 1)
-                slices = []
-                start_idx = 0
-                for j in sorted(idxs):
-                    s = sequence[start_idx:j]
-                    start_idx = j
-                    slices.append(s)
-                slices.append(sequence[start_idx:])
-                np.random.shuffle(slices)
-            # concatenate the slices
-            sequence = np.concatenate(slices)
-            synthetic_data.append(sequence)
-            if has_labels:
-                new_labels.append(y[i])
-        if has_labels:
-            return np.array(synthetic_data), np.array(new_labels)
-        else:
-            return np.array(synthetic_data)
-
-
-class Shuffle(BaseAugmenter):
-    """
-    Shuffles time series features.
-    Shuffling is beneficial when each feature corresponds to interchangeable sensors.
-    """
-
-    def __init__(self) -> None:
-        super(Shuffle, self).__init__(per_feature=False)
-
-    def _n_repeats(self, n: int, total_num: int) -> int:
-        return math.ceil(n / total_num)
-
-    def generate(self, X: TensorLike, y: Optional[TensorLike] = None, n_samples: int = 1) -> AugmentationOutput:
-        """
-        Generate synthetic data using Shuffle strategy.
-        Features are randomly shuffled to generate novel samples.
-
-        :param X: Input data tensor of shape (n_data, n_timesteps, n_features).
-        :type X: TensorLike
-
-        :param y: Optional labels tensor. If provided, labels will also be returned
-        :type y: Optional[TensorLike]
-
-        :param n_samples: Number of augmented samples to generate. Default is 1.
-        :type n_samples: int
-
-        :return: Augmented data tensor of shape (n_samples, n_timesteps, n_features) and optionally augmented labels if 'y' is provided.
-        :rtype: Union[TensorLike, Tuple[TensorLike, TensorLike]]
-        """
-        seeds_idx = self._get_seeds(total_num=X.shape[0], n_seeds=n_samples)
-        n_features = X.shape[2]
-        n_repeats = self._n_repeats(n_samples, total_num=len(X))
-        shuffle_ids = [
-            np.random.choice(np.arange(n_features), n_features, replace=False)
-            for _ in range(n_repeats)
-        ]
-
-        synthetic_data = []
-        has_labels = y is not None
-        if has_labels:
-            new_labels = []
-        for num, i in enumerate(seeds_idx):
-            sequence = X[i]
-            id_repeat = self._n_repeats(num + 1, total_num=len(X))
-            synthetic_data.append(sequence[:, shuffle_ids[id_repeat - 1]])
-            if has_labels:
-                new_labels.append(y[i])
-        if has_labels:
-            return np.array(synthetic_data), np.array(new_labels)
-        else:
-            return np.array(synthetic_data)
+            return synthetic_X
 
 
 class MagnitudeWarping(BaseAugmenter):
@@ -247,15 +117,15 @@ class MagnitudeWarping(BaseAugmenter):
     def __init__(self) -> None:
         super(MagnitudeWarping, self).__init__(per_feature=False)
 
-    def generate(self, X: TensorLike, y: Optional[TensorLike] = None, n_samples: int = 1, sigma: float = 0.2, n_knots: int = 4) -> AugmentationOutput:
+    def generate(self, X: Tensor, y: Optional[Tensor] = None, n_samples: int = 1, sigma: float = 0.2, n_knots: int = 4) -> AugmentationOutput:
         """
         Generates augmented samples via MagnitudeWarping for (X, y)
 
         :param X: Input data tensor of shape (n_data, n_timesteps, n_features).
-        :type X: TensorLike
+        :type X: Tensor
 
         :param y: Optional labels tensor. If provided, labels will also be returned
-        :type y: Optional[TensorLike]
+        :type y: Optional[Tensor]
 
         :param n_samples: Number of augmented samples to generate. Default is 1.
         :type n_samples: int
@@ -267,7 +137,7 @@ class MagnitudeWarping(BaseAugmenter):
         :type n_knots: int
 
         :return: Augmented data tensor of shape (n_samples, n_timesteps, n_features) and optionally augmented labels if 'y' is provided.
-        :rtype: Union[TensorLike, Tuple[TensorLike, TensorLike]]
+        :rtype: Union[Tensor, Tuple[Tensor, Tensor]]
         """
         n_data = X.shape[0]
         n_timesteps = X.shape[1]
@@ -275,28 +145,25 @@ class MagnitudeWarping(BaseAugmenter):
 
         orig_steps = np.arange(n_timesteps)
         random_warps = np.random.normal(loc=1.0, scale=sigma, size=(n_samples, n_knots + 2, n_features))
-        warp_steps = (np.ones(
-            (n_features, 1)) * (np.linspace(0, n_timesteps - 1., num=n_knots + 2))).T
+        warp_steps = (np.ones( (n_features, 1)) * (np.linspace(0, n_timesteps - 1., num=n_knots + 2))).T
 
-        result = np.zeros((n_samples, n_timesteps, n_features))
+        result = torch.zeros((n_samples, n_timesteps, n_features))
         has_labels = y is not None
 
         if has_labels:
-            result_y = np.zeros((n_samples, 1))
+            result_y = torch.zeros((n_samples, 1))
+        else:
+            result_y = None
 
         for i in range(n_samples):
             random_sample_id = random.randint(0, n_data - 1)
-            warper = np.array(
-                [
-                    scipy.interpolate.CubicSpline(
-                        warp_steps[:, dim], random_warps[i, :, dim]
-                    )(orig_steps)
-                    for dim in range(n_features)
-                ]
-            ).T
+            warper = np.array([scipy.interpolate.CubicSpline(warp_steps[:, dim], random_warps[i, :, dim])(orig_steps)
+                    for dim in range(n_features)]).T
+            warper = torch.tensor(warper).float()
             result[i] = X[random_sample_id] * warper
             if has_labels:
                 result_y[i] = y[random_sample_id]
+
         if has_labels:
             return result, result_y
         else:
@@ -311,15 +178,15 @@ class WindowWarping(BaseAugmenter):
     def __init__(self) -> None:
         super(WindowWarping, self).__init__(per_feature=False)
 
-    def generate(self, X: TensorLike, y: Optional[TensorLike] = None, window_ratio: float = 0.2, scales: Tuple = (0.25, 1.0), n_samples: int = 1) -> AugmentationOutput:
+    def generate(self, X: Tensor, y: Optional[Tensor] = None, window_ratio: float = 0.2, scales: Tuple = (0.25, 1.0), n_samples: int = 1) -> AugmentationOutput:
         """
         Generates augmented samples via MagnitudeWarping for (X, y)
 
         :param X: Input data tensor of shape (n_data, n_timesteps, n_features).
-        :type X: TensorLike
+        :type X: Tensor
 
         :param y: Optional labels tensor. If provided, labels will also be returned
-        :type y: Optional[TensorLike]
+        :type y: Optional[Tensor]
 
         :param window_ratio: The ratio of the window size relative to the total number of timesteps.
             Default is 0.2.
@@ -333,7 +200,7 @@ class WindowWarping(BaseAugmenter):
         :type n_samples: int
 
         :return: Augmented data tensor of shape (n_samples, n_timesteps, n_features) and optionally augmented labels if 'y' is provided.
-        :rtype: Union[TensorLike, Tuple[TensorLike, TensorLike]]
+        :rtype: Union[Tensor, Tuple[Tensor, Tensor]]
         """
         n_data = X.shape[0]
         n_timesteps = X.shape[1]
@@ -342,8 +209,8 @@ class WindowWarping(BaseAugmenter):
         scales_per_sample = np.random.choice(scales, n_samples)
         warp_size = max(np.round(window_ratio * n_timesteps).astype(np.int64), 1)
 
-        result = np.zeros((n_samples, n_timesteps, n_features))
-        result_y = np.zeros((n_samples, 1))
+        result = torch.zeros((n_samples, n_timesteps, n_features))
+        result_y = torch.zeros((n_samples, 1))
         has_labels = y is not None
         for i in range(n_samples):
             window_starts = np.random.randint(
@@ -377,115 +244,251 @@ class WindowWarping(BaseAugmenter):
             return result
 
 
-class DTWBarycentricAveraging(BaseAugmenter):
+
+
+class Drift(_Augmenter):
     """
-    DTW Barycenter Averaging (DBA) [1] method estimated through
-        Expectation-Maximization algorithm [2] as in https://github.com/tslearn-team/tslearn/
+    Drift the value of time series.
+
+    The augmenter drifts the value of time series from its original values
+    randomly and smoothly. The extent of drifting is controlled by the maximal
+    drift and the number of drift points.
+
+    Parameters
     ----------
-    References
-    ----------
-    .. [1] F. Petitjean, A. Ketterlin & P. Gancarski. A global averaging method
-       for dynamic time warping, with applications to clustering. Pattern
-       Recognition, Elsevier, 2011, Vol. 44, Num. 3, pp. 678-693
-    .. [2] D. Schultz and B. Jain. Nonsmooth Analysis and Subgradient Methods
-       for Averaging in Dynamic Time Warping Spaces.
-       Pattern Recognition, 74, 340-358.
+    max_drift : float or tuple, optional
+        The maximal amount of drift added to a time series.
+
+        - If float, all series (all channels if `per_channel` is True) are
+          drifted with the same maximum.
+        - If tuple, the maximal drift added to a time series (a channel if
+          `per_channel` is True) is sampled from this interval randomly.
+
+        Default: 0.5.
+
+    n_drift_points : int or list, optional
+        The number of time points a new drifting trend is defined in a series.
+
+        - If int, all series (all channels if `per_channel` is True) have the
+          same number of drift points.
+        - If list, the number of drift points defined in a series (a channel if
+          `per_channel` is True) is sampled from this list randomly.
+
+    kind : str, optional
+        How the noise is added to the original time series. It must be either
+        'additive' or 'multiplicative'. Default: 'additive'.
+
+    per_channel : bool, optional
+        Whether to sample independent drifting trends for each channel in a time
+        series or to use the same drifting trends for all channels in a time
+        series. Default: True.
+
+    normalize : bool, optional
+        Whether the drifting trend is added to the normalized time series. If
+        True, each channel of a time series is normalized to [0, 1] first.
+        Default: True.
+
+    repeats : int, optional
+        The number of times a series is augmented. If greater than one, a series
+        will be augmented so many times independently. This parameter can also
+        be set by operator `*`. Default: 1.
+
+    prob : float, optional
+        The probability of a series is augmented. It must be in (0.0, 1.0]. This
+        parameter can also be set by operator `@`. Default: 1.0.
+
+    seed : int, optional
+        The random seed. Default: None.
+
     """
 
-    def __init__(self):
-        super(DTWBarycentricAveraging, self).__init__(per_feature=False)
-
-    def generate(
+    def __init__(
             self,
-            X: TensorLike,
-            y: Optional[TensorLike] = None,
-            n_samples: int = 1,
-            num_initial_samples: Optional[int] = None,
-            initial_timeseries: Optional[List[TensorLike]] = None,
-            initial_labels: Optional[List[int]] = None,
-            **kwargs,
-    ) -> AugmentationOutput:
-        """
-        Parameters
-        ----------
-        X : TensorLike, the timeseries dataset
-        y : TensorLike or None, the classes
-        n_samples : int, number of samples to generate (per class, if y is given)
-        num_initial_samples : int or None (default: None)
-            The number of timeseries to draw (per class) from the dataset before computing DTW_BA.
-            If None, use the entire set (per class).
-        initial_timeseries : array or None (default: None)
-            Initial timesteries to start from for the optimization process, with shape (original_size, d).
-            In case y is given, the shape of initial_timeseries is assumed to be (n_classes, original_size, d)
-        initial_labels: array or None (default: None)
-            Labels for samples from `initial_timeseries`
-        Returns
-        -------
-        np.array of shape (n_samples, original_size, d) if y is None
-            or (n_classes * n_samples, original_size, d),
-            and np.array of labels (or None)
-        """
-        assert initial_timeseries is None or len(initial_timeseries) == n_samples
-        has_labels = y is not None
+            max_drift: Union[float, Tuple[float, float]] = 0.5,
+            n_drift_points: Union[int, List[int]] = 3,
+            kind: str = "additive",
+            per_channel: bool = True,
+            normalize: bool = True,
+            repeats: int = 1,
+            prob: float = 1.0,
+            seed: Optional[int] = _default_seed,
+    ):
+        self.max_drift = max_drift
+        self.n_drift_points = n_drift_points
+        self.kind = kind
+        self.per_channel = per_channel
+        self.normalize = normalize
+        super().__init__(repeats=repeats, prob=prob, seed=seed)
 
-        if isinstance(X, list):
-            X = np.asarray(X)
+    @classmethod
+    def _get_param_name(cls) -> Tuple[str, ...]:
+        return (
+            "max_drift",
+            "n_drift_points",
+            "kind",
+            "per_channel",
+            "normalize",
+        )
 
-        if isinstance(y, list):
-            y = np.asarray(y)
+    @property
+    def max_drift(self) -> Union[float, Tuple[float, float]]:
+        return self._max_drift
 
-        random_samples = random.choices(range(X.shape[0]), k=n_samples)
-        if initial_timeseries is None:
-            initial_timeseries = X[random_samples]
-        if has_labels:
-            if initial_labels is None:
-                initial_labels = y[random_samples]
+    @max_drift.setter
+    def max_drift(self, v: Union[float, Tuple[float, float]]) -> None:
+        MAX_DRIFT_ERROR_MSG = (
+            "Parameter `max_drift` must be a non-negative number "
+            "or a 2-tuple of non-negative numbers representing an interval. "
+        )
+        if not isinstance(v, (float, int)):
+            if isinstance(v, tuple):
+                if len(v) != 2:
+                    raise ValueError(MAX_DRIFT_ERROR_MSG)
+                if (not isinstance(v[0], (float, int))) or (
+                        not isinstance(v[1], (float, int))
+                ):
+                    raise TypeError(MAX_DRIFT_ERROR_MSG)
+                if v[0] > v[1]:
+                    raise ValueError(MAX_DRIFT_ERROR_MSG)
+                if (v[0] < 0.0) or (v[1] < 0.0):
+                    raise ValueError(MAX_DRIFT_ERROR_MSG)
+            else:
+                raise TypeError(MAX_DRIFT_ERROR_MSG)
+        elif v < 0.0:
+            raise ValueError(MAX_DRIFT_ERROR_MSG)
+        self._max_drift = v
 
-            y_new = []
-            X_new = []
-            unique_labels = np.unique(initial_labels)
-            for i, label in enumerate(unique_labels):
-                logger.debug(f"DTWBA Class {label}...")
-                cur_initial_timeseries = initial_timeseries[np.ravel(initial_labels) == label]
-                n_samples_per_label = len(cur_initial_timeseries)
-                X_class = X[np.ravel(y) == label]
-                y_new += [label] * n_samples_per_label
-                X_new.append(
-                    self._dtwba(
-                        X_subset=X_class,
-                        n_samples=n_samples_per_label,
-                        num_initial_samples=num_initial_samples,
-                        initial_timeseries=cur_initial_timeseries,
-                        **kwargs,
-                    )
-                )
-            return np.concatenate(X_new), np.array(y_new).reshape(-1, 1)
+    @property
+    def n_drift_points(self) -> Union[int, List[int]]:
+        return self._n_drift_points
+
+    @n_drift_points.setter
+    def n_drift_points(self, n: Union[int, List[int]]) -> None:
+        N_DRIFT_POINTS_ERROR_MSG = (
+            "Parameter `n_drift_points` must be a positive integer "
+            "or a list of positive integers."
+        )
+        if not isinstance(n, int):
+            if isinstance(n, list):
+                if len(n) == 0:
+                    raise ValueError(N_DRIFT_POINTS_ERROR_MSG)
+                if not all([isinstance(nn, int) for nn in n]):
+                    raise TypeError(N_DRIFT_POINTS_ERROR_MSG)
+                if not all([nn > 0 for nn in n]):
+                    raise ValueError(N_DRIFT_POINTS_ERROR_MSG)
+            else:
+                raise TypeError(N_DRIFT_POINTS_ERROR_MSG)
+        elif n <= 0:
+            raise ValueError(N_DRIFT_POINTS_ERROR_MSG)
+        self._n_drift_points = n
+
+    @property
+    def per_channel(self) -> bool:
+        return self._per_channel
+
+    @per_channel.setter
+    def per_channel(self, p: bool) -> None:
+        if not isinstance(p, bool):
+            raise TypeError("Paremeter `per_channel` must be boolean.")
+        self._per_channel = p
+
+    @property
+    def normalize(self) -> bool:
+        return self._normalize
+
+    @normalize.setter
+    def normalize(self, p: bool) -> None:
+        if not isinstance(p, bool):
+            raise TypeError("Paremeter `normalize` must be boolean.")
+        self._normalize = p
+
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+    @kind.setter
+    def kind(self, k: str) -> None:
+        if not isinstance(k, str):
+            raise TypeError(
+                "Parameter `kind` must be either 'additive' or 'multiplicative'."
+            )
+        if k not in ("additive", "multiplicative"):
+            raise ValueError(
+                "Parameter `kind` must be either 'additive' or 'multiplicative'."
+            )
+        self._kind = k
+
+    def _augment_core(
+            self, X: np.ndarray, Y: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        N, T, C = X.shape
+        rand = np.random.RandomState(self.seed)
+
+        if isinstance(self.n_drift_points, int):
+            n_drift_points = set([self.n_drift_points])
         else:
-            return self._dtwba(
-                X_subset=X,
-                n_samples=n_samples,
-                num_initial_samples=num_initial_samples,
-                initial_timeseries=initial_timeseries,
-                **kwargs,
+            n_drift_points = set(self.n_drift_points)
+
+        ind = rand.choice(
+            len(n_drift_points), N * (C if self.per_channel else 1)
+        )  # map series to n_drift_points
+
+        drift = np.zeros((N * (C if self.per_channel else 1), T))
+        for i, n in enumerate(n_drift_points):
+            if not (ind == i).any():
+                continue
+            anchors = np.cumsum(
+                rand.normal(size=((ind == i).sum(), n + 2)), axis=1
+            )  # type: np.ndarray
+            interpFuncs = CubicSpline(
+                np.linspace(0, T, n + 2), anchors, axis=1
+            )  # type: Callable
+            drift[ind == i, :] = interpFuncs(np.arange(T))
+        drift = drift.reshape((N, -1, T)).swapaxes(1, 2)
+        drift = drift - drift[:, 0, :].reshape(N, 1, -1)
+        drift = drift / abs(drift).max(axis=1, keepdims=True)
+        if isinstance(self.max_drift, (float, int)):
+            drift = drift * self.max_drift
+        else:
+            drift = drift * rand.uniform(
+                low=self.max_drift[0],
+                high=self.max_drift[1],
+                size=(N, 1, C if self.per_channel else 1),
             )
 
-    def _dtwba(
-            self,
-            X_subset: TensorLike,
-            n_samples: int,
-            num_initial_samples: Optional[int],
-            initial_timeseries: Optional[TensorLike],
-            **kwargs,
-    ) -> npt.NDArray:
-        samples = []
-        for i, st in enumerate(initial_timeseries):
-            samples.append(
-                dtw_barycenter.dba(
-                    s=X_subset,
-                    c=st,
-                    nb_initial_samples=num_initial_samples,
-                    # TODO: use_c=True,
-                    **kwargs,
+        if self.kind == "additive":
+            if self.normalize:
+                X_aug = X + drift * (
+                        X.max(axis=1, keepdims=True) - X.min(axis=1, keepdims=True)
                 )
-            )
-        return np.array(samples)
+            else:
+                X_aug = X + drift
+        else:
+            X_aug = X * (1 + drift)
+
+        if Y is not None:
+            Y_aug = Y.copy()
+        else:
+            Y_aug = None
+
+        return X_aug, Y_aug
+
+
+class Trend(BaseAugmenter):
+    "Randomly rotates the sequence along the z-axis"
+    def __init__(self, magnitude=0.1, ex=None, **kwargs):
+        self.magnitude, self.ex = magnitude, ex
+        super().__init__(**kwargs)
+    def encodes(self, o: Tensor):
+        if not self.magnitude or self.magnitude <= 0: return o
+        flat_x = o.reshape(o.shape[0], -1)
+        ran = flat_x.max(dim=-1, keepdim=True)[0] - flat_x.min(dim=-1, keepdim=True)[0]
+        trend = torch.linspace(0, 1, o.shape[-1], device=o.device) * ran
+        t = (1 + self.magnitude * 2 * (np.random.rand() - 0.5) * trend)
+        t -= t.mean(-1, keepdim=True)
+        if o.ndim == 3: t = t.unsqueeze(1)
+        output = o + t
+        if self.ex is not None: output[...,self.ex,:] = o[...,self.ex,:]
+        return output
+
+
