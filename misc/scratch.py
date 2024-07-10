@@ -3,93 +3,80 @@ import torch
 from utils import augmentations as aug
 import matplotlib.pyplot as plt
 import pandas as pd
+import time
+import cupy
 
 path = "/extdata4/baeklab/Hyeonseo/m6A/dataset/ver070124/score-perfect/val/pos/000016697.pkl"
-data = pd.read_pickle(path)
-data["signal_len"] = data["signal_token"].apply(lambda x: len(x))
-data = data[(data["signal_len"] > 600) & (data["signal_len"] < 1200)]
-print(data)
-
-nrows=4
-fig, axes = plt.subplots(figsize=(20,10), nrows=nrows, ncols=1)
-
-data = data["signal_token"].sample(5).values
+df = pd.read_pickle(path)
+df["signal_len"] = df["signal_token"].apply(lambda x: len(x))
+df = df[df["signal_len"] < 1200]
+data = df["signal_token"].values
 data_list = []
 pad_mask = []
-for i in range(nrows):
+for i in range(len(data)):
     pad_len = 1200 - len(data[i])
     data_list.append(np.pad(data[i], (0,pad_len)))
     pad_mask.append([1]*len(data[i]) + [0]*pad_len)
 data = np.stack(data_list)
-data = torch.tensor(data).float().unsqueeze(2)
-pad_mask = torch.tensor(pad_mask).float().unsqueeze(2)
+data = torch.tensor(data).float()
+pad_mask = torch.tensor(pad_mask).float()
 
-## GAUSSIAN JITTER
-t_data = aug.jitter(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Jitter")
+data = data.to(1)
+pad_mask = pad_mask.to(1)
 
-## MAGNITUDE WARP
-t_data = aug.magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.6, n_knots = 20) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Mag Warp")
+with torch.no_grad():
 
-## MOVING AVERAGE MAGNITUDE WARP
-t_data = aug.moving_magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.8, n_knots = 60) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Moving Warp")
+    ## GAUSSIAN JITTER
+    start = time.time()
+    t_data = aug.jitter(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, pad_mask = pad_mask)
+    print("JITTER: ",time.time() - start)
 
-## SPIKE NOISE
-t_data = aug.jitter(data, fraction=1.0, min_sigma=1.0, max_sigma=2.0, dropout = 0.95) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Spike")
+    ## SPIKE NOISE
+    start = time.time()
+    t_data = aug.jitter(data, fraction=1.0, min_sigma=1.0, max_sigma=2.0, dropout = 0.95, pad_mask = pad_mask)
+    print("SPIKE: ",time.time() - start)
 
-## WINDOWED TIME WARP
-t_data = aug.window_warp(data, fraction=1.0, window_ratio = 0.1, window_count=5)
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Window Warp")
+    ## STEP NOISE
+    start = time.time()
+    t_data = aug.step(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, dropout = 0.95, pad_mask = pad_mask)
+    print("STEP: ",time.time() - start)
 
-## TIME WARP
-t_data = aug.time_warp(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Time Warp")
+    ## MAGNITUDE WARP
+    start = time.time()
+    t_data = aug.magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.6, n_knots = 20, pad_mask = pad_mask)
+    print("MAGNITUDE: ",time.time() - start)
 
-## STEP NOISE
-t_data = aug.step(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, dropout = 0.95) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Step")
+    ## SLOPE NOISE
+    start = time.time()
+    t_data = aug.slope(data, fraction=1.0, magnitude = 1.0, pad_mask = pad_mask)
+    print("SLOPE: ",time.time() - start)
 
-## SLOPE NOISE
-t_data = aug.slope(data, fraction=1.0) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Slope")
+    ## DRIFT NOISE
+    start = time.time()
+    t_data = aug.drift(data, fraction=1.0, min_sigma=0.5, max_sigma=1.0, n_knots = 40, pad_mask = pad_mask)
+    print("DRIFT: ",time.time() - start)
 
-## DRIFT NOISE
-t_data = aug.drift(data, fraction=1.0) * pad_mask
-print(t_data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(t_data[i,:,0], label=f"Drift")
+    ## TIME WARP
+    start = time.time()
+    t_data = aug.time_warp(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, n_knots = 40, pad_mask = pad_mask)
+    print("TIME: ",time.time() - start)
 
-## Original
-print(data[0,:,0])
-for i in range(nrows):
-    axes[i].plot(data[i,:,0], label=f"Original")
+    ## MOVING AVERAGE MAGNITUDE WARP
+    start = time.time()
+    t_data = aug.moving_magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.8, n_knots = 60, pad_mask = pad_mask)
+    print("MOVING: ",time.time() - start)
 
-for ax in axes:
-    ax.set_xlim(0,600)
-    ax.set_ylim(-3,3)
+    ## WINDOWED TIME WARP
+    start = time.time()
+    t_data = aug.window_warp(data, fraction=1.0, pad_mask = pad_mask)
+    print("WINDOWED: ",time.time() - start)
 
-    ax.legend(loc="upper right")
+def signal_sliding_win(signal_segmented, stride = 6, win_size = 5):
+    signal_segmented = cupy.lib.stride_tricks.sliding_window_view(signal_segmented, win_size * stride)[::stride]
+    return signal_segmented
 
-plt.tight_layout()
-plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/plot/augmentation.png")
-plt.close(fig)
+print(df["signal_token"])
 
+df["signal_token"] = df["signal_token"].apply(lambda x: signal_sliding_win(x))
+
+print(df["signal_token"])

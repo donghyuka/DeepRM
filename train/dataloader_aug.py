@@ -13,11 +13,6 @@ import gc
 ## Load Nanopore Dataset from Pickled Pandas DataFrame
 
 
-def signal_sliding_win(signal_segmented, stride = 6, win_size = 5):
-    signal_segmented = np.lib.stride_tricks.sliding_window_view(signal_segmented, win_size * stride)[::stride]
-    return signal_segmented
-
-
 def sequence_to_kmer_token(seq, kmer):
     ## 1. change string to array of int - 0, 1, 2, 3
     seq = seq.upper()
@@ -36,20 +31,8 @@ def sequence_to_kmer_token(seq, kmer):
     return seq
 
 
-def create_segment_len_arr(segment_arr, sampling):
-    segment_len_arr = np.array([len(x) for x in segment_arr], dtype=int)
-    segment_len_arr = segment_len_arr // sampling
-    return segment_len_arr
-
-
 def expand_token_to_segment(token_arr, segment_len_arr):
     token = np.repeat(token_arr, segment_len_arr)
-    return token
-
-
-def create_move_token(segment_len_arr):
-    token = np.arange(1, len(segment_len_arr)+1, dtype=np.uint8)
-    token = np.repeat(token, segment_len_arr)
     return token
 
 
@@ -142,13 +125,10 @@ class BinaryClassDatasetIterator:
         kmer = 5
         cb_lr_pad = (cb_len-kmer)//2
 
-        df["signal_token"] = df["signal_token"].apply(lambda x: signal_sliding_win(x))
         df["kmer_token"] = df["kmer_token"].apply(lambda x: sequence_to_kmer_token(x, kmer))
         df["kmer_token"] = df.apply(lambda x: expand_token_to_segment(x["kmer_token"], x["segment_len_arr"]), axis=1)
-        df["bq_token"] = df.apply(lambda x: expand_token_to_segment(x["bq_token"], x["segment_len_arr"]), axis=1)
-        df["move_token"] = df["segment_len_arr"].apply(lambda x: create_move_token(x))
         df["target_mask"] = df["segment_len_arr"].apply(lambda x: create_target_mask(x, cb_lr_pad))
-        df = df[["kmer_token", "bq_token", "signal_token", "move_token", "target_mask"]].copy()
+        df = df[["kmer_token", "signal_token", "target_mask"]].copy()
         df = df.itertuples(index=False)
         self.current_iterator[self.current_class] = df
         self.len_iterator[self.current_class] = len_df
@@ -201,13 +181,11 @@ class BinaryClassDatasetIterator:
 
     def nanopore_row_to_tensor(self, row, class_idx):
         kmer_token = torch.tensor(row[0], dtype=torch.long)
-        bq_token = torch.tensor(row[1], dtype=torch.long)
-        signal_token = torch.tensor(row[2], dtype=torch.float)
-        move_token = torch.tensor(row[3], dtype=torch.long)
-        target_mask = torch.tensor(row[4], dtype=torch.float)
+        signal_token = torch.tensor(row[1], dtype=torch.float)
+        target_mask = torch.tensor(row[2], dtype=torch.float)
 
-        return_dict = {"kmer_token": kmer_token, "bq_token": bq_token,
-                       "signal_token": signal_token, "move_token": move_token, "target_mask": target_mask}
+        return_dict = {"kmer_token": kmer_token,
+                       "signal_token": signal_token, "target_mask": target_mask}
 
         if not self.soft_label:
             label = torch.tensor(class_idx, dtype=torch.float)
@@ -426,7 +404,7 @@ def pad_collate(batch, pad_to, bq_clip):
     label = [item[1] for item in batch]
     target = torch.stack(label, dim=0)
 
-    token_name_list = ["kmer_token", "bq_token", "signal_token", "move_token", "target_mask"]
+    token_name_list = ["kmer_token", "signal_token", "target_mask"]
 
     source = {}
 
