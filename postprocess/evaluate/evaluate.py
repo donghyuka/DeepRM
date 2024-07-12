@@ -41,24 +41,11 @@ def main():
     return None
 
 
-def setup_ddp(rank,world_size):
-    if world_size == 0:
-        ## use CPU.
-        return None
-
-    else:
-        torch.cuda.set_device(rank)
-
-    return None
-
 def run_inference(args):
     torch.multiprocessing.set_sharing_strategy('file_system')
     args_dict = vars(args)
     printmessage("Inference Program Started.")
-    if args_dict["gpu"] > 0:
-        printmessage(f"Using GPU {args.gpu}.")
-    else:
-        printmessage("Using CPU.")
+    printmessage(f"Using GPU {args.gpu}.")
 
     model_list = []
     for model_path in args_dict["model"]:
@@ -81,8 +68,6 @@ def run_inference(args):
 
 def inference_worker(gpu, args_dict):
 
-    torch.cuda.set_device(gpu)
-
     rank = 0
     seed = 0
     world_size = 1
@@ -97,9 +82,8 @@ def inference_worker(gpu, args_dict):
                                False, prefetch_factor, bag_size, shuffle=False)
 
     for model_path in args_dict["model"]:
-        if rank == 0:
-            printmessage(f"Running inference: {model_path}")
-        save_dict = torch.load(model_path, map_location={'cuda:0': f'cuda:{rank}'})
+        printmessage(f"Running inference: {model_path}")
+        save_dict = torch.load(model_path, map_location={'cuda:0': f'cuda:{gpu}'})
         model_config = save_dict["model_config"]
         CNNModel = importlib.import_module(f"postprocess.model.{model_config['model']}").CNNModel
         model = CNNModel(input_height=model_config["input_height"],
@@ -112,14 +96,14 @@ def inference_worker(gpu, args_dict):
                          num_output_layers=model_config["num_output_layers"],
                          dropout_rate=model_config["dropout_rate"],
                          kernel_size=model_config["kernel_size"])
-        if rank == 0:
-            total_params = 0
-            for name, parameter in model.named_parameters():
-                params = parameter.numel()
-                total_params += params
-            printmessage(f"Total Params: {total_params:,}")
-        if args_dict["gpu"] > 0:
-            model.to(rank)
+
+        total_params = 0
+        for name, parameter in model.named_parameters():
+            params = parameter.numel()
+            total_params += params
+        printmessage(f"Total Params: {total_params:,}")
+
+        model.to(gpu)
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
         save_dict.clear()
         model.eval()
@@ -130,11 +114,11 @@ def inference_worker(gpu, args_dict):
         for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
             source, target = data
             id, error, re_error, metadata, pred, mask = source
-            error = error.to(rank)
-            re_error = re_error.to(rank)
-            metadata = metadata.to(rank)
-            pred = pred.to(rank)
-            mask = mask.to(rank)
+            error = error.to(gpu)
+            re_error = re_error.to(gpu)
+            metadata = metadata.to(gpu)
+            pred = pred.to(gpu)
+            mask = mask.to(gpu)
             output = model(error, re_error, metadata, pred, mask).cpu().detach().numpy()
 
             if len(output.shape) > 1:

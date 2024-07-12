@@ -40,10 +40,9 @@ class NanoporeDatasetIterator:
 
     def df_to_tensor(self, df, pad_to):
 
-        df = df.dropna(axis=0)
         len_df = len(df)
-
         error_arr = np.stack(df["error"].to_numpy(), axis=0).transpose(0, 2, 1) ## 21, 3
+
         re_error_arr = np.stack(df["realigned_error"].to_numpy(), axis=0) ## 21, 3
         metadata_arr = df[["pi","flag","mapq","depth","read_bq","block_bq","base_bq",
                            "query_pos", "query_len", "left_soft_clip"]].to_numpy() ## 7 + 3

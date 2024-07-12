@@ -59,7 +59,7 @@ for i in range(nrows):
     axes[i].plot(t_data[i], label=f"Window Warp")
 
 ## TIME WARP
-t_data = aug.time_warp(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, n_knots = 10, pad_mask = pad_mask)
+t_data = aug.time_warp(data, fraction=1.0, min_sigma=0.1, max_sigma=0.5, n_knots = 20, pad_mask = pad_mask)
 print(t_data[0])
 for i in range(nrows):
     axes[i].plot(t_data[i], label=f"Time Warp")
@@ -88,7 +88,7 @@ for i in range(nrows):
     axes[i].plot(data[i], label=f"Original")
 
 for ax in axes:
-    ax.set_xlim(0,800)
+    ax.set_xlim(0,1000)
     ax.set_ylim(-3,3)
 
     ax.legend(loc="upper right")

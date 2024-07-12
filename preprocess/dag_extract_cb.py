@@ -376,36 +376,36 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
     gc.collect()
 
     proc_list = []
-
-    for pid in range(ncpu):
-        proc = mp.Process(target=extract_blocks_from_read_list_mp_worker,
-                          args=(record_split_dict[pid], indel_penalty, cb_size_tolerance,
-                                skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
-                                spacer_mismatch_tolerance, spacer_mismatch_penalty,
-                                cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
-                                anchor_list, spacer_list, spacer_size, bb_size,
-                                flush_path, pid, flush_interval, score_converting_func, cb_size,
-                                min_ideal_displacement_dict, resume))
-        proc_list.append(proc)
-        proc.start()
-
-    for proc in proc_list:
-        proc.join()
-
-    block_df_list = []
-    for pid in range(ncpu):
-        try:
-            block_df = pd.read_pickle(f"{flush_path}df_{pid}.pkl")
-            block_df_list.append(block_df)
-        except:
-            printmessage(f"ERROR! PID {pid} did not return any result.")
-    block_df = pd.concat(block_df_list, axis=0).reset_index(drop=True)
-    del block_df_list
-    gc.collect()
-
-    print(block_df)
-
-    block_df.to_pickle(output)
+    #
+    # for pid in range(ncpu):
+    #     proc = mp.Process(target=extract_blocks_from_read_list_mp_worker,
+    #                       args=(record_split_dict[pid], indel_penalty, cb_size_tolerance,
+    #                             skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
+    #                             spacer_mismatch_tolerance, spacer_mismatch_penalty,
+    #                             cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
+    #                             anchor_list, spacer_list, spacer_size, bb_size,
+    #                             flush_path, pid, flush_interval, score_converting_func, cb_size,
+    #                             min_ideal_displacement_dict, resume))
+    #     proc_list.append(proc)
+    #     proc.start()
+    #
+    # for proc in proc_list:
+    #     proc.join()
+    #
+    # block_df_list = []
+    # for pid in range(ncpu):
+    #     try:
+    #         block_df = pd.read_pickle(f"{flush_path}df_{pid}.pkl")
+    #         block_df_list.append(block_df)
+    #     except:
+    #         printmessage(f"ERROR! PID {pid} did not return any result.")
+    # block_df = pd.concat(block_df_list, axis=0).reset_index(drop=True)
+    # del block_df_list
+    # gc.collect()
+    #
+    # print(block_df)
+    #
+    # block_df.to_pickle(output)
 
     block_df = pd.read_pickle(output)
 
@@ -490,8 +490,8 @@ def main():
 
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"ERROR! {args.input} does not exist.")
-    if os.path.exists(args.output):
-        raise FileExistsError(f"ERROR! {args.output} already exists.")
+    # if os.path.exists(args.output):
+    #     raise FileExistsError(f"ERROR! {args.output} already exists.")
 
     base_path = os.path.dirname(args.output)
     if args.resume is not None:

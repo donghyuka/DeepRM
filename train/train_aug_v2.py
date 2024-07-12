@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_aug import load_dataset, NanoporeDataLoader
+from train.dataloader_aug_v2 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -12,7 +12,7 @@ import tqdm
 import numpy as np
 from utils.utils import printmessage
 import importlib
-from utils import augmentations as aug
+from utils import augmentations_dev as aug
 from functools import partial
 import pickle
 
@@ -167,6 +167,8 @@ class Trainer:
         self.aug_list = self._get_aug_list()
         self.histogram = False
         self.kmer_size = model_config["kmer_size"]
+        self.seq_len = model_config["seq_len"]
+        self.block_len = model_config["block_len"]
 
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
@@ -184,13 +186,13 @@ class Trainer:
 
     def _get_aug_list(self):
         fraction = self.aug_fraction
+        ## WINDOWED TIME WARP
+        winwarp = partial(aug.window_warp, fraction=fraction, min_window_ratio = 0.01, max_window_ratio = 0.05,
+                          min_window_count = 1, max_window_count = 20, sigma = 0.2)
+        ## TIME WARP
+        timewarp = partial(aug.time_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 20)
         ## MOVING AVERAGE MAGNITUDE WARP
         movmag = partial(aug.moving_magnitude_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
-        ## WINDOWED TIME WARP
-        winwarp = partial(aug.window_warp, fraction=fraction, min_window_ratio = 0.05, max_window_ratio = 0.10,
-                          min_window_count = 5, max_window_count = 20, sigma = 0.4)
-        ## TIME WARP
-        timewarp = partial(aug.time_warp, fraction=fraction, min_sigma=0.2, max_sigma=0.4, n_knots = 30)
         ## GAUSSIAN JITTER
         jitter = partial(aug.jitter, fraction=fraction, min_sigma=0.15, max_sigma=0.3)
         ## SPIKE NOISE
@@ -203,8 +205,7 @@ class Trainer:
         drift = partial(aug.drift, fraction=fraction, min_sigma=0.15, max_sigma=0.3, n_knots = 10)
         aug_list = [movmag, winwarp, timewarp, jitter, spike, step, drift, slope]
         return aug_list
-
-    def _augment_signal(self, signal, pad_mask, shuffle_order = True):
+    def _augment_signal(self, signal, pad_mask, seg_len, shuffle_order = True):
 
         with torch.no_grad():
             if shuffle_order:
@@ -213,9 +214,9 @@ class Trainer:
                 aug_list = self.aug_list
 
             for i, aug_func in enumerate(aug_list):
-                signal = aug_func(signal, pad_mask=pad_mask)
+                signal, pad_mask, seg_len = aug_func(signal, pad_mask=pad_mask, seg_len=seg_len)
 
-        return signal
+        return signal, pad_mask, seg_len
 
 
     def _cache_eval_data(self):
@@ -230,27 +231,37 @@ class Trainer:
     def _feed_model(self, source, target, augment = False):
         src_kmer = source["kmer_token"]
         src_signal = source["signal_token"]
-        src_target_mask = source["target_mask"]
+        src_seg_len = source["segment_len"]
 
         if self.cut_overlap:
             src_signal = src_signal[:,:,10:15]
 
         src_kmer = src_kmer.to(self.gpu_id)
         src_signal = src_signal.to(self.gpu_id)
-        src_target_mask = src_target_mask.to(self.gpu_id)
+        src_seg_len = src_seg_len.to(self.gpu_id)
         target = target.to(torch.float32).to(self.gpu_id)
-        src_pad_mask = (src_kmer > 0).to(torch.int)
+        src_seg_len_sum = src_seg_len.sum(dim=1)
+        src_pad_mask = torch.arange(self.seq_len, device=src_seg_len.device, dtype=torch.int).repeat(src_seg_len.shape[0], 1) < src_seg_len_sum.unsqueeze(1)
 
         if augment:
             extra_pad = (self.kmer_size - 1) * self.signal_stride
-            src_pad_mask_signal = src_pad_mask.repeat_interleave(self.signal_stride, dim = 1)
-            src_pad_mask_signal = torch.cat([src_pad_mask_signal, torch.zeros(src_pad_mask_signal.shape[0], extra_pad, device=src_pad_mask_signal.device, dtype=torch.int)], dim=1)
-            src_signal = self._augment_signal(src_signal, src_pad_mask_signal, shuffle_order = True)
+            src_pad_mask = src_pad_mask.repeat_interleave(self.signal_stride, dim = 1)
+            src_pad_mask = torch.cat([src_pad_mask, torch.zeros(src_pad_mask.shape[0], extra_pad, device=src_pad_mask.device, dtype=torch.int)], dim=1)
+            src_seg_len = src_seg_len * self.signal_stride
+            src_signal, src_pad_mask, src_seg_len = self._augment_signal(src_signal, src_pad_mask, src_seg_len, shuffle_order = True)
+            src_seg_len = (src_seg_len / self.signal_stride).round().to(torch.int)
+            src_pad_mask = src_pad_mask[:,:-extra_pad:self.signal_stride]
 
         src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride).clip(-100,100) * src_pad_mask.unsqueeze(-1)
-        src_pad_mask = src_pad_mask.logical_not()
+        src_seg_len = src_seg_len.clip(1, self.seq_len)
+        src_seg_len_sum = src_seg_len.sum(dim=1)
+        max_len = max((self.seq_len, src_seg_len_sum.max()))
+        src_seg_len[:,-1] += max_len-src_seg_len_sum
 
-        output = self.model(src_kmer, src_signal, src_pad_mask, src_target_mask)
+        src_kmer = src_kmer.flatten().repeat_interleave(src_seg_len.flatten()).reshape(src_signal.shape[0], max_len).contiguous()
+        src_kmer = src_kmer[:,:self.seq_len] * src_pad_mask
+        src_pad_mask = src_pad_mask.logical_not()
+        output = self.model(src_kmer, src_signal, src_pad_mask)
 
         return output, target
 

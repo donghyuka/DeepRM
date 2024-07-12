@@ -31,19 +31,6 @@ def sequence_to_kmer_token(seq, kmer):
     return seq
 
 
-def expand_token_to_segment(token_arr, segment_len_arr):
-    token = np.repeat(token_arr, segment_len_arr)
-    return token
-
-
-def create_target_mask(segment_len_arr, lr_pad):
-    binary_mask = np.zeros(2*lr_pad+1, dtype=np.uint8)
-    binary_mask[lr_pad] = 1
-    binary_mask = np.repeat(binary_mask, segment_len_arr)
-    return binary_mask
-
-
-
 class BinaryClassDatasetIterator:
     def __init__(self, pos_file_paths, neg_file_paths, disk_shard_size, shuffle_buffer_size,
                  shuffle = True, class_ratio = 0.5, soft_label = False, yield_period = None):
@@ -121,14 +108,10 @@ class BinaryClassDatasetIterator:
         df = df.copy()
         len_df = len(df)
 
-        cb_len = 21
         kmer = 5
-        cb_lr_pad = (cb_len-kmer)//2
 
         df["kmer_token"] = df["kmer_token"].apply(lambda x: sequence_to_kmer_token(x, kmer))
-        df["kmer_token"] = df.apply(lambda x: expand_token_to_segment(x["kmer_token"], x["segment_len_arr"]), axis=1)
-        df["target_mask"] = df["segment_len_arr"].apply(lambda x: create_target_mask(x, cb_lr_pad))
-        df = df[["kmer_token", "signal_token", "target_mask"]].copy()
+        df = df[["kmer_token", "signal_token", "segment_len_arr"]].copy()
         df = df.itertuples(index=False)
         self.current_iterator[self.current_class] = df
         self.len_iterator[self.current_class] = len_df
@@ -180,12 +163,12 @@ class BinaryClassDatasetIterator:
 
 
     def nanopore_row_to_tensor(self, row, class_idx):
-        kmer_token = torch.tensor(row[0], dtype=torch.long)
+        kmer_token = torch.tensor(row[0], dtype=torch.int32)
         signal_token = torch.tensor(row[1], dtype=torch.float)
-        target_mask = torch.tensor(row[2], dtype=torch.float)
-
+        segment_len_arr = torch.tensor(row[2], dtype=torch.int32)
         return_dict = {"kmer_token": kmer_token,
-                       "signal_token": signal_token, "target_mask": target_mask}
+                       "signal_token": signal_token,
+                       "segment_len_arr": segment_len_arr}
 
         if not self.soft_label:
             label = torch.tensor(class_idx, dtype=torch.float)
@@ -367,7 +350,7 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
                  disk_shard_size, rank, num_replicas, shuffle_buffer_size, yield_period, seed = 0, shuffle = True, drop_last = True,
                  pad_to = 200, bq_clip = 40, class_ratio = 1, prefetch_factor = 512, pin_memory = True, soft_label = False,
                  num_workers = 4, signal_stride = 6, kmer_size = 5):
-    pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, bq_clip = bq_clip, signal_stride = signal_stride, kmer_size = kmer_size)
+    pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, signal_stride = signal_stride, kmer_size = kmer_size)
     ## Use DataLoader to load the dataset
     pos_data_paths = glob.glob(f"{pos_data_path}/*.pkl")
     neg_data_paths = glob.glob(f"{neg_data_path}/*.pkl")
@@ -397,7 +380,7 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
     return dataloader
 
 
-def pad_collate(batch, pad_to, bq_clip, signal_stride, kmer_size):
+def pad_collate(batch, pad_to, signal_stride, kmer_size):
     ## Collate function for DataLoader
     ## Based on NanoporeDataset
     ## Transform into Batch First
@@ -414,35 +397,17 @@ def pad_collate(batch, pad_to, bq_clip, signal_stride, kmer_size):
 
     if pad_to is not None:
         signal_pad_to = (pad_to+kmer_size-1) * signal_stride
-    else:
-        signal_pad_to = None
-
-    if signal_pad_to is not None:
         if token.shape[1] < signal_pad_to:
-            add_shape = list(token.shape)
-            add_shape[1] = signal_pad_to - token.shape[1]
-            token = torch.cat((token, torch.zeros(add_shape, dtype=token.dtype)), dim=1)
+            token = torch.cat((token, torch.zeros(token.shape[0], signal_pad_to - token.shape[1])), dim=1)
         else:
             token = token[:, :signal_pad_to]
 
     source["signal_token"] = token
 
+    token = torch.stack([item[0]["kmer_token"] for item in batch], dim=0)
+    source["kmer_token"] = token
 
-    for token_name in ["kmer_token", "target_mask"]:
-        token = [item[0][token_name] for item in batch]
-        token = torch.nn.utils.rnn.pad_sequence(token, batch_first=True, padding_value=0)
-        if pad_to is not None:
-            if token.shape[1] < pad_to:
-                add_shape = list(token.shape)
-                add_shape[1] = pad_to - token.shape[1]
-                token = torch.cat((token, torch.zeros(add_shape, dtype=token.dtype)), dim=1)
-            else:
-                token = token[:, :pad_to]
-
-        source[token_name] = token
-
-
-    ## clip bq
-    # source["bq_token"] = torch.clamp(source["bq_token"], 0, bq_clip)
+    token = torch.stack([item[0]["segment_len_arr"] for item in batch], dim=0)
+    source["segment_len"] = token
 
     return source, target

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from utils.activations import get_activation_fn
 
 
-## AIRNA_V4: From V1. Removed BQ and MOVE features. Added More Signal Embedding FFW Layers.
+## AIRNA_V5: From V1. Removed BQ and MOVE features and MASK. Added More Signal Embedding FFW Layers.
 
 class TransformerModel(nn.Module):
 
@@ -41,15 +41,17 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
-        self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
+        intermediate_dim = 16
+        self.regression_head_1 = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, d_model, intermediate_dim)
+        self.regression_head_2 = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, intermediate_dim * seq_len, 1)
 
         ## Weight Initialization
         self.init_weights()
 
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
-        self.regression_head.init_weights(initrange)
+        self.regression_head_1.init_weights(initrange)
+        self.regression_head_2.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         for layer in self.signal_embedding:
             if isinstance(layer, nn.Linear):
@@ -60,7 +62,7 @@ class TransformerModel(nn.Module):
         return None
 
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor, target_mask: Tensor) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
@@ -71,14 +73,10 @@ class TransformerModel(nn.Module):
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## apply regression head to each token:
-        output = self.regression_head(output)
+        output = self.regression_head_1(output)
+        output = output.flatten(start_dim = 1)
+        output = self.regression_head_2(output)
         output = output.squeeze(-1)
-
-        target_mask_sum = target_mask.sum(dim = 1)
-        output = output * target_mask
-        output = output.sum(dim = 1)
-        output = output / target_mask_sum
-
         output = torch.sigmoid(output)
 
         return output
@@ -110,20 +108,24 @@ class PositionalEncoding(nn.Module):
 
 
 class RegressionHead(nn.Module):
-    def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
+    def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, in_dim: int, out_dim: int):
         super().__init__()
         layer_list=  []
-        for i in range(lin_depth-1):
-            layer_list.append(nn.Linear(d_model, d_model))
-            layer_list.append(nn.BatchNorm1d(seq_length))
-            layer_list.append(get_activation_fn(lin_act))
-            layer_list.append(nn.Dropout(lin_dropout))
+
+        layer_list.append(nn.Linear(in_dim, d_model))
+        layer_list.append(get_activation_fn(lin_act))
+        layer_list.append(nn.Dropout(lin_dropout))
+
+        for i in range(lin_depth-2):
+                layer_list.append(nn.Linear(d_model, d_model))
+                layer_list.append(get_activation_fn(lin_act))
+                layer_list.append(nn.Dropout(lin_dropout))
 
         layer_list.append(nn.Linear(d_model, d_model))
         layer_list.append(get_activation_fn(lin_act))
         layer_list.append(nn.Linear(d_model, d_model//4))
         layer_list.append(get_activation_fn(lin_act))
-        layer_list.append(nn.Linear(d_model//4, 1))
+        layer_list.append(nn.Linear(d_model//4, out_dim))
         self.lin_layers = nn.Sequential(*layer_list)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -138,4 +140,3 @@ class RegressionHead(nn.Module):
         return None
 
     ## END OF RegressionHead
-

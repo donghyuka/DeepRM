@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from utils.activations import get_activation_fn
 
 
-## AIRNA_V4: From V1. Removed BQ and MOVE features. Added More Signal Embedding FFW Layers.
+## AIRNA_V6: From V1. Removed BQ and MOVE features and MASK. Added More Signal Embedding FFW Layers.
 
 class TransformerModel(nn.Module):
 
@@ -60,7 +60,7 @@ class TransformerModel(nn.Module):
         return None
 
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor, target_mask: Tensor) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
@@ -74,10 +74,10 @@ class TransformerModel(nn.Module):
         output = self.regression_head(output)
         output = output.squeeze(-1)
 
-        target_mask_sum = target_mask.sum(dim = 1)
-        output = output * target_mask
+        src_pad_mask = src_pad_mask.logical_not()
+        output = output * src_pad_mask
         output = output.sum(dim = 1)
-        output = output / target_mask_sum
+        output = output / src_pad_mask.sum(dim = 1)
 
         output = torch.sigmoid(output)
 
