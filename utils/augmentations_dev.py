@@ -164,21 +164,19 @@ def time_warp(X: Tensor, pad_mask: Tensor, seg_len: Tensor,
     result = X.clone()
     time_warp = NaturalCubicSpline(natural_cubic_spline_coeffs(warp_steps, random_warps.unsqueeze(-1))
                                    ).evaluate(orig_steps).squeeze(-1).clip(0.001,None).cumsum(dim=1)
-    time_warp = (((n_timesteps-1)/time_warp[:,-1:])*time_warp).clip(0, n_timesteps-1)
+
+    pad_idx = pad_mask[idx_aug].sum(dim=-1).to(torch.int64) - 1
+    time_warp = ((pad_idx/time_warp[torch.arange(n_aug, dtype=torch.int, device = X.device),pad_idx]).unsqueeze(-1)*time_warp).clip(0, n_timesteps-1)
 
     warped_seg_idx = seg_len[idx_aug].cumsum(dim=-1)
     warped_seg_idx = interp1d(time_warp, orig_steps.float(), warped_seg_idx).int()
-
-    warped_mask = (torch.arange(n_timesteps, device=X.device).repeat(n_aug,1) < warped_seg_idx[:,-1:]).int()
     warped_seg_idx[:,1:] = warped_seg_idx[:,1:] - warped_seg_idx[:,:-1]
-
     warped_seg_idx = warped_seg_idx.clip(1, None)
 
     interp = interp1d(orig_steps, X[idx_aug], time_warp)
-    result[idx_aug] = interp * warped_mask
+    result[idx_aug] = interp
+    result = result * pad_mask
 
-    pad_mask = pad_mask.clone()
-    pad_mask[idx_aug] =  warped_mask
     seg_len = seg_len.clone()
     seg_len[idx_aug] = warped_seg_idx
 
@@ -218,20 +216,20 @@ def window_warp(X: Tensor, pad_mask: Tensor, seg_len: Tensor, fraction: float = 
     random_values = random_values.repeat_interleave(window_sizes)
     random_warps[window_sample_tensor, window_indices] = random_values
 
-    result = X.clone()
     time_warp = torch.cumsum(random_warps, dim=1)
+
+    pad_idx = pad_mask[idx_aug].sum(dim=-1).to(torch.int64) - 1
+    time_warp = ((pad_idx/time_warp[torch.arange(n_aug, dtype=torch.int, device = X.device),pad_idx]).unsqueeze(-1)*time_warp).clip(0, n_timesteps-1)
+    interp = interp1d(orig_steps, X[idx_aug], time_warp)
+
+    result = X.clone()
+    result[idx_aug] = interp
+    result = result * pad_mask
 
     warped_seg_idx = seg_len[idx_aug].cumsum(dim=-1)
     warped_seg_idx = interp1d(time_warp, orig_steps.float(), warped_seg_idx).int()
-    warped_mask = (torch.arange(n_timesteps, device=X.device).repeat(n_aug,1) < warped_seg_idx[:,-1:]).int()
     warped_seg_idx[:,1:] = warped_seg_idx[:,1:] - warped_seg_idx[:,:-1]
     warped_seg_idx = warped_seg_idx.clip(1, None)
-
-    interp = interp1d(orig_steps, X[idx_aug], time_warp)
-    result[idx_aug] = interp * warped_mask
-
-    pad_mask = pad_mask.clone()
-    pad_mask[idx_aug] =  warped_mask
     seg_len = seg_len.clone()
     seg_len[idx_aug] = warped_seg_idx
 

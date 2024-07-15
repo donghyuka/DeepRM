@@ -14,7 +14,7 @@ from utils.utils import printmessage
 import importlib
 from utils import augmentations_dev as aug
 from functools import partial
-import pickle
+from utils.tensor_utils import hard_to_soft_mask
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
@@ -186,13 +186,13 @@ class Trainer:
 
     def _get_aug_list(self):
         fraction = self.aug_fraction
-        ## WINDOWED TIME WARP
-        winwarp = partial(aug.window_warp, fraction=fraction, min_window_ratio = 0.01, max_window_ratio = 0.05,
-                          min_window_count = 1, max_window_count = 20, sigma = 0.2)
-        ## TIME WARP
-        timewarp = partial(aug.time_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 20)
         ## MOVING AVERAGE MAGNITUDE WARP
         movmag = partial(aug.moving_magnitude_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
+        ## WINDOWED TIME WARP
+        winwarp = partial(aug.window_warp, fraction=0.5, min_window_ratio = 0.05, max_window_ratio = 0.10,
+                          min_window_count = 5, max_window_count = 20, sigma = 0.4)
+        ## TIME WARP
+        timewarp = partial(aug.time_warp, fraction=0.5, min_sigma=0.2, max_sigma=0.5, n_knots = 30)
         ## GAUSSIAN JITTER
         jitter = partial(aug.jitter, fraction=fraction, min_sigma=0.15, max_sigma=0.3)
         ## SPIKE NOISE
@@ -205,6 +205,7 @@ class Trainer:
         drift = partial(aug.drift, fraction=fraction, min_sigma=0.15, max_sigma=0.3, n_knots = 10)
         aug_list = [movmag, winwarp, timewarp, jitter, spike, step, drift, slope]
         return aug_list
+
     def _augment_signal(self, signal, pad_mask, seg_len, shuffle_order = True):
 
         with torch.no_grad():
@@ -261,6 +262,7 @@ class Trainer:
         target_start = src_seg_len[:,:target_pos].sum(dim=1, keepdim = True)
         target_end = src_seg_len[:,:target_pos+1].sum(dim=1, keepdim = True)
         target_mask = ((target_mask >= target_start) & (target_mask < target_end)).int()
+        target_mask = hard_to_soft_mask(target_mask, self.block_len//2)
         src_seg_len_sum = src_seg_len.sum(dim=1)
         max_len = max((self.seq_len, src_seg_len_sum.max()))
         src_seg_len[:,-1] += max_len-src_seg_len_sum
@@ -268,37 +270,6 @@ class Trainer:
         src_kmer = src_kmer.flatten().repeat_interleave(src_seg_len.flatten()).reshape(src_signal.shape[0], max_len).contiguous()
         src_kmer = src_kmer[:,:self.seq_len] * src_pad_mask
         src_pad_mask = src_pad_mask.logical_not()
-
-        if torch.isnan(src_kmer).any():
-            printmessage("NaN in Kmer")
-            nan_idx = torch.isnan(src_kmer).nonzero()
-            nan_array = src_kmer[nan_idx[0][0]]
-            print(nan_array)
-            raise ValueError("NaN in Kmer")
-        if torch.isnan(src_signal).any():
-            printmessage("NaN in Signal")
-            nan_idx = torch.isnan(src_signal).nonzero()
-            nan_array = src_signal[nan_idx[0][0]]
-            print(nan_array)
-            raise ValueError("NaN in Signal")
-        if torch.isnan(src_pad_mask).any():
-            printmessage("NaN in Pad Mask")
-            nan_idx = torch.isnan(src_pad_mask).nonzero()
-            nan_array = src_pad_mask[nan_idx[0][0]]
-            print(nan_array)
-            raise ValueError("NaN in Pad Mask")
-        if torch.isnan(target).any():
-            printmessage("NaN in Target")
-            nan_idx = torch.isnan(target).nonzero()
-            nan_array = target[nan_idx[0][0]]
-            print(nan_array)
-            raise ValueError("NaN in Target")
-        if torch.isnan(target_mask).any():
-            printmessage("NaN in Target Mask")
-            nan_idx = torch.isnan(target_mask).nonzero()
-            nan_array = target_mask[nan_idx[0][0]]
-            print(nan_array)
-            raise ValueError("NaN in Target Mask")
         output = self.model(src_kmer, src_signal, src_pad_mask, target_mask)
 
         return output, target
@@ -490,7 +461,7 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
                               buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
                               prefetch_factor = prefetch, pin_memory = pin_memory, soft_label=soft_label, num_workers = num_workers,
-                                signal_stride=signal_stride, kmer_size=kmer_size)
+                              signal_stride=signal_stride, kmer_size=kmer_size)
 
     return train_loader, val_loader
 
