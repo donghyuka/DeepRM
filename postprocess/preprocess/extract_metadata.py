@@ -10,8 +10,16 @@ import pandas as pd
 import tqdm
 import pysam
 from utils.utils import mean_phred, oom_killer, printmessage
+from evaluate.tokenize_transcript import preprocess_pod5
 
 def md_to_mismatch_arr(md):
+    """
+    Convert MD tag to mismatch array.
+
+    :param md: An array. MD tag from BAM file.
+
+    :return A numpy array with shape (len(read),) with 1 for mismatch and 0 for match.
+    """
     mis_arr = []
     digit_buffer = ""
     del_flag = False
@@ -50,8 +58,22 @@ def md_to_mismatch_arr(md):
     return mis_arr
 
 
-def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
-    ## Extract mv tag from bam and save to separate file
+def parse_bam(bam_path, threads, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
+    """
+    Parse BAM File and saves the pickled Pandas Dataframes to disk.
+    Dataframes contain SAM tags (including MOVE), Sequence, Mapping, and BQ.
+
+    :param bam_path: A string. Path to BAM file.
+    :param threads: An integer. Number of threads.
+    :param bq_cutoff: An integer. Minimum BQ score.
+    :param signal_path_dict: A dictionary. Read ID to Signal Path mapping.
+    :param signal_path_arr: A list. Signal Path list.
+    :param intermediate_path: A string. Path to save the output.
+
+    :return: None.
+    Pickled Pandas Dataframes are written to disk.
+    Each Dataframe is a part of BAM that corresponds to each POD5 file.
+    """
     data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [],
                      "mapq": [], "flag": [], "md": [], "pi": [], "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
     valid_count = 0
@@ -61,7 +83,7 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
     missing_signal = 0
     unmapped = 0
 
-    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
+    with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=threads) as input_bam:
         with tqdm.tqdm(total=input_bam.mapped + input_bam.unmapped, desc="Parsing BAM File") as pbar:
             for read in input_bam:
                 pbar.update(1)
@@ -157,6 +179,19 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
 
 
 def standardise_trim_segment_signal(signal,move,sp,ts,ns,offset,scale,mean,stdev):
+    """
+    Standardise and Trim the signal.
+    :param signal:
+    :param move:
+    :param sp:
+    :param ts:
+    :param ns:
+    :param offset:
+    :param scale:
+    :param mean:
+    :param stdev:
+    :return:
+    """
     signal = signal[sp:]
     signal_len = len(signal)
     if ns == 0:
@@ -594,33 +629,22 @@ def main():
 
     norm_factor = parse_toml(args.toml, args.norm_mode)
 
-    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.min_size, args.max_size)
-    # signal_path_arr = list(index_dict.keys())
-    # gc.collect()
+    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.min_size, args.max_size)
+    signal_path_arr = list(index_dict.keys())
+    gc.collect()
 
-    # with open(signal_index_path, "wb") as outfile:
-    #     pickle.dump(index_dict, outfile)
-    # gc.collect()
-    #
-
-    # signal_path_dict = {}
-    # for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
-    #     for read_id in id_list:
-    #         signal_path_dict[read_id] = signal_path.split('/')[-1]
-    # del index_dict
-    # gc.collect()
-
-    with open(signal_index_path, "rb") as infile:
-        index_dict = pickle.load(infile)
+    with open(signal_index_path, "wb") as outfile:
+        pickle.dump(index_dict, outfile)
+    gc.collect()
 
     signal_path_dict = {}
     for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
         for read_id in id_list:
             signal_path_dict[read_id] = signal_path.split('/')[-1]
-    signal_path_arr = list(index_dict.keys())
+    del index_dict
+    gc.collect()
 
-    # signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
-    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+    parse_bam(args.bam, args.cpu, args.qcut, signal_path_dict, intermediate_path)
 
     del signal_path_dict, index_dict
     gc.collect()

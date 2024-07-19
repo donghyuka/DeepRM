@@ -134,7 +134,7 @@ def main():
         data_df = data_df.merge(dorado_pred, on = "label_id", how = "inner")
         print(data_df)
         plot_scatter(data_df, outdir, modelname)
-        plot_boxplot(data_df, outdir, modelname)
+        # plot_boxplot(data_df, outdir, modelname)
 
     return None
 

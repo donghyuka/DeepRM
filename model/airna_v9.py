@@ -15,11 +15,12 @@ class TransformerModel(nn.Module):
                  n_layers: int, encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40, block_len = 17,
                  seq_len: int = 200, t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1,
-                 sig_emb_depth: int = 6) -> None:
+                 sig_emb_depth: int = 6, fin_emb_dim: int = 1) -> None:
 
         super().__init__()
 
         ## Embedding Initialization
+
         signal_embedding_layers = []
         signal_embedding_layers.append(nn.Linear(signal_size, d_model))
         signal_embedding_layers.append(nn.LayerNorm(d_model))
@@ -29,8 +30,8 @@ class TransformerModel(nn.Module):
             signal_embedding_layers.append(nn.LayerNorm(d_model))
             signal_embedding_layers.append(get_activation_fn(t_act))
 
-        self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Sequential(*signal_embedding_layers)
+        self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
 
         ## Encoder Initialization
@@ -41,15 +42,17 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
-        self.regression_head = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head)
+        self.regression_head_1 = RegressionHead1(d_model, d_model, fin_emb_dim, lin_act, lin_depth, lin_dropout, seq_len)
+        self.regression_head_1 = nn.SyncBatchNorm.convert_sync_batchnorm(self.regression_head_1)
+        self.regression_head_2 = RegressionHead2(d_model, seq_len * fin_emb_dim, 1, lin_act, lin_depth, lin_dropout, seq_len)
 
         ## Weight Initialization
         self.init_weights()
 
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
-        self.regression_head.init_weights(initrange)
+        self.regression_head_1.init_weights(initrange)
+        self.regression_head_2.init_weights(initrange)
         self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         for layer in self.signal_embedding:
             if isinstance(layer, nn.Linear):
@@ -60,8 +63,7 @@ class TransformerModel(nn.Module):
         return None
 
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor, src_target_mask: Tensor,
-                src_bq=None, src_move=None) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
@@ -69,17 +71,12 @@ class TransformerModel(nn.Module):
 
         ## add all embeddings and dropout
         final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
-        output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = None)
 
         ## apply regression head to each token:
-        output = self.regression_head(output)
+        output = self.regression_head_1(output).flatten(start_dim = 1)
+        output = self.regression_head_2(output)
         output = output.squeeze(-1)
-
-        target_mask_sum = src_target_mask.sum(dim = 1)
-        output = output * src_target_mask
-        output = output.sum(dim = 1)
-        output = output / target_mask_sum
-
         output = torch.sigmoid(output)
 
         return output
@@ -110,22 +107,60 @@ class PositionalEncoding(nn.Module):
     ## END OF PositionalEncoding
 
 
-class RegressionHead(nn.Module):
-    def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
+class RegressionHead1(nn.Module):
+    def __init__(self, d_model: int, in_dim: int, out_dim: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
         super().__init__()
         layer_list=  []
+
+        layer_list.append(nn.Linear(in_dim, d_model))
+        layer_list.append(nn.BatchNorm1d(seq_length))
+        layer_list.append(get_activation_fn(lin_act))
+
         for i in range(lin_depth-1):
             layer_list.append(nn.Linear(d_model, d_model))
             layer_list.append(nn.BatchNorm1d(seq_length))
             layer_list.append(get_activation_fn(lin_act))
             layer_list.append(nn.Dropout(lin_dropout))
 
-        layer_list.append(nn.Linear(d_model, d_model))
-        layer_list.append(get_activation_fn(lin_act))
         layer_list.append(nn.Linear(d_model, d_model//4))
         layer_list.append(get_activation_fn(lin_act))
-        layer_list.append(nn.Linear(d_model//4, 1))
+        layer_list.append(nn.Linear(d_model//4, out_dim))
+        layer_list.append(get_activation_fn(lin_act))
         self.lin_layers = nn.Sequential(*layer_list)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.lin_layers(x)
+
+    def init_weights(self, initrange = 0.1):
+        for layer in self.lin_layers:
+            if isinstance(layer, nn.Linear):
+                layer.weight.data.uniform_(-initrange, initrange)
+                if layer.bias is not None:
+                    layer.bias.data.zero_()
+        return None
+
+    ## END OF RegressionHead
+
+
+
+class RegressionHead2(nn.Module):
+    def __init__(self, d_model: int, in_dim: int, out_dim: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
+        super().__init__()
+        layer_list=  []
+
+        layer_list.append(nn.Linear(in_dim, d_model))
+        layer_list.append(get_activation_fn(lin_act))
+
+        for i in range(lin_depth-1):
+            layer_list.append(nn.Linear(d_model, d_model))
+            layer_list.append(get_activation_fn(lin_act))
+            layer_list.append(nn.Dropout(lin_dropout))
+
+        layer_list.append(nn.Linear(d_model, d_model//4))
+        layer_list.append(get_activation_fn(lin_act))
+        layer_list.append(nn.Linear(d_model//4, out_dim))
+        self.lin_layers = nn.Sequential(*layer_list)
+
 
     def forward(self, x: Tensor) -> Tensor:
         return self.lin_layers(x)
