@@ -409,7 +409,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["pos"] = pos_list
         signal_df = signal_df[signal_df["pos"].apply(lambda x: len(x) > 0)]
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            printmessage(f"Empty signal data (1): {signal_path}", msg_type="warning")
             continue
         del pos_list, alignment_zip
         gc.collect()
@@ -434,7 +434,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df.explode("pos").reset_index(drop=True)
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            printmessage(f"Empty signal data (2): {signal_path}", msg_type="warning")
             continue
 
         signal_df["ref"] = signal_df["ref"].str.split(".").str[0]
@@ -445,7 +445,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            printmessage(f"Empty signal data (3): {signal_path}", msg_type="warning")
             continue
 
         signal_df["label_id"] = signal_df["ref"].astype(str) + ":" + signal_df["ref_pos"].astype(str)
@@ -458,7 +458,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] <= signal_df["query_len"])]
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data: {signal_path}", msg_type="warning")
+            printmessage(f"Empty signal data (4): {signal_path}", msg_type="warning")
             continue
 
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)
@@ -641,33 +641,41 @@ def main():
     norm_factor = parse_toml(args.toml, args.norm_mode)
     printmessage(f"Normalisation factor: {norm_factor}", msg_type="info")
 
-    # index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
-    # signal_path_arr = list(index_dict.keys())
-    # gc.collect()
+    if not os.path.exists(signal_index_path):
+        index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
+        gc.collect()
 
-    # with open(signal_index_path, "wb") as outfile:
-    #     pickle.dump(index_dict, outfile)
-    # gc.collect()
-    #
+        with open(signal_index_path, "wb") as outfile:
+            pickle.dump(index_dict, outfile)
+        gc.collect()
 
-    # signal_path_dict = {}
-    # for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
-    #     for read_id in id_list:
-    #         signal_path_dict[read_id] = signal_path.split('/')[-1]
-    # del index_dict
-    # gc.collect()
 
-    with open(signal_index_path, "rb") as infile:
-        index_dict = pickle.load(infile)
+        signal_path_dict = {}
+        for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+            for read_id in id_list:
+                signal_path_dict[read_id] = signal_path.split('/')[-1]
+        signal_path_arr = list(index_dict.keys())
+        del index_dict
+        gc.collect()
 
-    signal_path_dict = {}
-    for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
-        for read_id in id_list:
-            signal_path_dict[read_id] = signal_path.split('/')[-1]
-    signal_path_arr = list(index_dict.keys())
+    else:
+        printmessage("Signal data already exists. Skipping extraction.", msg_type="info")
+        with open(signal_index_path, "rb") as infile:
+            index_dict = pickle.load(infile)
 
-    # signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
-    # extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+        signal_path_dict = {}
+        for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+            for read_id in id_list:
+                signal_path_dict[read_id] = signal_path.split('/')[-1]
+        signal_path_arr = list(index_dict.keys())
+
+    if os.path.exists(f"{intermediate_path}/move_df_split") and len(glob.glob(f"{intermediate_path}/move_df_split/*.pkl")) > 0:
+        printmessage("Move data already exists. Skipping extraction.", msg_type="info")
+
+    else:
+        signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+        extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+
 
     del signal_path_dict, index_dict
     gc.collect()

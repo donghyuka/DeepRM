@@ -239,6 +239,8 @@ class Timeit(object):
 
 
 def mean_phred(phred):
+    if not isinstance(phred, np.ndarray):
+        phred = np.array(phred, dtype=int)
     ## When averaging PHRED scores, note that the PHRED score is logarithmically scaled.
     return -10 * np.log10(np.mean(10 ** (-np.array(phred) / 10)))
 

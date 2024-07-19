@@ -20,9 +20,9 @@ import importlib
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
-    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_070324/test.pkl", help="Data path")
+    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_071224/test.pkl", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/inference/", help="Output path")
-    parser.add_argument("--batch", "-b", type=int, default=512, help="Batch size")
+    parser.add_argument("--batch", "-b", type=int, default=1024, help="Batch size")
     parser.add_argument("--gpu", "-g", type=int, default=1, help="GPU device")
     parser.add_argument("--bag_size", "-s", type=int, default=20, help="Bag size")
 

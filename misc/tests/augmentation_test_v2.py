@@ -12,7 +12,6 @@ import glob
 
 def get_aug_list(fraction):
     ## MOVING AVERAGE MAGNITUDE WARP
-    ## MOVING AVERAGE MAGNITUDE WARP
     movmag = partial(aug.moving_magnitude_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
     ## WINDOWED TIME WARP
     winwarp = partial(aug.window_warp, fraction=fraction, min_window_ratio = 0.05, max_window_ratio = 0.10,

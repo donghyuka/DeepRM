@@ -315,8 +315,7 @@ def main():
     token_output_path = f"{args.output}/output"
     os.makedirs(token_output_path, exist_ok=True)
 
-    # data_df = extract_move(args.bam, args.cpu, args.qcut, args.output)
-    data_df = pd.read_pickle(f"{args.output}/move_df.pkl")
+    data_df = extract_move(args.bam, args.cpu, args.qcut, args.output)
     print(data_df)
 
     data_df_split = np.array_split(data_df, args.cpu)

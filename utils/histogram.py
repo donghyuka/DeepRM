@@ -10,9 +10,9 @@ from matplotlib import pyplot as plt
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--cpu", type=int, default=int(mp.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--input", type=str, required=True, help="Input path")
-    args.add_argument("--output", type=str, required=True, help="Output path")
+    args.add_argument("--cpu", "-c", type=int, default=int(mp.cpu_count()*0.9), help="Number of CPUs")
+    args.add_argument("--input", "-i", type=str, required=True, help="Input path")
+    args.add_argument("--output", "-o", type=str, required=True, help="Output path")
     args = args.parse_args()
     return args
 

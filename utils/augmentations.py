@@ -3,7 +3,7 @@
 ## Slope augmentation modified from: https://github.com/timeseriesAI/tsai/blob/main/tsai/data/transforms.py
 ## Warps modified from: https://github.com/uchidalab/time_series_augmentation/blob/master/utils/augmentation.py
 
-## This script procides accelerated implementations of various time series augmentations.
+## This script provides accelerated implementations of various time series augmentations.
 ## This script is for on-line augmentation, in which the speed is crucial.
 ## Multichannel support has been removed for speed.
 ## Supports both CPU and GPU, and considerably faster on GPU.

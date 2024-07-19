@@ -69,7 +69,7 @@ def parse_args():
     num_cpu = os.cpu_count()
     parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--out", "-o", dest = "output", type=str, required=True, help="Output directory")
-    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.0", help="Dorado path")
+    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.2", help="Dorado path")
     parser.add_argument("--cpu", "-t", type=int, default=120, help="Number of threads")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
@@ -116,11 +116,11 @@ def main():
         else:
             args.batch = ""
 
-        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A -b 400 --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {raw_bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {pod5_path} > {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 
-        cmd = f"samtools view -@ {args.cpu} -bh -F 260 -o {bam_path} {raw_bam_path}"
+        cmd = f"samtools view -@ {args.cpu} -bh -F 276 -o {bam_path} {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 
@@ -151,10 +151,18 @@ def main():
     if 3 in args.step:
         ## Step 3. Run tokenize_transcript.py
         printmessage(f"[Step 3/3] Tokenize Transcript")
-        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n normalise"
+        cmd = f"python -m evaluate.tokenize_transcript -q {args.qcut} -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n normalise -x drach"
         printmessage(cmd)
         os.system(cmd)
-
+        cmd = f"python -m evaluate.tokenize_transcript -q {args.qcut} -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n standardise -x drach"
+        printmessage(cmd)
+        os.system(cmd)
+        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n normalise -x all"
+        printmessage(cmd)
+        os.system(cmd)
+        cmd = f"python -m evaluate.tokenize_transcript -p {pod5_path} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n standardise -x all"
+        printmessage(cmd)
+        os.system(cmd)
     pass
 
 if __name__ == '__main__':

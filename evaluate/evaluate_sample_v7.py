@@ -154,7 +154,8 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_target_mask = data["target_mask"]
 
         with torch.no_grad():
-            pred = model(src_kmer, src_signal, src_bq, src_move, src_pad_mask, src_target_mask)
+            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_bq=src_bq, src_move=src_move,
+                         src_pad_mask=src_pad_mask, src_target_mask=src_target_mask)
 
         ## if pred has additional dimension, remove it.
         if len(pred.shape) > 1:
