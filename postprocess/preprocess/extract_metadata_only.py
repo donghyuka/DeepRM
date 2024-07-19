@@ -426,10 +426,12 @@ def main():
     if not len(os.listdir(intermediate_path)) == 0:
         raise FileExistsError(f"Output directory {intermediate_path} is not empty")
 
+    ## Read label and BAM files.
     label_df = pd.read_csv(args.label, sep='\t')
     bam_df = parse_bam(args.bam, args.cpu, args.qcut)
     bam_df = np.array_split(bam_df, args.cpu)
 
+    ## Extract metadata from BAM and write to intermediate files.
     proc_list = []
     for pid, bam_df_split in enumerate(bam_df):
         proc = mp.Process(target=extract_write_metadata,
@@ -447,6 +449,7 @@ def main():
     if len(intermediate_file_list) == 0:
         raise FileNotFoundError("No intermediate files found")
 
+    ## Merge intermediate files
     final_df = []
     for path in tqdm.tqdm(intermediate_file_list, desc="Merging Files"):
         final_df.append(pd.read_pickle(path))
