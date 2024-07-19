@@ -184,23 +184,24 @@ def ref_pos_to_query_pos(ref_pos_list, cigar, start_pos, query_len, md_tag, cb_p
     Convert reference position to query position.
     Also returns error array for context block.
 
+    Error Array:
+        Channel 0: Mismatch, Channel 1: Insertion, Channel 2: Deletion
+
     :param ref_pos_list: An iterable. Positions in reference to convert.
     :param cigar: A string. CIGAR string.
     :param start_pos: An integer. Start position in reference.
     :param query_len: An integer. Length of query.
     :param md_tag: A string. MD tag.
     :param cb_pad: An integer. Padding for context block (Context block size / 2 -1).
-    :return: (query_pos_arr, error_arr)
-    A tuple of numpy arrays.
-    query_pos_arr is the converted query positions.
-    error_arr is the error array for context block.
+    :return: (query_pos_arr, error_arr) A tuple of numpy arrays.
+             query_pos_arr is the converted query positions. Shape (len(ref_pos_list),).
+             error_arr is the error array for context block. Shape (len(ref_pos_list), 2*cb_pad+1, 3).
     """
 
     cigar_list = re.findall(r'(\d+)([A-Z,=])', cigar)
     mis_arr = md_to_mismatch_arr(md_tag)
     query_pos_dict = {}
     error_arr = np.zeros((query_len,3),dtype=bool)
-    ## Channel 0: Mismatch, Channel 1: Insertion, Channel 2: Deletion
 
     idx_ref_prev = start_pos
     idx_ref = start_pos
@@ -276,12 +277,12 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
     :param label_df: A Pandas DataFrame. Label DataFrame.
 
     :return: (ref_pos_arr, query_pos_arr, error_arr, label_arr, dom_arr)
-    A tuple of numpy arrays.
-    ref_pos_arr is the reference positions.
-    query_pos_arr is the query positions.
-    error_arr is the error array for context block.
-    label_arr is the label array.
-    dom_arr is the domain array.
+            A tuple of numpy arrays.
+            ref_pos_arr is the reference positions.
+            query_pos_arr is the query positions.
+            error_arr is the error array for context block.
+            label_arr is the label array.
+            dom_arr is the domain array.
     """
 
     ref = ref.split(".")[0]
@@ -316,7 +317,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
 
     """
     Extract metadata from BAM Dataframe and write to Dataframe.
-    Each rows in the output are the molecules that correspond to the positions in the given label Dataframe.
+    Each rows in the output are the context blocks that correspond to the positions in the given label Dataframe.
 
     :param bam_df: A Pandas DataFrame. BAM Dataframe.
     :param label_df: A Pandas DataFrame. Label DataFrame.
@@ -324,7 +325,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
     :param out_dir: A string. Output directory.
     :param cb_len: An Integer. Context block length.
     :param boi: A string. Base of interest.
-    :return:
+    :return: None. Output is written to file.
     """
     
     cb_half_len = cb_len//2
@@ -336,6 +337,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
 
     bam_df["query_len"] = bam_df["seq"].apply(len)
 
+    ## Extract positions in each query that corresponds to reference positions in label
     bam_df[['ref_pos', 'query_pos', 'error', 'label', "dom"]] = bam_df.apply(lambda x: get_label_pos_list(
         x["ref"], x["start"], x["cigar"], x["query_len"], x["md"], label_df), axis=1, result_type="expand")
 
@@ -353,6 +355,8 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
                      "mapq", "flag", "pi", "left_soft_clip"]].copy()
     bam_df["read_bq"] = bam_df["bq"].apply(mean_phred)
 
+    ## Before explode: Each row is a query.
+    ## After explode: Each row is a context block.
     bam_df = bam_df.explode(["ref_pos", "query_pos", "error", "label", "dom"], ignore_index=True)
 
     if len(bam_df) == 0:
