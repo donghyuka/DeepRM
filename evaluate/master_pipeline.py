@@ -141,6 +141,8 @@ def get_canonical_base(base):
 
     raise ValueError(f"Invalid base argument: {base}")
 
+    return None
+
 def parse_args():
     parser = argparse.ArgumentParser()
     num_cpu = os.cpu_count()
@@ -155,7 +157,7 @@ def parse_args():
     parser.add_argument("--ref", "-f", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta", help="Reference path")
     parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
     parser.add_argument("--toml", "-m", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml", help="Dorado TOML file")
-    parser.add_argument("--base", "-x", type=str, default=None, help="Base of Interest")
+    parser.add_argument("--base", "-x", type=str, default="A", help="Base of Interest")
     parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
     args = parser.parse_args()
     if not os.path.exists(args.input):
