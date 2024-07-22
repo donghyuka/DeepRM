@@ -38,5 +38,5 @@ print(data)
 
 fig, ax = plt.subplots(figsize=(20, 10))
 sns.boxplot(x="5mer", y="signal", hue="group", data=data, ax=ax)
-plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/plot/ivt_tok.png")
+plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/plot/ivt_tok_notrim.png")
 

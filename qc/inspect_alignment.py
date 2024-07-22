@@ -15,14 +15,61 @@ REF_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta"
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--in", type=str, dest="input", help="Input BAM file path", required=True)
-    parser.add_argument("--out", type=str, dest="output", help="Output Directory", required=True)
-    parser.add_argument("--ref", type=str, dest="ref", help="Reference FASTA file path", default=REF_PATH)
-    parser.add_argument("--cpu", type=int, dest="cpu", help="Number of CPUs",  default=int(os.cpu_count()*0.9))
-    parser.add_argument("--mapq", type=int, dest="mapq", help="MAPQ cutoff", default=30)
-    parser.add_argument("--bq", type=int, dest="bq", help="BQ cutoff", default=7)
+    parser.add_argument("--in", "-i", type=str, dest="input", help="Input BAM file path", required=True)
+    parser.add_argument("--out","-o", type=str, dest="output", help="Output Directory", required=True)
+    parser.add_argument("--ref","-r", type=str, dest="ref", help="Reference FASTA file path", default=REF_PATH)
+    parser.add_argument("--cpu","-c", type=int, dest="cpu", help="Number of CPUs",  default=int(os.cpu_count()*0.9))
+    parser.add_argument("--mapq","-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
+    parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
     args = parser.parse_args()
     return args
+
+
+def md_to_mismatch_arr(md):
+    """
+    Convert MD tag to mismatch array.
+
+    :param md: An array. MD tag from BAM file.
+
+    :return A numpy array with shape (len(read),) with 1 for mismatch and 0 for match.
+    """
+    mis_arr = []
+    digit_buffer = ""
+    del_flag = False
+    del_count = 0
+    for char in md:
+        if char.isdigit():
+            if del_flag:
+                del_flag = False
+                if del_count > 0:
+                    mis_arr += [0] * del_count
+                    del_count = 0
+            digit_buffer += char
+        else:
+            if del_flag:
+                del_count += 1
+                continue
+            if len(digit_buffer) > 0:
+                digit_buffer = int(digit_buffer)
+                if digit_buffer > 0:
+                    mis_arr += [0] * digit_buffer
+                digit_buffer = ""
+            if char == "^":
+                del_flag = True
+            else:
+                mis_arr.append(1)
+
+    if del_flag:
+        if del_count > 0:
+            mis_arr += [0] * del_count
+    if len(digit_buffer) > 0:
+        digit_buffer = int(digit_buffer)
+        if digit_buffer > 0:
+            mis_arr += [0] * digit_buffer
+
+    mis_arr = np.array(mis_arr, dtype=int)
+    return mis_arr
+
 
 def align_bam(args):
     basename = os.path.basename(args.input)
@@ -50,6 +97,7 @@ def align_bam(args):
 def extract_cigar(args):
     bamfile = pysam.AlignmentFile(args.input, "rb", check_sq=False, threads=args.cpu)
     cigar_list = []
+    md_list = []
     for read in tqdm(bamfile):
         if read.is_unmapped or read.is_secondary:
             continue
@@ -61,11 +109,14 @@ def extract_cigar(args):
             continue
         cigar = read.cigarstring
         cigar_list.append(cigar)
-    return cigar_list
+        md = read.get_tag("MD")
+        md_list.append(md)
+
+    return cigar_list, md_list
 
 
 
-def get_error_rate_func(cigar):
+def get_error_rate_func(cigar, md, use_md = True):
 
     cigar_list = re.findall(r'(\d+)([A-Z,=])', cigar)
     mismatch = 0
@@ -89,32 +140,37 @@ def get_error_rate_func(cigar):
     ins_rate = insertion/ref_length
     del_rate = deletion/ref_length
 
+    if use_md:
+        mis_arr = md_to_mismatch_arr(md)
+        mis_rate = np.sum(mis_arr) / ref_length
+
     return mis_rate, ins_rate, del_rate
 
 
-def get_error_rate_worker(cigar_list, man_df_list):
+def get_error_rate_worker(cigar_list, md_list, man_df_list, use_md = True):
     mis_rate_list = []
     ins_rate_list = []
     del_rate_list = []
-    for cigar in cigar_list:
-        mis_rate, ins_rate, del_rate = get_error_rate_func(cigar)
-        mis_rate_list.append(mis_rate)
+    for cigar, md in zip(cigar_list, md_list):
+        mis_rate, ins_rate, del_rate = get_error_rate_func(cigar, md, use_md)
         ins_rate_list.append(ins_rate)
         del_rate_list.append(del_rate)
+        mis_rate_list.append(mis_rate)
     df = pd.DataFrame({"MIS_RATE":mis_rate_list, "INS_RATE":ins_rate_list, "DEL_RATE":del_rate_list})
     man_df_list.append(df)
     return None
 
 
-def get_error_rate_master(cigar_list, args):
+def get_error_rate_master(cigar_list, md_list, args):
 
     cigar_list_split = np.array_split(cigar_list, args.cpu)
+    md_list_split = np.array_split(md_list, args.cpu)
     proc_list = []
     man = mp.Manager()
     man_df_list = man.list()
 
-    for cigar_list in cigar_list_split:
-        proc = mp.Process(target=get_error_rate_worker, args=(cigar_list, man_df_list))
+    for (cigar_list, md_list) in zip(cigar_list_split, md_list_split):
+        proc = mp.Process(target=get_error_rate_worker, args=(cigar_list, md_list, man_df_list))
         proc_list.append(proc)
         proc.start()
     for proc in proc_list:
@@ -179,12 +235,12 @@ def main():
         os.makedirs(args.output, exist_ok=True)
 
         printmessage("Extracting CIGAR string")
-        cigar_list = extract_cigar(args)
+        cigar_list, md_list = extract_cigar(args)
         with open(f"{args.output}/cigar_list.pkl", "wb") as f:
             pickle.dump(cigar_list, f)
 
         printmessage("Calculating error rate")
-        df_error = get_error_rate_master(cigar_list, args)
+        df_error = get_error_rate_master(cigar_list, md_list, args)
         df_error.to_pickle(f"{args.output}/error_rate.pkl")
 
     assert len(df_error) > 0, "Error rate dataframe is empty. Check input BAM file"

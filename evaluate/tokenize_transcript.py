@@ -442,6 +442,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["query_pos"] = signal_df["pos"].apply(lambda x: x[1])
 
         signal_df["centre_nuc"] = signal_df.apply(lambda x: x["seq"][x["query_pos"]] if x["query_pos"] < len(x["seq"]) else None, axis=1)
+
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
 
         if len(signal_df) == 0:
@@ -456,6 +457,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["query_len"] = signal_df["seq"].apply(len)
 
         signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] <= signal_df["query_len"])]
+        signal_df.dropna(inplace=True)
 
         if len(signal_df) == 0:
             printmessage(f"Empty signal data (4): {signal_path}", msg_type="warning")

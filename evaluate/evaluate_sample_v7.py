@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--nfile", "-n", type=int, default=16, help="Number of files to load")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
+    parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
     args = parser.parse_args()
     return args
 
@@ -84,6 +85,8 @@ def run_inference(args):
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
         out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
+        if len(args_dict["postfix"]) > 0:
+            out_dir = f"{out_dir}-{args_dict['postfix']}"
         print(out_dir)
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir

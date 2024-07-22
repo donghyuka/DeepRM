@@ -184,9 +184,31 @@ def main():
     # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0104/result/intermediates/dorado_output.actb.bam"
     # extract_move(ivt_bam, 120, 7, ivt_path)
 
+    # ivt_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA
+    # /ON0105/ON0105/result/block/intermediates"
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_notrim_noalign.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="debug_notrim_noalign", skip_unmapped=False)
+
+    # ivt_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/block/intermediates"
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_manualtrim.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="debug_manualtrim", skip_unmapped=True)
+
     ivt_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/block/intermediates"
-    ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_notrim_noalign.bam"
-    extract_move(ivt_bam, 120, 7, ivt_path, output_name="debug_notrim_noalign", skip_unmapped=False)
+
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_example_noalign_notrim.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="example_noalign_notrim", skip_unmapped=False)
+    #
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_example_noalign_yestrim.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="example_noalign_yestrim", skip_unmapped=False)
+    #
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_example_yesalign_notrim.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="example_yesalign_notrim", skip_unmapped=False)
+    #
+    # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_example_yesalign_yestrim.bam"
+    # extract_move(ivt_bam, 120, 7, ivt_path, output_name="example_yesalign_yestrim", skip_unmapped=False)
+
+    ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output.bam"
+    extract_move(ivt_bam, 120, 7, ivt_path, output_name="debug_notrim_0720", skip_unmapped=False)
 
     return None
 

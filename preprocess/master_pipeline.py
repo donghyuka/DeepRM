@@ -34,7 +34,7 @@ def restructure_directory(args):
             args.raw_path = str(os.path.join(args.input, "raw"))
 
         ## Check if there are any pod5 directories
-        pod5_dirs = glob.glob(f'{args.pod5}/pod5*/')
+        pod5_dirs = glob.glob(f'{args.raw_path}/pod5*/')
         if len(pod5_dirs) == 0:
             raise FileNotFoundError(f"Input directory {args.raw_path} does not contain any pod5 directories")
 
@@ -155,10 +155,10 @@ def autoconfig(args):
     return args
 
 def get_canonical_base(base):
-    modification_dict = {"A": ["cA", "m6A", "m1A", "Am", "I"],
-                         "C": ["cC", "m5C", "hm5C", "Cm"],
-                         "G": ["cG", "m7G", "m1G", "Gm"],
-                         "U": ["cU", "m5U", "Um", "pseU"]}
+    modification_dict = {"A": ["A", "cA", "m6A", "m1A", "Am", "I"],
+                         "C": ["C", "cC", "m5C", "hm5C", "Cm"],
+                         "G": ["G", "cG", "m7G", "m1G", "Gm"],
+                         "U": ["U", "cU", "m5U", "Um", "pseU"]}
 
     for k, v in modification_dict.items():
         if base in v:

@@ -4,6 +4,7 @@ import seaborn as sns
 import numpy as np
 import glob
 from tqdm import tqdm
+import argparse
 
 
 def standardise_trim_segment_signal(signal,move,sp,ts,ns,offset,scale):
@@ -28,12 +29,12 @@ def standardise_trim_segment_signal(signal,move,sp,ts,ns,offset,scale):
     return signal
 
 
-def extract_kmer_signal(path, bam_name="debug_actb", sample = False):
+def extract_kmer_signal(path, bam_name="debug_actb", sample = 0, trim = 0):
 
     b_paths = f"{path}/{bam_name}/*.pkl"
     b_paths = glob.glob(b_paths)
     if sample:
-        b_paths = np.random.choice(b_paths, 100)
+        b_paths = np.random.choice(b_paths, sample)
     s_paths = [x.replace(bam_name, "signal_raw") for x in b_paths]
 
 
@@ -45,11 +46,14 @@ def extract_kmer_signal(path, bam_name="debug_actb", sample = False):
             data2 = pd.read_pickle(b_path)
         except:
             continue
+
         data = data.merge(data2, on="read_id", how="inner")
+        if trim:
+            data["signal"] = data["signal"].apply(lambda x: x[trim:])
+
         df_list.append(data)
 
     df = pd.concat(df_list, axis=0)
-    print(df)
     return df
 
 
@@ -210,8 +214,19 @@ def main3():
     return None
 
 
-def main4():
-    ivt = extract_kmer_signal("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0104/result/block/intermediates", bam_name="debug_actb")
+def main4( sample = 100, trim = 0):
+    args = argparse.ArgumentParser()
+    args.add_argument("--key", type=str, required=True)
+    args = args.parse_args()
+    key = args.key
+
+    ivt_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/block/intermediates"
+    ivt = extract_kmer_signal(ivt_path, bam_name=key, sample = sample, trim = trim)
+    print(ivt)
+    cell_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block_070/intermediates"
+    cell = extract_kmer_signal(cell_path, bam_name="move_df_split", sample = sample)
+    print(cell)
+
     cell["class"] = "CELL"
     ivt["class"] = "IVT"
     data = pd.concat([cell, ivt], axis=0)
@@ -219,6 +234,7 @@ def main4():
     print(data)
 
     data["signal"] = data.apply(lambda x: standardise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"], x["offset"], x["scale"]), axis=1)
+    data = data.dropna(subset=["signal"], axis=0)
     data["signal"] = data["signal"].apply(lambda x: x[2:-2])
     data["5mer"] = data["seq"].apply(lambda x:[x[i:i+5] for i in range(0, len(x)-4)])
     data["len_signal"] = data["signal"].apply(lambda x: len(x))
@@ -226,15 +242,11 @@ def main4():
     data = data[data["len_signal"] == data["len_5mer"]]
 
     data = data[["signal","5mer", "class"]].copy().explode(["signal","5mer"])
+    data["signal"] = data["signal"].apply(np.mean)
     print(data)
 
-    data.to_pickle("/extdata4/baeklab/Hyeonseo/m6A/plot/kmer_signal_actb.pkl")
+    data.to_pickle(f"/extdata4/baeklab/Hyeonseo/m6A/plot/{key}.pkl")
 
-    data = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/plot/kmer_signal_actb.pkl")
-
-    ## dropna
-    data["signal"] = data["signal"].apply(np.mean)
-    data = data.dropna()
 
     ## Plot distribution for each 5mer. There can be 4^5 = 1024 5mers, so we will plot only 30 5mers with the highest counts.
     selected_5mers = data["5mer"].value_counts().index[1:31]
@@ -250,11 +262,17 @@ def main4():
         ax.legend()
         ax.set_xlim(40,140)
     fig.tight_layout()
-    plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/plot/kmer_signal_actb_ON0104.png")
+    plt.savefig(f"/extdata4/baeklab/Hyeonseo/m6A/plot/{key}.png")
     plt.close(fig)
 
     return None
 
 
 if __name__ == "__main__":
-    main4()
+    main4(sample=100, trim=0)
+    # main4("debug_notrim", sample=100, trim=0)
+    # main4("debug_noalign", sample=100, trim=0)
+    # main4("example_noalign_notrim", sample=100, trim=0)
+    # main4("example_noalign_yestrim", sample=100, trim=0)
+    # main4("example_yesalign_notrim", sample=100, trim=0)
+    # main4("example_yesalign_yestrim", sample=100, trim=0)
