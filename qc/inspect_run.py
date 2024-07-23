@@ -21,32 +21,11 @@ def parse_args():
     args.add_argument("--cpu","-c", dest="cpu", type=int, default=8, help="Number of CPUs")
     args.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
     args.add_argument("--bb", "-b", dest="bb_length", type=int, default=87, help="BB length")
+    args.add_argument("--mrna", "-m", action="store_true", help="mRNA mode")
     args = args.parse_args()
     return args
 
-
-def plot_read_len(read_len_arr, out_path):
-    ## plot read length KDE
-    fig, ax = plt.subplots(figsize=(10,10))
-    ## cut at 99.9 percentile
-    read_len_arr = read_len_arr[read_len_arr <= np.percentile(read_len_arr, 99.9)]
-    sns.histplot(read_len_arr, ax=ax, color="royalblue", label=f"Read Length (n={len(read_len_arr):,})", binwidth=100)
-    ax.set_title(f"Passed Read Length Distribution (n={len(read_len_arr):,})")
-    ax.set_xlabel("Read Length")
-    ax.set_ylabel("Count")
-    ## Vline at Q1, Q3, median
-    ax.axvline(np.percentile(read_len_arr, 25), color="black", linestyle="--")
-    ax.axvline(np.percentile(read_len_arr, 50), color="black", linestyle="--")
-    ax.axvline(np.percentile(read_len_arr, 75), color="black", linestyle="--")
-    ax.text(np.percentile(read_len_arr, 25), 0.9 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 25):.0f}", color="black")
-    ax.text(np.percentile(read_len_arr, 50), 0.8 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 50):.0f}", color="black")
-    ax.text(np.percentile(read_len_arr, 75), 0.7 * ax.get_ylim()[1], f"{np.percentile(read_len_arr, 75):.0f}", color="black")
-    fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
-    plt.close(fig)
-    return None
-
-
-def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length):
+def plot_read_len_oligo(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length):
 
     read_len_arr_passed = read_len_arr[mean_qual_arr >= bq_thres]
     read_len_arr_failed = read_len_arr[mean_qual_arr < bq_thres]
@@ -79,6 +58,38 @@ def plot_read_len_v2(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length)
 
     ## Peak Detection
 
+
+    ## Vline at median
+    fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
+    plt.close(fig)
+    return None
+
+
+def plot_read_len_mrna(read_len_arr, mean_qual_arr, bq_thres, out_path):
+
+    read_len_arr_passed = read_len_arr[mean_qual_arr >= bq_thres]
+    read_len_arr_failed = read_len_arr[mean_qual_arr < bq_thres]
+
+    ## plot read length KDE
+    fig, ax = plt.subplots(figsize=(10,10))
+    read_len_max = np.percentile(read_len_arr, 99.9)
+    binrange = (0, read_len_max)
+    binwidth = 10
+
+    sns.histplot(read_len_arr_passed, ax=ax, color="royalblue", label=f"Passed (n={len(read_len_arr_passed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step",  stat='density')
+    sns.histplot(read_len_arr_failed, ax=ax, color="tomato", label=f"Failed (n={len(read_len_arr_failed):,})", binwidth=binwidth, binrange=binrange, fill=False, lw=5, element="step", stat='density')
+
+    ## Median
+    ax.axvline(np.median(read_len_arr_passed), color="royalblue", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_passed), 0.9 * ax.get_ylim()[1], f"Passed median = {np.median(read_len_arr_passed):.0f}", color="black")
+    ax.axvline(np.median(read_len_arr_failed), color="tomato", linestyle="--", linewidth=2)
+    ax.text(np.median(read_len_arr_failed), 0.8 * ax.get_ylim()[1], f"Failed median = {np.median(read_len_arr_failed):.0f}", color="black")
+
+    ax.set_title(f"Read Length Distribution (n={len(read_len_arr):,})")
+    ax.set_xlabel("Read Length")
+    ax.set_ylabel("Count")
+    ax.set_xlim(0, 3000)
+    ax.legend()
 
     ## Vline at median
     fig.savefig(f"{out_path}/read_len_hist.png", dpi=300)
@@ -193,7 +204,10 @@ def main():
             pickle.dump(polya_len_arr, f)
 
     printmessage("Plotting")
-    plot_read_len_v2(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
+    if not args.mrna:
+        plot_read_len_oligo(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
+    else:
+        plot_read_len_mrna(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
     plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
     plot_polya_len(polya_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
 

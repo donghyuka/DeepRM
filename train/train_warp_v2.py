@@ -245,11 +245,7 @@ class Trainer:
         src_seg_len = source["segment_len"].to(self.gpu_id)
         target = target.to(torch.float32).to(self.gpu_id)
 
-        with torch.no_grad():
-            src_signal = interp1d(torch.arange(src_signal.shape[1], device=src_signal.device).unsqueeze(0).repeat(src_signal.shape[0],1), src_signal, (src_seg_len / self.unit_size).repeat_interleave(self.unit_size * self.signal_stride, dim=1).cumsum(dim=1)).unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
-            src_kmer = src_kmer.repeat_interleave(self.unit_size, dim=1)[:,self.kmer_size//2:-(self.kmer_size//2)]
-
-        output = self.model(src_kmer, src_signal, self.target_start_idx, self.target_end_idx)
+        output = self.model(src_kmer, src_signal, src_seg_len, self.target_start_idx, self.target_end_idx)
         # output = self.model(src_kmer, src_signal)
 
         return output, target

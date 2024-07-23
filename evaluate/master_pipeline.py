@@ -47,6 +47,8 @@ def restructure_directory(args):
             os.makedirs(args.pod5)
             for pod5_dir in pod5_dirs:
                 for file in os.listdir(pod5_dir):
+                    if os.path.exists(os.path.join(args.pod5, file)):
+                        raise FileExistsError(f"File {file} already exists in {args.pod5}")
                     os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
                 os.rmdir(pod5_dir)
 
@@ -54,6 +56,8 @@ def restructure_directory(args):
             pod5_dirs = [x for x in pod5_dirs if os.path.basename(x[:-1]) != "pod5"]
             for pod5_dir in pod5_dirs:
                 for file in os.listdir(pod5_dir):
+                    if os.path.exists(os.path.join(args.pod5, file)):
+                        raise FileExistsError(f"File {file} already exists in {args.pod5}")
                     os.rename(os.path.join(pod5_dir, file), os.path.join(args.pod5, file))
                 os.rmdir(pod5_dir)
 
@@ -214,7 +218,7 @@ def main():
         printmessage(cmd)
         os.system(cmd)
 
-        cmd = f"python -m qc.inspect_run -i {bam_path} -o {qc_path}"
+        cmd = f"python -m qc.inspect_run -i {bam_path} -o {qc_path} --mrna"
         printmessage(cmd)
         os.system(cmd)
 

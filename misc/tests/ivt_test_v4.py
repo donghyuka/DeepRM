@@ -270,9 +270,3 @@ def main4( sample = 100, trim = 0):
 
 if __name__ == "__main__":
     main4(sample=100, trim=0)
-    # main4("debug_notrim", sample=100, trim=0)
-    # main4("debug_noalign", sample=100, trim=0)
-    # main4("example_noalign_notrim", sample=100, trim=0)
-    # main4("example_noalign_yestrim", sample=100, trim=0)
-    # main4("example_yesalign_notrim", sample=100, trim=0)
-    # main4("example_yesalign_yestrim", sample=100, trim=0)

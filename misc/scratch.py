@@ -1,82 +1,91 @@
-import numpy as np
-import torch
-from utils import augmentations as aug
-import matplotlib.pyplot as plt
-import pandas as pd
-import time
-import cupy
+try:
+    import sys
+    import time
+    import os
+    import configparser
+    import traceback
+except ImportError as e:
+    print(f"ImportError: {e}")
+    input("Press any key to exit.")
+    sys.exit(1)
 
-path = "/extdata4/baeklab/Hyeonseo/m6A/dataset/ver070124/score-perfect/val/pos/000016697.pkl"
-df = pd.read_pickle(path)
-df["signal_len"] = df["signal_token"].apply(lambda x: len(x))
-df = df[df["signal_len"] < 1200]
-data = df["signal_token"].values
-data_list = []
-pad_mask = []
-for i in range(len(data)):
-    pad_len = 1200 - len(data[i])
-    data_list.append(np.pad(data[i], (0,pad_len)))
-    pad_mask.append([1]*len(data[i]) + [0]*pad_len)
-data = np.stack(data_list)
-data = torch.tensor(data).float()
-pad_mask = torch.tensor(pad_mask).float()
+def windows_to_wsl_path(windows_path):
+    wsl_path = windows_path.replace("C:\\", "/mnt/c/").replace("\\", "/")
+    if wsl_path.startswith('"') or wsl_path.startswith("'"):
+        wsl_path = wsl_path[1:]
+    if wsl_path.endswith('"') or wsl_path.endswith("'"):
+        wsl_path = wsl_path[:-1]
+    if wsl_path.endswith("/"):
+        wsl_path = wsl_path[:-1]
+    return wsl_path
 
-data = data.to(1)
-pad_mask = pad_mask.to(1)
+def main(config_path = "config.toml"):
+    print(f"Program start: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-with torch.no_grad():
+    if not os.path.exists(config_path):
+        print(f"Config file not found: {config_path}")
+        config_path = input("Enter the path to the config file: ")
 
-    ## GAUSSIAN JITTER
-    start = time.time()
-    t_data = aug.jitter(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, pad_mask = pad_mask)
-    print("JITTER: ",time.time() - start)
+    config_toml = configparser.ConfigParser()
+    config_toml.read(config_path)
+    source_dir = config_toml["path"]["source"]
+    dest_dir = config_toml["path"]["destination"]
+    jump_ip = config_toml["ssh"]["jump_ip"]
+    dest_ip = config_toml["ssh"]["destination"]
+    dest_user = config_toml["ssh"]["user"]
+    dest_port = config_toml["ssh"]["port"]
+    dest_node = config_toml["ssh"]["node"]
+    local_comp_thr = config_toml["compression"]["local_thread"]
+    remote_comp_thr = config_toml["compression"]["remote_thread"]
+    comp_level = config_toml["compression"]["comp_level"]
 
-    ## SPIKE NOISE
-    start = time.time()
-    t_data = aug.jitter(data, fraction=1.0, min_sigma=1.0, max_sigma=2.0, dropout = 0.95, pad_mask = pad_mask)
-    print("SPIKE: ",time.time() - start)
+    source_dir = windows_to_wsl_path(source_dir)
+    dest_dir = windows_to_wsl_path(dest_dir)
 
-    ## STEP NOISE
-    start = time.time()
-    t_data = aug.step(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, dropout = 0.95, pad_mask = pad_mask)
-    print("STEP: ",time.time() - start)
+    run_id = input(f"Enter the Nanopore Run ID: ")
+    subdirs = os.listdir(source_dir)
+    subdirs = [x for x in subdirs if run_id in x]
 
-    ## MAGNITUDE WARP
-    start = time.time()
-    t_data = aug.magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.6, n_knots = 20, pad_mask = pad_mask)
-    print("MAGNITUDE: ",time.time() - start)
+    if len(subdirs) == 0:
+        print("No matching directories found.")
+        source_subdir = input("Enter the name of the source directory manually: ")
+    elif len(subdirs) > 1:
+        print("Multiple matching directories found.")
+        print("Select the source directory from the list below")
+        for i, subdir in enumerate(subdirs):
+            print(f"{i+1}: {subdir}")
+        subdir_idx = input("Enter the index of the source directory: ")
+        source_subdir = subdirs[int(subdir_idx)-1]
+    else:
+        source_subdir = subdirs[0]
 
-    ## SLOPE NOISE
-    start = time.time()
-    t_data = aug.slope(data, fraction=1.0, magnitude = 1.0, pad_mask = pad_mask)
-    print("SLOPE: ",time.time() - start)
+    source_subdir = windows_to_wsl_path(source_subdir)
 
-    ## DRIFT NOISE
-    start = time.time()
-    t_data = aug.drift(data, fraction=1.0, min_sigma=0.5, max_sigma=1.0, n_knots = 40, pad_mask = pad_mask)
-    print("DRIFT: ",time.time() - start)
+    print(f"Source: {source_dir}/{source_subdir}")
 
-    ## TIME WARP
-    start = time.time()
-    t_data = aug.time_warp(data, fraction=1.0, min_sigma=0.1, max_sigma=0.2, n_knots = 40, pad_mask = pad_mask)
-    print("TIME: ",time.time() - start)
+    source_disk_size = os.popen(f'du -sh "{source_dir}/{source_subdir}"').read().split("\t")[0]
+    print(f"Source on-disk size: {source_disk_size}")
 
-    ## MOVING AVERAGE MAGNITUDE WARP
-    start = time.time()
-    t_data = aug.moving_magnitude_warp(data, fraction=1.0, min_sigma=0.2, max_sigma=0.8, n_knots = 60, pad_mask = pad_mask)
-    print("MOVING: ",time.time() - start)
+    tar_command = f'tar cf - -C "{source_dir}" "./{source_subdir}"'
+    pv_command = f"pv -s {source_disk_size}"
+    pigz_command = f"pigz -{comp_level} -p {local_comp_thr}"
+    ssh_command = f"ssh -J {dest_user}@{jump_ip} -p {dest_port} 'cd {dest_dir} ; pigz -dc -p {remote_comp_thr} - | tar xf -'"
 
-    ## WINDOWED TIME WARP
-    start = time.time()
-    t_data = aug.window_warp(data, fraction=1.0, pad_mask = pad_mask)
-    print("WINDOWED: ",time.time() - start)
+    print(tar_command)
+    print(pv_command)
+    print(pigz_command)
+    print(ssh_command)
 
-def signal_sliding_win(signal_segmented, stride = 6, win_size = 5):
-    signal_segmented = cupy.lib.stride_tricks.sliding_window_view(signal_segmented, win_size * stride)[::stride]
-    return signal_segmented
+    return None
 
-print(df["signal_token"])
 
-df["signal_token"] = df["signal_token"].apply(lambda x: signal_sliding_win(x))
+def error_handler(func):
+    try:
+        func()
+    except:
+        print(traceback.format_exc())
+    input("Press Enter to exit.")
+    sys.exit(1)
 
-print(df["signal_token"])
+if __name__ == "__main__":
+    error_handler(main)

@@ -207,8 +207,8 @@ def main():
     # ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_example_yesalign_yestrim.bam"
     # extract_move(ivt_bam, 120, 7, ivt_path, output_name="example_yesalign_yestrim", skip_unmapped=False)
 
-    ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output.bam"
-    extract_move(ivt_bam, 120, 7, ivt_path, output_name="debug_notrim_0720", skip_unmapped=False)
+    ivt_bam = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0105/ON0105/result/intermediates/dorado_output_notrim_a100.bam"
+    extract_move(ivt_bam, 120, 7, ivt_path, output_name="dorado_output_notrim_a100", skip_unmapped=False)
 
     return None
 
