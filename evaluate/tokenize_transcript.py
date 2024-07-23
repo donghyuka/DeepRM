@@ -657,8 +657,6 @@ def main():
             for read_id in id_list:
                 signal_path_dict[read_id] = signal_path.split('/')[-1]
         signal_path_arr = list(index_dict.keys())
-        del index_dict
-        gc.collect()
 
     else:
         printmessage("Signal data already exists. Skipping extraction.", msg_type="info")
@@ -671,6 +669,10 @@ def main():
                 signal_path_dict[read_id] = signal_path.split('/')[-1]
         signal_path_arr = list(index_dict.keys())
 
+
+    del index_dict
+    gc.collect()
+
     if os.path.exists(f"{intermediate_path}/move_df_split") and len(glob.glob(f"{intermediate_path}/move_df_split/*.pkl")) > 0:
         printmessage("Move data already exists. Skipping extraction.", msg_type="info")
 
@@ -679,7 +681,7 @@ def main():
         extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
 
 
-    del signal_path_dict, index_dict
+    del signal_path_dict
     gc.collect()
 
     label_df = pd.read_csv(args.label, sep='\t')
