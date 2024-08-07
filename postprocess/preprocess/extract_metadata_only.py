@@ -428,6 +428,7 @@ def main():
 
     ## Read label and BAM files.
     label_df = pd.read_csv(args.label, sep='\t')
+    label_df = label_df.groupby("nmid")
     bam_df = parse_bam(args.bam, args.cpu, args.qcut)
     bam_df = np.array_split(bam_df, args.cpu)
 
