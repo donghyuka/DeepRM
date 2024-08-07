@@ -3,10 +3,10 @@ import os
 import argparse
 
 
-## This script is used for data transfer between two servers.
+## This script is used for data transfer between two Linux servers.
 ## ssh, pigz, and tar should be installed on both servers.
 ## pv should be installed on the source server.
-## This script is considerably faster than rsync or scp.
+## This script is considerably faster than rsync or scp when transferring large number of small files.
 
 
 def parse_args():
