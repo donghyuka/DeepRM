@@ -45,7 +45,6 @@ def main(config_path = "config.toml"):
     dest_ip = config_toml["ssh"]["destination"]
     dest_user = config_toml["ssh"]["user"]
     dest_port = config_toml["ssh"]["port"]
-    dest_node = config_toml["ssh"]["node"]
     local_comp_thr = config_toml["compression"]["local_thread"]
     remote_comp_thr = config_toml["compression"]["remote_thread"]
     comp_level = config_toml["compression"]["comp_level"]

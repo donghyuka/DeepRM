@@ -29,7 +29,8 @@ class TransformerModel(nn.Module):
         self.model_type = 'Transformer'
         encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout, activation = t_act,
                                                    batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
+        self.transformer_encoder_1 = nn.TransformerEncoder(encoder_layer, n_layers)
+        self.transformer_encoder_2 = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
         self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
@@ -52,12 +53,17 @@ class TransformerModel(nn.Module):
 
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
+
         with torch.no_grad():
             src_signal = self.interp1d(torch.arange(src_signal.shape[1], device=src_signal.device).unsqueeze(0).repeat(src_signal.shape[0],1), src_signal, (src_seg_len / self.unit_size).repeat_interleave(self.unit_size * self.signal_stride, dim=1).cumsum(dim=1)).unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
             src_kmer = src_kmer.repeat_interleave(self.unit_size, dim=1)[:,self.kmer_size//2:-(self.kmer_size//2)]
 
-        output = torch.stack([self.kmer_embedding(src_kmer), self.signal_embedding(src_signal), self.pos_encoding(src_kmer.size(0))], dim = 0).sum(dim = 0)
-        output = self.transformer_encoder(src=output, mask = None, src_key_padding_mask = None)
+        pe =  self.pos_encoding(src_kmer.size(0))
+
+        output = self.signal_embedding(src_signal) + pe
+        output = self.transformer_encoder_1(src=output, mask = None, src_key_padding_mask = None)
+        output = output + self.kmer_embedding(src_kmer) + pe
+        output = self.transformer_encoder_2(src=output, mask = None, src_key_padding_mask = None)
         output = self.regression_head(output)
 
         return output

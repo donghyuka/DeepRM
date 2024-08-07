@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_aug_v2 import load_dataset, NanoporeDataLoader
+from train.dataloader_mfe import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -14,7 +14,7 @@ from utils.utils import printmessage
 import importlib
 from utils import augmentations_dev as aug
 from functools import partial
-from utils.interp1d import interp1d
+
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
@@ -70,6 +70,8 @@ def parse_args():
     parser.add_argument("--prefetch", type=int, default=512)
     parser.add_argument("--aug", dest="aug_fraction", type=float, default=0.1)
     parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
+    parser.add_argument("--no_bq", action="store_true", default=False)
+    parser.add_argument("--no_freeze", action="store_true", default=False)
 
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
@@ -121,6 +123,7 @@ class Trainer:
             cut_overlap: bool = False,
             signal_stride: int = 6,
             aug_fraction: float = 0.1,
+            no_bq: bool = False,
     ) -> None:
 
         self.rank = rank
@@ -164,8 +167,8 @@ class Trainer:
         self.cut_overlap = cut_overlap
         self.signal_stride = signal_stride
         self.aug_fraction = aug_fraction
-        self.aug_list = self._get_aug_list()
         self.histogram = False
+        self.no_bq = no_bq
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
         else:
@@ -174,43 +177,6 @@ class Trainer:
         self.eval_sources, self.eval_targets = self._cache_eval_data()
 
         ## END of __init__
-
-
-    def _get_aug_list(self):
-        fraction = self.aug_fraction
-        ## MOVING AVERAGE MAGNITUDE WARP
-        movmag = partial(aug.moving_magnitude_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
-        ## WINDOWED TIME WARP
-        winwarp = partial(aug.window_warp, fraction=0.5, min_window_ratio = 0.05, max_window_ratio = 0.10,
-                          min_window_count = 5, max_window_count = 20, sigma = 0.4)
-        ## TIME WARP
-        timewarp = partial(aug.time_warp, fraction=0.5, min_sigma=0.2, max_sigma=0.5, n_knots = 30)
-        ## GAUSSIAN JITTER
-        jitter = partial(aug.jitter, fraction=fraction, min_sigma=0.15, max_sigma=0.3)
-        ## SPIKE NOISE
-        spike = partial(aug.jitter, fraction=fraction, min_sigma=0.3, max_sigma=1.0, dropout = 0.95)
-        ## STEP NOISE
-        step = partial(aug.step, fraction=fraction, min_sigma=0.15, max_sigma=0.3, dropout = 0.95)
-        ## SLOPE NOISE
-        slope = partial(aug.slope, fraction=fraction, magnitude = 0.5,)
-        ## DRIFT NOISE
-        drift = partial(aug.drift, fraction=fraction, min_sigma=0.15, max_sigma=0.3, n_knots = 10)
-        aug_list = [movmag, winwarp, timewarp, jitter, spike, step, drift, slope]
-        return aug_list
-
-    def _augment_signal(self, signal, pad_mask, seg_len, shuffle_order = True):
-
-        with torch.no_grad():
-            if shuffle_order:
-                aug_list = np.random.permutation(self.aug_list)
-            else:
-                aug_list = self.aug_list
-
-            for i, aug_func in enumerate(aug_list):
-                signal, pad_mask, seg_len = aug_func(signal, pad_mask=pad_mask, seg_len=seg_len)
-
-
-        return signal, pad_mask, seg_len
 
 
     def _cache_eval_data(self):
@@ -224,13 +190,18 @@ class Trainer:
 
 
     def _feed_model(self, source, target):
+        target = target.to(torch.float32).to(self.gpu_id)
         src_kmer = source["kmer_token"].to(self.gpu_id)
         src_signal = source["signal_token"].to(self.gpu_id)
         src_seg_len = source["segment_len"].to(self.gpu_id)
-        target = target.to(torch.float32).to(self.gpu_id)
+        src_mfe = source["mfe"].to(self.gpu_id)
 
-        output = self.model(src_kmer, src_signal, src_seg_len)
-        # output = self.model(src_kmer, src_signal)
+        if not self.no_bq:
+            src_bq = source["bq_token"].to(self.gpu_id)
+            output = self.model(src_kmer, src_signal, src_seg_len, src_bq, src_mfe)
+
+        else:
+            output = self.model(src_kmer, src_signal, src_seg_len, src_mfe)
 
         return output, target
 
@@ -448,21 +419,19 @@ def main_worker(rank, args_dict):
 
     if args_dict["load_checkpoint"] is not None:
         save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'})
-        model.load_state_dict(state_dict=save_dict["model_state_dict"])
+        ## Only load weights with matching size
+        for name, parameter in model.named_parameters():
+            if name in save_dict["model_state_dict"]:
+                if parameter.size() == save_dict["model_state_dict"][name].size():
+                    parameter.data = save_dict["model_state_dict"][name]
+        if not args_dict["no_freeze"] :
+            model.freeze_and_reinit()
     else:
         save_dict = {}
-
 
     model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
-
-    if args_dict["load_checkpoint"] is not None:
-        optimizer.load_state_dict(save_dict["optimizer_state_dict"])
-        # ## overwrite lr and weight_decay
-        # for param_group in optimizer.param_groups:
-        #     param_group['lr'] = args_dict["lr"]
-        #     param_group['weight_decay'] = args_dict["weight_decay"]
 
 
     if args_dict["rlrop"] is not None:
@@ -471,11 +440,6 @@ def main_worker(rank, args_dict):
                                                                min_lr = 1e-6, eps = 1e-8)
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
-
-    if args_dict["load_checkpoint"] is not None:
-        scheduler.load_state_dict(save_dict["scheduler_state_dict"])
-        save_dict.clear()
-
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
@@ -503,7 +467,7 @@ def main_worker(rank, args_dict):
                       args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
                       args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
                       soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"],
-                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"])
+                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"], no_bq = args_dict["no_bq"])
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {gpu_id}] Training Loop Complete.")

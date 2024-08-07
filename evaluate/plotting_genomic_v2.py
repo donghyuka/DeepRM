@@ -54,25 +54,17 @@ def plot_roc(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize = (20,20))
 
-    fpr, tpr, _ = roc_curve(data_df["label"], data_df["pm6a"])
-    roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'AIRNA (v0.4) (AUC = {roc_auc:.3f})', color = "royalblue", zorder = 3)
-
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pm6a_070"])
     roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'AIRNA (v0.7) (AUC = {roc_auc:.3f})', color = "teal", zorder = 3)
-
-    fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_dorado"])
-    roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'Dorado (v0.4) (AUC = {roc_auc:.3f})', color = "tomato", zorder = 3)
-
-    fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_dorado_070"])
-    roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'Dorado (v0.7) (AUC = {roc_auc:.3f})', color = "darkorange", zorder = 3)
+    ax.plot(fpr, tpr, lw=3, label=f'AIRNA (AUC = {roc_auc:.3f})', color = "royalblue", zorder = 3)
 
     fpr, tpr, _ = roc_curve(data_df["label"], data_df["pm6a_m6anet"])
     roc_auc = auc(fpr, tpr)
-    ax.plot(fpr, tpr, lw=3, label=f'm6Anet (AUC = {roc_auc:.3f})', color = "goldenrod", zorder = 3)
+    ax.plot(fpr, tpr, lw=3, label=f'm6Anet (AUC = {roc_auc:.3f})', color = "tomato", zorder = 3)
+
+    fpr, tpr, _ = roc_curve(data_df["label"], data_df["pred_dorado_070"])
+    roc_auc = auc(fpr, tpr)
+    ax.plot(fpr, tpr, lw=3, label=f'Dorado (AUC = {roc_auc:.3f})', color = "forestgreen", zorder = 3)
 
     ax.plot([0, 1], [0, 1], color='grey', lw=2, linestyle='--')
 
@@ -94,30 +86,21 @@ def plot_pr(data_df, outdir, modelname ,comment=""):
     fig, ax = plt.subplots(figsize = (20,20))
     ax.plot([0, 1], [pr_baseline_level, pr_baseline_level], color='grey', lw=2, linestyle='--')
 
-    precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pm6a"])
-    pr_auc = auc(recall, precision)
-    # max_f1 = max_f1_score(data_df["label"], data_df["pm6a"])
-    ax.plot(recall, precision, lw=3, label=f'AIRNA (v0.4) (AUC = {pr_auc:.3f})', color = "royalblue", zorder = 3)
-
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pm6a_070"])
     pr_auc = auc(recall, precision)
     # max_f1 = max_f1_score(data_df["label"], data_df["pm6a_070"])
-    ax.plot(recall, precision, lw=3, label=f'AIRNA (v0.7) (AUC = {pr_auc:.3f})', color = "teal", zorder = 3)
-
-    precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_dorado"])
-    pr_auc = auc(recall, precision)
-    # max_f1 = max_f1_score(data_df["label"], data_df["pred_dorado"])
-    ax.plot(recall, precision, lw=3, label=f'Dorado (v0.4) (AUC = {pr_auc:.3f})', color = "tomato", zorder = 3)
-
-    precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_dorado_070"])
-    pr_auc = auc(recall, precision)
-    # max_f1 = max_f1_score(data_df["label"], data_df["pred_dorado_070"])
-    ax.plot(recall, precision, lw=3, label=f'Dorado (v0.7) (AUC = {pr_auc:.3f})', color = "darkorange", zorder = 3)
+    ax.plot(recall, precision, lw=3, label=f'AIRNA (AUC = {pr_auc:.3f})', color = "royalblue", zorder = 3)
 
     precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pm6a_m6anet"])
     pr_auc = auc(recall, precision)
     # max_f1 = max_f1_score(data_df["label"], data_df["pm6a_m6anet"])
-    ax.plot(recall, precision, lw=3, label=f'm6Anet (AUC = {pr_auc:.3f})', color = "goldenrod", zorder = 3)
+    ax.plot(recall, precision, lw=3, label=f'm6Anet (AUC = {pr_auc:.3f})', color = "tomato", zorder = 3)
+
+    precision, recall, _ = precision_recall_curve(data_df["label"], data_df["pred_dorado_070"])
+    pr_auc = auc(recall, precision)
+    # max_f1 = max_f1_score(data_df["label"], data_df["pred_dorado_070"])
+    ax.plot(recall, precision, lw=3, label=f'Dorado (AUC = {pr_auc:.3f})', color = "forestgreen", zorder = 3)
+
 
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.0])
@@ -132,72 +115,47 @@ def plot_pr(data_df, outdir, modelname ,comment=""):
 
 def plot_scatter(data_df, outdir, modelname, comment=""):
     plt.rcParams.update({'font.size': 24})
-    fig, axes = plt.subplots(1,5, figsize = (100,20))
+    fig, axes = plt.subplots(1,3, figsize = (60,20))
 
     data_df = data_df[data_df["dom_label"] > 0]
 
     ax = axes[0]
-    ax.scatter(data_df["dom_label"], data_df["dom"], s = 10, alpha = 0.5, color = "royalblue")
-    r2 = r2_score(data_df["dom_label"], data_df["dom"])
-    rho2 = spearmanr(data_df["dom_label"], data_df["dom"])[0] ** 2
-    ax.set_title(f"AIRNA (v0.4), R2 = {r2:.3f}, rho2 = {rho2:.3f}")
-    ## polyfit
-    z = np.polyfit(data_df["dom_label"], data_df["dom"], 1)
-    p = np.poly1d(z)
-    x = np.linspace(0, 1, 100)
-    ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
-
-    ax = axes[1]
-    ax.scatter(data_df["dom_label"], data_df["dom_070"], s = 10, alpha = 0.5, color = "teal")
+    ax.scatter(data_df["dom_label"], data_df["dom_070"], s = 10, alpha = 0.5, color = "royalblue")
     r2 = r2_score(data_df["dom_label"], data_df["dom_070"])
     rho2 = spearmanr(data_df["dom_label"], data_df["dom_070"])[0] ** 2
-    ax.set_title(f"AIRNA (v0.7), R2 = {r2:.3f}, rho2 = {rho2:.3f}")
+    ax.set_title(f"AIRNA, R2 = {r2:.3f}, rho2 = {rho2:.3f}")
     ## polyfit
     z = np.polyfit(data_df["dom_label"], data_df["dom_070"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
     ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
 
-    ax = axes[2]
-    ax.scatter(data_df["dom_label"], data_df["pred_dorado"], s = 10, alpha = 0.5, color = "tomato")
-    r2c = r2_score(data_df["dom_label"], data_df["pred_dorado"])
-    rho2c = spearmanr(data_df["dom_label"], data_df["pred_dorado"])[0] ** 2
-    ax.set_title(f"Dorado (v0.4), R2 = {r2c:.3f}, rho2 = {rho2c:.3f}")
-    z = np.polyfit(data_df["dom_label"], data_df["pred_dorado"], 1)
+    ax = axes[1]
+    ax.scatter(data_df["dom_label"], data_df["dom_m6anet"], s = 10, alpha = 0.5, color = "tomato")
+    r2 = r2_score(data_df["dom_label"], data_df["dom_m6anet"])
+    rho2 = spearmanr(data_df["dom_label"], data_df["dom_m6anet"])[0] ** 2
+    ax.set_title(f"m6Anet, R2 = {r2:.3f}, rho2 = {rho2:.3f}")
+    ## polyfit
+    z = np.polyfit(data_df["dom_label"], data_df["dom_m6anet"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
     ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
 
-    ax = axes[3]
-    ax.scatter(data_df["dom_label"], data_df["pred_dorado_070"], s = 10, alpha = 0.5, color = "darkorange")
+    ax = axes[2]
+    ax.scatter(data_df["dom_label"], data_df["pred_dorado_070"], s = 10, alpha = 0.5, color = "forestgreen")
     r2d = r2_score(data_df["dom_label"], data_df["pred_dorado_070"])
     rho2d = spearmanr(data_df["dom_label"], data_df["pred_dorado_070"])[0] ** 2
-    ax.set_title(f"Dorado (v0.7), R2 = {r2d:.3f}, rho2 = {rho2d:.3f}")
+    ax.set_title(f"Dorado, R2 = {r2d:.3f}, rho2 = {rho2d:.3f}")
     z = np.polyfit(data_df["dom_label"], data_df["pred_dorado_070"], 1)
     p = np.poly1d(z)
     x = np.linspace(0, 1, 100)
     ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
-
-    ax = axes[4]
-    ax.scatter(data_df["dom"], data_df["dom_070"], s = 10, alpha = 0.5, color = "goldenrod")
-    r2 = r2_score(data_df["dom"], data_df["dom_070"])
-    rho2 = spearmanr(data_df["dom"], data_df["dom_070"])[0] ** 2
-    ax.set_title(f"AIRNA v0.4 vs. v0.7, R2 = {r2:.3f}, rho2 = {rho2:.3f}")
-    z = np.polyfit(data_df["dom"], data_df["dom_070"], 1)
-    p = np.poly1d(z)
-    x = np.linspace(0, 1, 100)
-    ax.plot(x, p(x), color = "grey", linestyle = "--", lw = 3)
-
 
     for ax in axes:
         ax.set_xlim([0.0, 1.0])
         ax.set_ylim([0.0, 1.0])
         ax.set_xlabel('GLORI DoM')
         ax.set_ylabel('Predicted DoM')
-
-    ax = axes[4]
-    ax.set_xlabel('DoM AIRNA (v0.4)')
-    ax.set_ylabel('DoM AIRNA (v0.7)')
 
 
     fig.suptitle(f"{modelname}")
@@ -287,42 +245,45 @@ def main():
     # label_df = process_label(args.label)
     # label_df.to_pickle(args.label.replace(".tsv", ".pkl"))
 
-    label_df = pd.read_pickle(args.label)
-    printmessage(f"Label count                  : {len(label_df):,}")
-    dorado_pred = pd.read_pickle(args.dorado1)
-    dorado_pred = dorado_pred[["dom", "count_dom"]].copy()
-    dorado_pred.rename(columns = {"dom": "pred_dorado", "count_dom": "count_dorado"}, inplace = True)
-    printmessage(f"Dorado v0.4 prediction count : {len(dorado_pred):,}")
-    dorado_pred2 = pd.read_pickle(args.dorado2)
-    dorado_pred2 = dorado_pred2[["dom", "count_dom"]].copy()
-    dorado_pred2.rename(columns = {"dom": "pred_dorado_070", "count_dom": "count_dorado_070"}, inplace = True)
-    printmessage(f"Dorado v0.7 prediction count : {len(dorado_pred2):,}")
-    m6anet_pred = pd.read_pickle(args.m6anet)
-    m6anet_pred = m6anet_pred[["dom", "count_dom","pm6a"]].copy()
-    m6anet_pred.rename(columns = {"dom": "dom_m6anet", "count_dom": "count_m6anet", "pm6a": "pm6a_m6anet"}, inplace = True)
-    printmessage(f"m6Anet v0.4 prediction count : {len(m6anet_pred):,}")
-    data_df_1 = pd.read_pickle(args.input1)
-    data_df_1 = data_df_1[["pm6a", "dom", "count_pm6a", "count_dom"]].copy()
-    printmessage(f"AIRNA v0.4 prediction count  : {len(data_df_1):,}")
-    data_df_2 = pd.read_pickle(args.input2)
-    data_df_2 = data_df_2[["pm6a", "dom", "count_pm6a", "count_dom"]].copy()
-    data_df_2.rename(columns = {"pm6a": "pm6a_070", "dom": "dom_070", "count_pm6a": "count_pm6a_070", "count_dom": "count_dom_070"}, inplace = True)
-    printmessage(f"AIRNA v0.7 prediction count  : {len(data_df_2):,}")
+    if not os.path.exists(f"{outdir}/inference_{modelname}.pkl"):
+        label_df = pd.read_pickle(args.label)
+        printmessage(f"Label count                  : {len(label_df):,}")
+        dorado_pred = pd.read_pickle(args.dorado1)
+        dorado_pred = dorado_pred[["dom", "count_dom"]].copy()
+        dorado_pred.rename(columns = {"dom": "pred_dorado", "count_dom": "count_dorado"}, inplace = True)
+        printmessage(f"Dorado v0.4 prediction count : {len(dorado_pred):,}")
+        dorado_pred2 = pd.read_pickle(args.dorado2)
+        dorado_pred2 = dorado_pred2[["dom", "count_dom"]].copy()
+        dorado_pred2.rename(columns = {"dom": "pred_dorado_070", "count_dom": "count_dorado_070"}, inplace = True)
+        printmessage(f"Dorado v0.7 prediction count : {len(dorado_pred2):,}")
+        m6anet_pred = pd.read_pickle(args.m6anet)
+        m6anet_pred = m6anet_pred[["dom", "count_dom","pm6a"]].copy()
+        m6anet_pred.rename(columns = {"dom": "dom_m6anet", "count_dom": "count_m6anet", "pm6a": "pm6a_m6anet"}, inplace = True)
+        printmessage(f"m6Anet v0.4 prediction count : {len(m6anet_pred):,}")
+        data_df_1 = pd.read_pickle(args.input1)
+        data_df_1 = data_df_1[["pm6a", "dom", "count_pm6a", "count_dom"]].copy()
+        printmessage(f"AIRNA v0.4 prediction count  : {len(data_df_1):,}")
+        data_df_2 = pd.read_pickle(args.input2)
+        data_df_2 = data_df_2[["pm6a", "dom", "count_pm6a", "count_dom"]].copy()
+        data_df_2.rename(columns = {"pm6a": "pm6a_070", "dom": "dom_070", "count_pm6a": "count_pm6a_070", "count_dom": "count_dom_070"}, inplace = True)
+        printmessage(f"AIRNA v0.7 prediction count  : {len(data_df_2):,}")
 
 
-    data_df = pd.concat([data_df_1, data_df_2, dorado_pred, dorado_pred2, m6anet_pred], axis = 1)
-    data_df = data_df.join(label_df, how = "right")
-    data_df.fillna(0, inplace = True)
-    print(data_df)
-    del data_df_1, data_df_2, dorado_pred, dorado_pred2, m6anet_pred, label_df
-    gc.collect()
-    printmessage("Data merged")
+        data_df = pd.concat([data_df_1, data_df_2, dorado_pred, dorado_pred2, m6anet_pred], axis = 1)
+        data_df = data_df.join(label_df, how = "right")
+        data_df.dropna(inplace = True)
+        print(data_df)
+        del data_df_1, data_df_2, dorado_pred, dorado_pred2, m6anet_pred, label_df
+        gc.collect()
+        printmessage("Data merged")
 
-    os.makedirs(outdir, exist_ok = True)
-    data_df.to_pickle(f"{outdir}/inference_{modelname}.pkl")
-    printmessage(f"Data saved to {outdir}")
+        os.makedirs(outdir, exist_ok = True)
+        data_df.to_pickle(f"{outdir}/inference_{modelname}.pkl")
+        printmessage(f"Data saved to {outdir}")
 
-    data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
+    else:
+        data_df = pd.read_pickle(f"{outdir}/inference_{modelname}.pkl")
+
     #
     # data_df_selected = data_df[data_df["count_pm6a"] >= 20].copy()
     # comment = "_043_depth_20"

@@ -20,9 +20,10 @@ class TransformerModel(nn.Module):
         super().__init__()
 
         ## Embedding Initialization
-        self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
+        self.kmer_embedding = nn.Embedding(4**kmer_size, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
-        self.pos_encoding = PositionalEncoding(d_model, seq_len)
+        self.pos_encoding_1 = PositionalEncoding(d_model, seq_len)
+        self.pos_encoding_2 = PositionalEncoding(d_model, block_len)
 
         ## Encoder Initialization
         self.d_model = d_model
@@ -30,9 +31,12 @@ class TransformerModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout, activation = t_act,
                                                    batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
+        decoder_layer = nn.TransformerDecoderLayer(d_model, n_heads, d_ff, dropout = 0, activation = t_act,
+                                                   batch_first=True)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, n_layers)
 
         ## Regression Head Initialization
-        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
+        self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, block_len)
 
         ## Weight Initialization
         self.init_weights()
@@ -42,22 +46,26 @@ class TransformerModel(nn.Module):
         self.unit_size = int((seq_len + kmer_size - 1) / block_len)
         self.target_start_idx = (block_len // 2) * self.unit_size - (kmer_size // 2)
         self.target_end_idx = self.target_start_idx + self.unit_size
+        self.seq_len = seq_len
 
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
         self.regression_head.init_weights(initrange)
-        self.pos_encoding.pe.data.uniform_(-initrange, initrange)
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
         return None
 
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
-        with torch.no_grad():
-            src_signal = self.interp1d(torch.arange(src_signal.shape[1], device=src_signal.device).unsqueeze(0).repeat(src_signal.shape[0],1), src_signal, (src_seg_len / self.unit_size).repeat_interleave(self.unit_size * self.signal_stride, dim=1).cumsum(dim=1)).unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
-            src_kmer = src_kmer.repeat_interleave(self.unit_size, dim=1)[:,self.kmer_size//2:-(self.kmer_size//2)]
 
-        output = torch.stack([self.kmer_embedding(src_kmer), self.signal_embedding(src_signal), self.pos_encoding(src_kmer.size(0))], dim = 0).sum(dim = 0)
-        output = self.transformer_encoder(src=output, mask = None, src_key_padding_mask = None)
+        with torch.no_grad():
+            src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
+            src_pad_mask = torch.arange(self.seq_len, device=src_signal.device).repeat(src_signal.size(0), 1) >= src_seg_len.sum(dim=1, keepdim=True)
+            src_kmer = (((src_kmer - 65).clip(None,8)%5).unfold(1, self.kmer_size, 1) * (4**torch.arange(self.kmer_size, device = src_kmer.device, dtype = torch.int)).unsqueeze(0).unsqueeze(0)).sum(dim = -1)
+
+        output = self.signal_embedding(src_signal) + self.pos_encoding_1(src_signal.size(0))
+        output = self.transformer_encoder(output, mask = None, src_key_padding_mask = src_pad_mask)
+        output = self.transformer_decoder(tgt=self.kmer_embedding(src_kmer) + self.pos_encoding_2(src_kmer.size(0)), memory=output, tgt_mask = None, memory_mask = None,
+                                          tgt_key_padding_mask = None, memory_key_padding_mask = src_pad_mask)
         output = self.regression_head(output)
 
         return output

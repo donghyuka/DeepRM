@@ -1,7 +1,9 @@
+import gc
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_aug_v2 import load_dataset, NanoporeDataLoader
+from train.dataloader_v7 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -70,6 +72,8 @@ def parse_args():
     parser.add_argument("--prefetch", type=int, default=512)
     parser.add_argument("--aug", dest="aug_fraction", type=float, default=0.1)
     parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
+    parser.add_argument("--no_bq", action="store_true", default=False)
+    parser.add_argument("--load_weight_only", action="store_true", default=False)
 
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
@@ -121,6 +125,7 @@ class Trainer:
             cut_overlap: bool = False,
             signal_stride: int = 6,
             aug_fraction: float = 0.1,
+            no_bq: bool = False,
     ) -> None:
 
         self.rank = rank
@@ -166,6 +171,7 @@ class Trainer:
         self.aug_fraction = aug_fraction
         self.aug_list = self._get_aug_list()
         self.histogram = False
+        self.no_bq = no_bq
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
         else:
@@ -224,13 +230,17 @@ class Trainer:
 
 
     def _feed_model(self, source, target):
+        target = target.to(torch.float32).to(self.gpu_id)
         src_kmer = source["kmer_token"].to(self.gpu_id)
         src_signal = source["signal_token"].to(self.gpu_id)
         src_seg_len = source["segment_len"].to(self.gpu_id)
-        target = target.to(torch.float32).to(self.gpu_id)
 
-        output = self.model(src_kmer, src_signal, src_seg_len)
-        # output = self.model(src_kmer, src_signal)
+        if not self.no_bq:
+            src_bq = source["bq_token"].to(self.gpu_id)
+            output = self.model(src_kmer, src_signal, src_seg_len, src_bq)
+
+        else:
+            output = self.model(src_kmer, src_signal, src_seg_len)
 
         return output, target
 
@@ -306,6 +316,8 @@ class Trainer:
 
                 self.current_batch += 1
                 self.current_step += 1
+
+        gc.collect()
 
         return None
 
@@ -458,11 +470,8 @@ def main_worker(rank, args_dict):
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
     if args_dict["load_checkpoint"] is not None:
-        optimizer.load_state_dict(save_dict["optimizer_state_dict"])
-        # ## overwrite lr and weight_decay
-        # for param_group in optimizer.param_groups:
-        #     param_group['lr'] = args_dict["lr"]
-        #     param_group['weight_decay'] = args_dict["weight_decay"]
+        if not args_dict["load_weight_only"]:
+            optimizer.load_state_dict(save_dict["optimizer_state_dict"])
 
 
     if args_dict["rlrop"] is not None:
@@ -473,9 +482,13 @@ def main_worker(rank, args_dict):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
     if args_dict["load_checkpoint"] is not None:
-        scheduler.load_state_dict(save_dict["scheduler_state_dict"])
-        save_dict.clear()
+        if not args_dict["load_weight_only"]:
+            scheduler.load_state_dict(save_dict["scheduler_state_dict"])
 
+    if args_dict["load_checkpoint"] is not None:
+        save_dict.clear()
+        del save_dict
+        gc.collect()
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
@@ -503,7 +516,7 @@ def main_worker(rank, args_dict):
                       args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
                       args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
                       soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"],
-                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"])
+                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"], no_bq = args_dict["no_bq"])
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {gpu_id}] Training Loop Complete.")

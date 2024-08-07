@@ -147,8 +147,8 @@ def main():
 
     print(gene_df)
 
-    gene_df.to_pickle(args.output + "/gene_df_final.pkl")
-    gene_df.to_csv(args.output + "/gene_df_final.tsv", sep="\t", index=False)
+    gene_df.to_csv(args.output, sep="\t", index=False)
+    gene_df.to_pickle(args.output.replace("tsv", "pkl"))
     gc.collect()
 
     return None

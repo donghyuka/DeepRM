@@ -11,11 +11,11 @@ from utils.utils import parse_refflat
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--cpu", "-c", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
+    args.add_argument("--cpu", "-c", type=int, default=int(os.cpu_count()*0.95), help="Number of CPUs")
     args.add_argument("--input", "-i", type=str, required=True, help="Data path")
     args.add_argument("--output", "-o", type=str, required=True, help="Output path")
     args = args.parse_args()
-    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
     return args
 
 

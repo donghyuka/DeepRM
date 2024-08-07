@@ -47,7 +47,8 @@ class TransformerModel(nn.Module):
         return None
 
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor, target_mask: Tensor) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_pad_mask: Tensor, src_target_mask: Tensor,
+                src_bq=None, src_move=None) -> Tensor:
 
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
@@ -61,8 +62,8 @@ class TransformerModel(nn.Module):
         output = self.regression_head(output)
         output = output.squeeze(-1)
 
-        target_mask_sum = target_mask.sum(dim = 1)
-        output = output * target_mask
+        target_mask_sum = src_target_mask.sum(dim = 1)
+        output = output * src_target_mask
         output = output.sum(dim = 1)
         output = output / target_mask_sum
 
