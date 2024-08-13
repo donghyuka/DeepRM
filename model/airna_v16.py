@@ -32,7 +32,7 @@ class TransformerModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout, activation = t_act,
                                                    batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
-        decoder_layer = nn.TransformerDecoderLayer(d_model, n_heads, d_ff, dropout = 0, activation = t_act,
+        decoder_layer = nn.TransformerDecoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout, activation = t_act,
                                                    batch_first=True)
         self.transformer_decoder_1 = nn.TransformerDecoder(decoder_layer, n_layers)
         self.transformer_decoder_2 = nn.TransformerDecoder(decoder_layer, n_layers)

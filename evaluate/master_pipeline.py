@@ -246,15 +246,16 @@ def main():
         cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n normalise -x drach"
         printmessage(cmd)
         os.system(cmd)
-        cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n standardise -x drach"
-        printmessage(cmd)
-        os.system(cmd)
-        cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n normalise -x all"
-        printmessage(cmd)
-        os.system(cmd)
-        cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n standardise -x all"
-        printmessage(cmd)
-        os.system(cmd)
+
+        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n standardise -x drach"
+        # printmessage(cmd)
+        # os.system(cmd)
+        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n normalise -x all"
+        # printmessage(cmd)
+        # os.system(cmd)
+        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n standardise -x all"
+        # printmessage(cmd)
+        # os.system(cmd)
 
     return None
 

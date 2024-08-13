@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=50)
     parser.add_argument("--es_start", type=int, default=1000)
-    parser.add_argument("--disk_shard_size", type=int, default=4000)
+    parser.add_argument("--disk_shard_size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--enc_dim", type=int, default=512)
     parser.add_argument("--lin_dim", type=int, default=1024)

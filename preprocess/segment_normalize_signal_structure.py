@@ -326,7 +326,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
             continue
 
         out_path = f"{seg_df_path}/token_structure/{file_id}"
-        if os.path.exists(out_path):
+        if os.path.exists(f"{out_path.replace('.pkl','')}-3.pkl"):
             continue
 
         signal_df = pd.read_pickle(signal_path)
@@ -421,21 +421,24 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
+    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
-    parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe path")
+    parser.add_argument("--block", "-k", type=str, default=None, help="Block dataframe path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files")
     parser.add_argument("--skip_intermediate", "-sk", action="store_true", help="Skip intermediate files")
+    parser.add_argument("--reset_path", "-rp", action="store_true", help="Reset path stored in index")
     args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    if args.pod5 is not None:
+        if not os.path.exists(args.pod5):
+            raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+    if args.block is not None:
+        if not os.path.exists(args.bam):
+            raise FileNotFoundError(f"BAM file {args.bam} does not exist")
     # if os.path.exists(args.output):
     #     raise FileExistsError(f"Output directory {args.output} already exists")
     return args
@@ -535,6 +538,16 @@ def main():
 
     with open(signal_index_path, "rb") as infile:
         index_dict = pickle.load(infile)
+
+    if args.reset_path:
+        prefix = signal_raw_path
+        index_dict_new = {}
+        for key, value in index_dict.items():
+            key_new = os.path.basename(key)
+            key_new = os.path.join(prefix, key_new)
+            index_dict_new[key_new] = value
+        index_dict = index_dict_new
+
     signal_path_arr = list(index_dict.keys())
 
     if not args.skip_intermediate:

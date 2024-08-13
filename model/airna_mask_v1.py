@@ -1,5 +1,3 @@
-
-## AIRNA_V18: From AIRNA_V3B. Added BPP Feature.
 import math
 import os
 from typing import Tuple
@@ -15,7 +13,7 @@ class TransformerModel(nn.Module):
                  n_layers: int, encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40, block_len = 17,
                  seq_len: int = 200, t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1,
-                 sig_emb_depth: int = 6, signal_stride = 6, structure_window = 121) -> None:
+                 sig_emb_depth: int = 6, signal_stride = 6) -> None:
 
         super().__init__()
 
@@ -23,7 +21,6 @@ class TransformerModel(nn.Module):
         self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
         self.signal_embedding = nn.Linear(signal_size, d_model)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
-        self.bpp_embedding = nn.Linear(structure_window, d_model)
 
         ## Encoder Initialization
         self.d_model = d_model
@@ -51,11 +48,10 @@ class TransformerModel(nn.Module):
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
-        self.bpp_embedding.weight.data.uniform_(-initrange, initrange)
         self.regression_head.init_weights(initrange)
         return None
 
-    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor, src_structure: Tensor) -> Tensor:
+    def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
 
         ## Tokenizer
         with torch.no_grad():
@@ -71,12 +67,10 @@ class TransformerModel(nn.Module):
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
         pos_encoding = self.pos_encoding(kmer_embedding)
-        structure_embedding = self.bpp_embedding(src_structure)
 
-        final_embedding = kmer_embedding + structure_embedding
-        final_embedding = torch.cat([final_embedding, torch.zeros(final_embedding.shape[0], 1, final_embedding.shape[2],  device = src_kmer.device, dtype = torch.int)], dim = 1)
-        final_embedding = final_embedding.flatten(end_dim=1).repeat_interleave(src_seg_len_flat,dim=0).reshape(src_seg_len.shape[0], self.seq_len, final_embedding.shape[2])
-        final_embedding = final_embedding + signal_embedding + pos_encoding
+        kmer_embedding = torch.cat([kmer_embedding, torch.zeros(kmer_embedding.shape[0], 1, kmer_embedding.shape[2],  device = kmer_embedding.device, dtype = torch.int)], dim = 1)
+        kmer_embedding = kmer_embedding.flatten(end_dim=1).repeat_interleave(src_seg_len_flat,dim=0).reshape(src_seg_len.shape[0], self.seq_len, kmer_embedding.shape[2])
+        final_embedding = kmer_embedding + signal_embedding + pos_encoding
 
         ## Transformer Encoder
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)

@@ -360,7 +360,7 @@ def pad_collate(batch, pad_to, signal_stride, kmer_size):
     src_seg_len = torch.tensor(np.stack(segment_len_list), dtype=torch.int32)
     src_bq = torch.tensor(np.stack(bq_token_list), dtype=torch.int32)
     src_signal = torch.nn.utils.rnn.pad_sequence(signal_token_list, batch_first=True, padding_value=0)
-    src_structure = torch.tensor(np.stack(structure_token_list), dtype=torch.int32)
+    src_structure = torch.tensor(np.stack(structure_token_list), dtype=torch.float)
 
     if pad_to is not None:
         signal_pad_to = (pad_to+kmer_size-1) * signal_stride

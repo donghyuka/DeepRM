@@ -13,7 +13,7 @@ class TransformerModel(nn.Module):
                  n_layers: int, encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, spectrogram_size: int = 21, max_bq: int = 40, block_len = 17,
                  seq_len: int = 200, t_act : str = 'gelu', lin_act : str = 'relu', lin_depth: int = 1,
-                 sig_emb_depth: int = 6, signal_stride = 6) -> None:
+                 sig_emb_depth: int = 6, signal_stride = 6, return_embedding = False) -> None:
 
         super().__init__()
 
@@ -44,6 +44,7 @@ class TransformerModel(nn.Module):
         self.seq_len = seq_len
         self.max_bq = max_bq
         self.block_len = block_len
+        self.return_embedding = return_embedding
 
     def init_weights(self, initrange = 0.1):
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
@@ -71,15 +72,18 @@ class TransformerModel(nn.Module):
         final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
 
         ## Transformer Encoder
-        output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        encoder_output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## Regression Head
-        output = self.regression_head(output)
+        output = self.regression_head(encoder_output)
         output = output.squeeze(-1)
         output = output * target_mask
         output = output.sum(dim = 1)
         output = output / target_mask.sum(dim = 1)
         output = torch.sigmoid(output)
+
+        if self.return_embedding:
+            output = (output, encoder_output, target_mask)
 
         return output
 

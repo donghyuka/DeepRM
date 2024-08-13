@@ -33,7 +33,7 @@ def parse_args():
     args.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
     args.add_argument("--out", dest="out_path", type=str, required=True, help="Output directory")
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--chk", dest="chunk", type=int, default=1000, help="Chunk size")
+    args.add_argument("--chk", dest="chunk", type=int, default=4000, help="Chunk size")
     args.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
     args = args.parse_args()
 
@@ -69,6 +69,8 @@ def sample_and_save_df(in_path_list, out_path, ncpu, label, chunk,
                        read_once = 100):
 
     in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.pkl")]
+
+
     if shuffle:
         in_file_list = np.random.permutation(in_file_list)
     in_file_list = np.array_split(in_file_list, ncpu)
@@ -135,8 +137,8 @@ def sample_and_save_df_worker(ncpu, pid, in_file_list, out_path, label_str, set_
         gc.collect()
         # orig_df["label"] = label
 
-        # perfect_df = orig_df[orig_df["block_score"] == 1].copy().reset_index(drop=True)
-        # perfect_df.drop("block_score", axis=1, inplace=True)
+        perfect_df = orig_df[orig_df["block_score"] == 1].copy().reset_index(drop=True)
+        perfect_df.drop("block_score", axis=1, inplace=True)
         # orig_df.drop("block_score", axis=1, inplace=True)
 
 
@@ -147,9 +149,9 @@ def sample_and_save_df_worker(ncpu, pid, in_file_list, out_path, label_str, set_
         # save_split_df(ncpu, pid, file_id, semiperfect_df, out_path, label_str, set_split_dict, chunk, score_name,
         #               id_digit, buffer_dict)
 
-        # score_name = "perfect"
-        # save_split_df(ncpu, pid, file_id, perfect_df, out_path, label_str, set_split_dict, chunk, score_name,
-        #               id_digit, buffer_dict)
+        score_name = "perfect"
+        save_split_df(ncpu, pid, file_id, perfect_df, out_path, label_str, set_split_dict, chunk, score_name,
+                      id_digit, buffer_dict)
 
         # score_name = "all"
         # save_split_df(ncpu, pid, file_id, orig_df, out_path, label_str, set_split_dict, chunk, score_name,
@@ -223,12 +225,14 @@ def main():
     os.makedirs(args.out_path, exist_ok=True)
 
     for set_name in ["train", "val"]:
-        for score_name in ["all","perfect"]:
+        # for score_name in ["all","perfect"]:
+        for score_name in ["perfect"]:
             for label in ["pos", "neg"]:
                 os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
 
     if args.pos_path is not None:
         sample_and_save_df(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk)
+
     if args.neg_path is not None:
         sample_and_save_df(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk)
 

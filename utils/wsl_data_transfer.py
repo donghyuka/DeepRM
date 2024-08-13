@@ -4,10 +4,19 @@ try:
     import os
     import configparser
     import traceback
+    import math
+    import subprocess
+
 except ImportError as e:
     print(f"ImportError: {e}")
     input("Press any key to exit.")
     sys.exit(1)
+
+
+def pretty_size(n,pow=0,b=1024,u='B',pre=['']+[p+'i'for p in'KMGTPEZY']):
+    ## https://stackoverflow.com/questions/1094841/get-a-human-readable-version-of-a-file-size
+    pow,n=min(int(math.log(max(n*b**pow,1),b)),len(pre)-1),n*b**pow
+    return "%%.%if %%s%%s"%abs(pow%(-pow-1))%(n/b**float(pow),pre[pow],u)
 
 
 def install_requirements():
@@ -73,8 +82,25 @@ def main(config_path = "config.toml"):
 
     print(f"Source: {source_dir}/{source_subdir}")
 
-    source_disk_size = os.popen(f'du -sh "{source_dir}/{source_subdir}"').read().split("\t")[0]
-    print(f"Size: {source_disk_size}")
+    source_disk_size = os.popen(f'du -sb "{source_dir}/{source_subdir}"').read().split("\t")[0]
+    print(f"Size: {pretty_size(int(source_disk_size))}")
+
+
+    # ## Check if destination already has the source directory
+    # ssh_command = f"ssh {dest_user}@{dest_ip} -J {dest_user}@{jump_ip}:{dest_port} 'cd {dest_dir} ; ls'"
+    # out = subprocess.check_output(ssh_command, shell = True).decode("utf-8")
+    # if source_subdir in out:
+    #     print(f"Destination already has the source directory: {source_subdir}")
+    #     dest_exists_option = input("Select Between: \n[1] Overwrite\n[2] Append\n[3] Abort\n\nInput: ")
+    #     if dest_exists_option == "1":
+    #         ## Remove the directory
+    #         ssh_command = f"ssh {dest_user}@{dest_ip} -J {dest_user}@{jump_ip}:{dest_port} 'cd {dest_dir} ; rm -rf {source_subdir}'"
+    #
+    #     elif dest_exists_option == "2":
+    #         append = False
+    #     else:
+    #         print("Aborting.")
+    #         return None
 
     tar_command = f'tar cf - -C "{source_dir}" "./{source_subdir}"'
     pv_command = f"pv -s {source_disk_size}"
