@@ -64,6 +64,7 @@ class NanoporeDatasetIterator:
         read_start = self.current_index*self.num_files_read_once
         read_end = min(len(self.file_paths), (self.current_index+1)*self.num_files_read_once)
         df = [pd.read_pickle(file_path) for file_path in self.file_paths[read_start:read_end]]
+
         if len(df)> 0:
             df = pd.concat(df)
         else:
@@ -79,7 +80,7 @@ class NanoporeDatasetIterator:
         df["segment_len_arr"] = df["segment_len_arr"].apply(lambda x: x[self.trim:-self.trim])
         df["kmer_token"] = df["motif"].apply(lambda x: np.array(list(x)))
         df["bq_token"] = df["bq"].apply(lambda x: x[self.trim:-self.trim])
-        df = df[["kmer_token", "signal_token", "bq_token", "segment_len_arr","label_id","block_id"]][df["signal_token"].notnull()].copy()
+        df = df[["kmer_token", "signal_token", "segment_len_arr"]][df["signal_token"].notnull()].copy()
 
         self.current_iterator = df.itertuples(index=False)
         return None
@@ -126,11 +127,6 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         self.rank = rank
         self.num_replicas = num_replicas
         self.file_paths = glob.glob(f"{self.data_path}/*.pkl")
-        if len(self.file_paths) == 0:
-            pos_paths = glob.glob(f"{self.data_path}/pos/*.pkl")
-            neg_paths = glob.glob(f"{self.data_path}/neg/*.pkl")
-            self.file_paths = pos_paths + neg_paths
-
         self.epoch = 0
         self.seed = seed
 
@@ -176,19 +172,7 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         self.reinit()
-        worker_info = torch.utils.data.get_worker_info()
-
-        if self.shuffle:
-            file_paths = self._deterministic_shuffle_and_sample(self.file_paths, self.num_shard, self.total_num_shard)
-        else:
-            file_paths = self.file_paths
-
-        if worker_info is None:
-            file_paths = file_paths[self.rank::self.num_replicas]
-        else:
-            id = worker_info.id + self.rank * worker_info.num_workers
-            nw = worker_info.num_workers * self.num_replicas
-            file_paths = file_paths[id::nw]
+        file_paths = self._deterministic_shuffle_and_sample(self.file_paths, self.num_shard, self.total_num_shard)
         return NanoporeDatasetIterator(file_paths, num_files_read_once = self.num_files_read_once,
                                        cb_len=self.cb_len, kmer_size=self.kmer_size, sampling=self.sampling,
                                        sig_window=self.sig_window, shuffle=self.shuffle)
@@ -267,6 +251,8 @@ def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
                 cb_len = 21, kmer_size = 5, signal_stride = 6, sig_window = 5, num_workers = 8, pin_memory = True,
                  drop_last = False, shuffle = True, seed = 0):
 
+
+
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, signal_stride = signal_stride, kmer_size = kmer_size)
     ## Use DataLoader to load the dataset
     dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
@@ -281,29 +267,23 @@ def pad_collate(batch, pad_to, signal_stride, kmer_size):
     ## Collate function for DataLoader
     ## Based on NanoporeDataset
     ## Transform into Batch First
-    ## "kmer_token", "signal_token", "bq_token", "segment_len_arr","label_id","block_id"
+    ## "kmer_token", "signal_token", "segment_len_arr",
 
-    label_id_list = []
-    block_id_list = []
     kmer_token_list = []
     signal_token_list = []
-    bq_token_list = []
     segment_len_list = []
 
 
     for source in batch:
         kmer_token_list.append(source[0])
         signal_token_list.append(source[1])
-        bq_token_list.append(source[2])
-        segment_len_list.append(source[3])
-        label_id_list.append(source[4])
-        block_id_list.append(source[5])
+        segment_len_list.append(source[2])
 
     src_kmer = torch.tensor(np.stack(kmer_token_list).view(np.int32), dtype=torch.int32)
     src_kmer = (src_kmer - 65).clip(None,8)%5 + 1
     src_seg_len = torch.tensor(np.stack(segment_len_list), dtype=torch.int32)
-    src_bq = torch.tensor(np.stack(bq_token_list), dtype=torch.int32)
     src_signal = torch.nn.utils.rnn.pad_sequence(signal_token_list, batch_first=True, padding_value=0)
+
     if pad_to is not None:
         signal_pad_to = (pad_to+kmer_size-1) * signal_stride
         if src_signal.shape[1] < signal_pad_to:
@@ -315,8 +295,5 @@ def pad_collate(batch, pad_to, signal_stride, kmer_size):
     source["kmer_token"] = src_kmer
     source["segment_len"] = src_seg_len
     source["signal_token"] = src_signal
-    source["bq_token"] = src_bq
-    source["label_id"] = label_id_list
-    source["block_id"] = block_id_list
 
     return source

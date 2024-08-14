@@ -254,11 +254,111 @@ def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
     return index_dict
 
 
+#
+# def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
+#     ## Extract mv tag from bam and save to separate file
+#     data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
+#                      "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
+#     valid_count = 0
+#     missing_move = 0
+#     missing_bq = 0
+#     low_bq = 0
+#     missing_signal = 0
+#     unmapped = 0
+#
+#     with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
+#         with tqdm.tqdm(total=input_bam.mapped + input_bam.unmapped, desc="Parsing BAM File") as pbar:
+#             for read in input_bam:
+#                 pbar.update(1)
+#                 pbar.set_postfix({"valid": valid_count, "invalid": missing_move + missing_bq + low_bq + missing_signal + unmapped})
+#                 if read.is_unmapped:
+#                     unmapped += 1
+#                     continue
+#
+#                 if read.has_tag("pi"):
+#                     read_id = str(read.get_tag("pi"))
+#                 else:
+#                     read_id = str(read.query_name)
+#
+#                 try:
+#                     bq = np.array(read.query_qualities, dtype=int)
+#                     if mean_phred(bq) < bq_cutoff:
+#                         low_bq += 1
+#                         continue
+#                 except:
+#                     missing_bq += 1
+#                     continue
+#
+#                 try:
+#                     signal_path = signal_path_dict[read_id]
+#                     data = data_dict[signal_path]
+#                 except:
+#                     missing_signal += 1
+#                     continue
+#
+#                 if read.has_tag("mv"):
+#                     mv = read.get_tag("mv")
+#                 else:
+#                     missing_move += 1
+#                     continue
+#
+#                 if read.has_tag("ts"):
+#                     ts = read.get_tag("ts")
+#                 else:
+#                     ts = 0
+#
+#                 if read.has_tag("ns"):
+#                     ns = read.get_tag("ns")
+#                 else:
+#                     ns = 0
+#
+#                 if read.has_tag("sp"):
+#                     sp = read.get_tag("sp")
+#                 else:
+#                     sp = 0
+#
+#                 if read.has_tag("pt"):
+#                     pt = read.get_tag("pt")
+#                 else:
+#                     pt = 0
+#
+#                 data["mv"].append(mv)
+#                 data["read_id"].append(read_id)
+#                 data["ts"].append(ts)
+#                 data["ns"].append(ns)
+#                 data["sp"].append(sp)
+#                 data["pt"].append(pt)
+#                 data["seq"].append(str(read.query_sequence))
+#                 data["bq"].append(bq)
+#                 data["ref"].append(read.reference_name)
+#                 data["start"].append(read.reference_start)
+#                 data["cigar"].append(read.cigarstring)
+#
+#                 valid_count += 1
+#
+#     printmessage(f"Valid reads: {valid_count}", msg_type="info")
+#     printmessage(f"Low BQ: {low_bq}", msg_type="info")
+#     printmessage(f"Missing BQ (Secondary): {missing_bq}", msg_type="info")
+#     printmessage(f"Missing Signal: {missing_signal}", msg_type="info")
+#     printmessage(f"Missing Move: {missing_move}", msg_type="info")
+#     printmessage(f"Unmapped: {unmapped}", msg_type="info")
+#
+#     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
+#         move_df = pd.DataFrame.from_dict(data, orient="columns")
+#         df_len = len(move_df)
+#         if df_len > 0:
+#             move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path}")
+#         del move_df
+#
+#     del data_dict
+#
+#     gc.collect()
+#     return None
+
 
 def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, intermediate_path):
     ## Extract mv tag from bam and save to separate file
-    data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
-                     "ref": [], "start": [], "cigar": []} for x in signal_path_arr}
+    data_dict = {x: [] for x in signal_path_arr}
     valid_count = 0
     missing_move = 0
     missing_bq = 0
@@ -271,6 +371,7 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
             for read in input_bam:
                 pbar.update(1)
                 pbar.set_postfix({"valid": valid_count, "invalid": missing_move + missing_bq + low_bq + missing_signal + unmapped})
+
                 if read.is_unmapped:
                     unmapped += 1
                     continue
@@ -291,48 +392,15 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
 
                 try:
                     signal_path = signal_path_dict[read_id]
-                    data = data_dict[signal_path]
                 except:
                     missing_signal += 1
                     continue
 
-                if read.has_tag("mv"):
-                    mv = read.get_tag("mv")
-                else:
+                if not read.has_tag("mv"):
                     missing_move += 1
                     continue
 
-                if read.has_tag("ts"):
-                    ts = read.get_tag("ts")
-                else:
-                    ts = 0
-
-                if read.has_tag("ns"):
-                    ns = read.get_tag("ns")
-                else:
-                    ns = 0
-
-                if read.has_tag("sp"):
-                    sp = read.get_tag("sp")
-                else:
-                    sp = 0
-
-                if read.has_tag("pt"):
-                    pt = read.get_tag("pt")
-                else:
-                    pt = 0
-
-                data["mv"].append(mv)
-                data["read_id"].append(read_id)
-                data["ts"].append(ts)
-                data["ns"].append(ns)
-                data["sp"].append(sp)
-                data["pt"].append(pt)
-                data["seq"].append(str(read.query_sequence))
-                data["bq"].append(bq)
-                data["ref"].append(read.reference_name)
-                data["start"].append(read.reference_start)
-                data["cigar"].append(read.cigarstring)
+                data_dict[signal_path].append(read)
 
                 valid_count += 1
 
@@ -344,7 +412,53 @@ def extract_move(bam_path, ncpu, bq_cutoff, signal_path_dict, signal_path_arr, i
     printmessage(f"Unmapped: {unmapped}", msg_type="info")
 
     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
-        move_df = pd.DataFrame.from_dict(data, orient="columns")
+
+        df_dict = {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "seq": [], "bq": [], "pt": [],
+                   "ref": [], "start": [], "cigar": []}
+
+        for read in data:
+
+            if read.has_tag("pi"):
+                read_id = str(read.get_tag("pi"))
+            else:
+                read_id = str(read.query_name)
+
+            bq = np.array(read.query_qualities, dtype=int)
+            mv = read.get_tag("mv")
+
+            if read.has_tag("ts"):
+                ts = read.get_tag("ts")
+            else:
+                ts = 0
+
+            if read.has_tag("ns"):
+                ns = read.get_tag("ns")
+            else:
+                ns = 0
+
+            if read.has_tag("sp"):
+                sp = read.get_tag("sp")
+            else:
+                sp = 0
+
+            if read.has_tag("pt"):
+                pt = read.get_tag("pt")
+            else:
+                pt = 0
+
+            df_dict["mv"].append(mv)
+            df_dict["read_id"].append(read_id)
+            df_dict["ts"].append(ts)
+            df_dict["ns"].append(ns)
+            df_dict["sp"].append(sp)
+            df_dict["pt"].append(pt)
+            df_dict["seq"].append(str(read.query_sequence))
+            df_dict["bq"].append(bq)
+            df_dict["ref"].append(read.reference_name)
+            df_dict["start"].append(read.reference_start)
+            df_dict["cigar"].append(read.cigarstring)
+
+        move_df = pd.DataFrame.from_dict(df_dict, orient="columns")
         df_len = len(move_df)
         if df_len > 0:
             move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path}")

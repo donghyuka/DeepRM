@@ -6,7 +6,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from train.pretrain_dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
-import torchmetrics.classification as cm
 import argparse
 import os
 import time
@@ -32,7 +31,7 @@ def parse_args():
     parser.add_argument("--es_delta", type=float, default=1e-5)
     parser.add_argument("--es_patience", type=int, default=50)
     parser.add_argument("--es_start", type=int, default=1000)
-    parser.add_argument("--disk_shard_size", type=int, default=4000)
+    parser.add_argument("--disk_shard_size", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--enc_dim", type=int, default=512)
     parser.add_argument("--lin_dim", type=int, default=1024)
@@ -177,8 +176,8 @@ class Trainer:
         else:
             self.tb_writer = None
 
-        self.eval_sources, self.eval_targets = self._cache_eval_data()
-
+        self.eval_sources = self._cache_eval_data()
+        self.target_len = torch.tensor(self.model_config["block_len"], dtype=torch.int).to(self.gpu_id)
         ## END of __init__
 
 
@@ -221,12 +220,10 @@ class Trainer:
 
     def _cache_eval_data(self):
         sources = []
-        targets = []
         with torch.no_grad():
-            for source, target in self.val_loader:
+            for source in self.val_loader:
                 sources.append(source)
-                targets.append(target)
-        return sources, targets
+        return sources
 
 
     def _feed_model(self, source):
@@ -235,14 +232,15 @@ class Trainer:
         src_seg_len = source["segment_len"].to(self.gpu_id)
 
         output = self.model(src_signal, src_seg_len)
+        input_len = src_seg_len.sum(dim=1)
 
-        return output, src_kmer
+        return output, src_kmer, input_len
 
 
     def _run_batch(self, source):
         self.optimizer.zero_grad()
-        output, target = self._feed_model(source)
-        loss = self.loss_func(output, target)
+        output, target, input_len = self._feed_model(source)
+        loss = self.loss_func(output, target, input_len, self.target_len.repeat(input_len.shape[0]))
         loss.backward()
         if self.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -321,9 +319,9 @@ class Trainer:
         val_loss = []
         outputs = []
         with torch.no_grad():
-            for source, target in zip(self.eval_sources, self.eval_targets):
-                output, target = self._feed_model(source, target)
-                loss = self.loss_func(output, target)
+            for source in self.eval_sources:
+                output, target, input_len = self._feed_model(source)
+                loss = self.loss_func(output, target, input_len, self.target_len.repeat(input_len.shape[0]))
                 val_loss.append(loss.item())
                 outputs.append(output)
 
@@ -415,17 +413,15 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
         printmessage(f"Total number of dataloader workers: {num_workers * num_replicas}")
 
     batch_size = batch_size
-    train_pos_data_path = f"{data_path}/train/pos"
-    train_neg_data_path = f"{data_path}/train/neg"
-    val_pos_data_path = f"{data_path}/val/pos"
-    val_neg_data_path = f"{data_path}/val/neg"
+    train_data_path = f"{data_path}/train"
+    val_data_path = f"{data_path}/val"
 
-    train_loader = load_dataset(train_pos_data_path, train_neg_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                buffer_size, read_every, seed = seed, shuffle = True, drop_last = True,
+    train_loader = load_dataset(train_data_path, batch_size, disk_shard_size, rank, num_replicas,
+                                num_files_read_once = 1, seed = seed, shuffle = True, drop_last = True,
                                 prefetch_factor = prefetch, pin_memory = pin_memory, num_workers = num_workers,
                                 signal_stride=signal_stride, kmer_size=kmer_size)
-    val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              buffer_size, read_every, seed = seed, shuffle = False, drop_last = True,
+    val_loader = load_dataset(val_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
+                              num_files_read_once = 1, seed = seed, shuffle = False, drop_last = True,
                               prefetch_factor = prefetch, pin_memory = pin_memory, num_workers = num_workers,
                               signal_stride=signal_stride, kmer_size=kmer_size)
 
@@ -457,7 +453,6 @@ def main_worker(rank, args_dict):
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
     else:
         save_dict = {}
-
 
     model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
@@ -493,6 +488,7 @@ def main_worker(rank, args_dict):
                                                   args_dict["read_every"], args_dict["seed"], args_dict["class_ratio"], args_dict["prefetch"],
                                                   pin_memory = args_dict["pin_memory"], soft_label = args_dict["soft"], num_workers = args_dict["workers"],
                                                   signal_stride = args_dict["signal_stride"], kmer_size = args_dict["kmer_size"])
+
     trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
                       args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
                       args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],

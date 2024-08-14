@@ -51,7 +51,6 @@ class TransformerModel(nn.Module):
         return None
 
     def forward(self, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
-
         ## Tokenizer
         with torch.no_grad():
             src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
@@ -67,7 +66,7 @@ class TransformerModel(nn.Module):
 
         ## Regression Head
         output = self.regression_head(encoder_output)
-        output = torch.log_softmax(output, dim = 1).permute(1, 0, 2)
+        output = torch.log_softmax(output, dim = 2).permute(1, 0, 2)
         return output
 
     ## END OF TransformerModel
