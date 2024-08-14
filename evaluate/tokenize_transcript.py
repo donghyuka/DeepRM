@@ -3,6 +3,7 @@ import multiprocessing as mp
 import numpy as np
 import pandas as pd
 from utils.utils import mean_phred, oom_killer, printmessage
+import math
 
 
 
@@ -84,9 +85,49 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
     return save_idx
 
 
+def split_pod5(pod5_dir, max_size_mb, ncpu = 8):
+    ## Split pod5 files
+    pod5_path_list = glob.glob(pod5_dir + "/*.pod5")
+    oversized_list = []
+    for pod5_path in pod5_path_list:
+        pod5_size = os.path.getsize(pod5_path) / (1024 ** 2)
+        if pod5_size > max_size_mb:
+            oversized_list.append((pod5_path, pod5_size))
+    if len(oversized_list) == 0:
+        return None
+    else:
+        n_proc = min(ncpu, len(oversized_list))
+        oversized_list_split = [oversized_list[i::n_proc] for i in range(n_proc)]
+        proc_list = []
+        for i in range(n_proc):
+            proc = mp.Process(target = split_pod5_proc, args = (oversized_list_split[i], max_size_mb))
+            proc_list.append(proc)
+            proc.start()
+        for proc in proc_list:
+            proc.join()
+
+    return None
+
+
+def split_pod5_proc(pod5_list, max_size_mb):
+    for pod5_path, pod5_size in pod5_list:
+        with pod5.Reader(pod5_path) as reader:
+            batch_count = reader.batch_count
+            writer_count = math.ceil(pod5_size / max_size_mb)
+            writer_list = [ pod5.Writer(f"{pod5_path[:-5]}_{x}.pod5") for x in range(writer_count)]
+            with tqdm.tqdm(total=batch_count) as pbar:
+                for batch_idx, batch in enumerate(reader.read_batches()):
+                    writer_list[batch_idx%writer_count].add_reads([x.to_read() for x in batch.reads()])
+                    pbar.update(1)
+            for writer in writer_list:
+                writer.close()
+        os.remove(pod5_path)
+    return None
+
+
 def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, max_mb, min_mb):
     index_dict_local = {}
-    chunk_buffer = []
+    chunk_buffer = None
     pod5_idx = 0
 
     for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list), desc=f"Parsing POD5 Files"):
@@ -95,10 +136,12 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
         offset_list = []
         scale_list = []
         id_list = []
+        skipped = 0
+        save_idx = 0
+
         try:
             with pod5.Reader(pod5_path) as reader:
-                skipped = 0
-                for record in reader:
+                for record_idx, record in enumerate(reader):
                     try:
                         signal_arr = record.signal
                         offset = record.calibration.offset
@@ -113,6 +156,48 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
                     signal_list.append(signal_arr)
                     id_list.append(id)
 
+                    if record_idx % chunk == 0 and record_idx > 0:
+
+                        signal_df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
+                        del signal_list, offset_list, scale_list, id_list
+                        gc.collect()
+
+                        if chunk_buffer is not None:
+                            signal_df = pd.concat([chunk_buffer, signal_df], ignore_index=True)
+                            chunk_buffer = None
+
+                        df_size = sys.getsizeof(signal_df) / (1024 ** 2)
+                        if df_size > min_mb:
+                            save_idx = write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
+                            del signal_df
+
+                        else:
+                            chunk_buffer = signal_df
+
+                        signal_list = []
+                        offset_list = []
+                        scale_list = []
+                        id_list = []
+                        gc.collect()
+
+            ## END record loop
+
+            signal_df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
+            del signal_list, offset_list, scale_list, id_list
+            gc.collect()
+
+            if chunk_buffer is not None:
+                signal_df = pd.concat([chunk_buffer, signal_df], ignore_index=True)
+                chunk_buffer = None
+
+            df_size = sys.getsizeof(signal_df) / (1024 ** 2)
+            if df_size > min_mb:
+                save_idx = write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
+                del signal_df
+            else:
+                chunk_buffer = signal_df
+            gc.collect()
+
             if skipped > 0:
                 printmessage(f"Skipped {skipped} faulty records in: {pod5_path}", msg_type="warning")
 
@@ -121,36 +206,15 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
             printmessage(f"Corrupted POD5 file: {pod5_path} - Skipping", msg_type="warning")
             continue
 
-        df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
-        del signal_list, offset_list, scale_list, id_list
-        gc.collect()
+        ## END try-except
 
-        save_idx = 0
+    ## END pod5_path_list loop
 
-        for chunk_idx in range(0, len(df) // chunk + 1):
-            signal_df = df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(df))].copy()
-            df_size = sys.getsizeof(signal_df) / (1024 ** 2)
-            if len(signal_df) == chunk and df_size > min_mb:
-                save_idx = write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
-            else:
-                chunk_buffer.append(signal_df)
-            gc.collect()
-
-        if len(chunk_buffer) > 0:
-            signal_df = pd.concat(chunk_buffer, ignore_index=True)
-            df_size = sys.getsizeof(signal_df) / (1024 ** 2)
-            if df_size > min_mb:
-                chunk_buffer = []
-                write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
-            else:
-                chunk_buffer = [signal_df]
-        gc.collect()
-
-    if len(chunk_buffer) > 0:
-        signal_df = pd.concat(chunk_buffer, ignore_index=True)
+    if chunk_buffer is not None:
         save_idx = 0
         pod5_idx += 1
-        write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
+        write_df(chunk_buffer, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
+        del chunk_buffer
         gc.collect()
 
     index_list.append(index_dict_local)
@@ -159,6 +223,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
 
 
 def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
+    max_pod5_mb = 4000
+    split_pod5(pod5_path, max_pod5_mb, ncpu)
+
     # Export pod5 to csv
     pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
@@ -650,7 +717,6 @@ def main():
         with open(signal_index_path, "wb") as outfile:
             pickle.dump(index_dict, outfile)
         gc.collect()
-
 
         signal_path_dict = {}
         for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):

@@ -19,12 +19,13 @@ def parse_args():
     parser.add_argument("--hostdir", "-d", type = str, required = True)
     parser.add_argument("--port", "-p", type = int, default = 22)
     parser.add_argument("--comp_level", "-cl", type = int, default = 3)
-    parser.add_argument("--local_comp_thr", "-lct", type = int, default = 8)
+    parser.add_argument("--local_comp_thr", "-lct", type = int, default = 16)
     parser.add_argument("--remote_comp_thr", "-rct", type = int, default = 8)
     parser.add_argument("--key", "-k", type = str, default = None)
     parser.add_argument("--jump_host", "-j", type = str, default = None)
     parser.add_argument("--jump_user", "-ju", type = str, default = None)
     parser.add_argument("--jump_port", "-jp", type = int, default = 22)
+    parser.add_argument("--size", "-sz", type = int, default = None)
     parser.add_argument("--no_size", "-ns", action = "store_true")
     parser.add_argument("--resume", "-r", action = "store_true")
     args = parser.parse_args()
@@ -40,9 +41,11 @@ def main():
     args = parse_args()
 
     print(f"Program start: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
     if not args.no_size:
-        source_disk_size = os.popen(f'du -sb {args.source}').read().split("\t")[0]
+        if args.size is None:
+            source_disk_size = os.popen(f'du -sb {args.source}').read().split("\t")[0]
+        else:
+            source_disk_size = args.size
         print(f"Size: {pretty_size(int(source_disk_size))}")
     else:
         source_disk_size = "0"
