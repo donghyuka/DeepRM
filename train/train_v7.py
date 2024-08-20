@@ -459,8 +459,11 @@ def main_worker(rank, args_dict):
     model = model.to(gpu_id)
 
     if args_dict["load_checkpoint"] is not None:
-        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'})
+        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
+        if args_dict["load_weight_only"]:
+            for param in model.parameters():
+                param.requires_grad = True
     else:
         save_dict = {}
 

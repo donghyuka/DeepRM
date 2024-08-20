@@ -80,7 +80,7 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"AIRNA-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"AIRNA-{args.model.split('_')[-1]}-PT-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:
@@ -326,15 +326,7 @@ class Trainer:
                 outputs.append(output)
 
         val_loss = np.mean(val_loss)
-        outputs = torch.cat(outputs, dim=0)
-        targets = torch.cat(self.eval_targets, dim=0)
-        if self.soft_label is not None:
-            targets = torch.where(targets > 0.5, torch.ones_like(targets), torch.zeros_like(targets))
-        targets = targets.to(torch.long).to(self.gpu_id)
         metric_dict = {}
-
-        for metric_name, metric_func in self.metric_func_dict.items():
-            metric_dict[metric_name] = metric_func(outputs, targets)
 
         ## ALL REDUCE LOSS and METRICS
         dist.barrier()
@@ -417,12 +409,12 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_data_path = f"{data_path}/val"
 
     train_loader = load_dataset(train_data_path, batch_size, disk_shard_size, rank, num_replicas,
-                                num_files_read_once = 1, seed = seed, shuffle = True, drop_last = True,
-                                prefetch_factor = prefetch, pin_memory = pin_memory, num_workers = num_workers,
+                                buffer_size, read_every, seed = seed, shuffle = True, drop_last = True, class_ratio = class_ratio,
+                                prefetch_factor = prefetch, pin_memory = pin_memory, soft_label=soft_label, num_workers = num_workers,
                                 signal_stride=signal_stride, kmer_size=kmer_size)
     val_loader = load_dataset(val_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
-                              num_files_read_once = 1, seed = seed, shuffle = False, drop_last = True,
-                              prefetch_factor = prefetch, pin_memory = pin_memory, num_workers = num_workers,
+                              buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
+                              prefetch_factor = prefetch, pin_memory = pin_memory, soft_label=soft_label, num_workers = num_workers,
                               signal_stride=signal_stride, kmer_size=kmer_size)
 
     return train_loader, val_loader
@@ -449,7 +441,7 @@ def main_worker(rank, args_dict):
     model = model.to(gpu_id)
 
     if args_dict["load_checkpoint"] is not None:
-        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'})
+        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
     else:
         save_dict = {}

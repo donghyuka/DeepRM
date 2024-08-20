@@ -80,7 +80,7 @@ def main():
             f.write("\n".join(out))
         atexit.register(os.system, "rm exclude_list.txt")
 
-        tar_command = f'tar cf - -C {source_parent} ./{source_subdir} --exclude-from=exclude_list.txt'
+        tar_command = f'tar cf - -C {source_parent} ./{source_subdir} --dereference --exclude-from=exclude_list.txt'
 
         if not args.no_size:
             ## Get total size of already transferred files from destination.
@@ -93,7 +93,7 @@ def main():
             source_disk_size = str(int(source_disk_size) - transferred_size)
 
     else:
-        tar_command = f'tar cf - -C {source_parent} ./{source_subdir}'
+        tar_command = f'tar cf - -C {source_parent} ./{source_subdir} --dereference'
 
     pv_command = f"pv -s {source_disk_size}"
     pigz_command = f"pigz -{args.comp_level} -p {args.local_comp_thr}"

@@ -28,6 +28,7 @@ class TransformerModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout, activation = t_act,
                                                    batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
+        self.transformer_encoder_2 = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
         self.regression_head = RegressionHead(d_model, lin_act, lin_depth, lin_dropout, seq_len)
@@ -70,12 +71,12 @@ class TransformerModel(nn.Module):
 
         ## Embedding
         kmer_embedding = self.kmer_embedding(src_kmer)
-        signal_embedding = self.signal_embedding(src_signal)
-        pos_encoding = self.pos_encoding(kmer_embedding)
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
+        signal_embedding = self.signal_embedding(src_signal) + self.pos_encoding(src_signal.size(0))
 
         ## Transformer Encoder
-        encoder_output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        encoder_output = self.transformer_encoder(src=signal_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        encoder_output = encoder_output + kmer_embedding
+        encoder_output = self.transformer_encoder_2(src=encoder_output, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## Regression Head
         output = self.regression_head(encoder_output)
@@ -85,8 +86,6 @@ class TransformerModel(nn.Module):
         output = output / target_mask.sum(dim = 1)
         output = torch.sigmoid(output)
 
-        if self.return_embedding:
-            output = (output, encoder_output, target_mask)
 
         return output
 
@@ -104,12 +103,11 @@ class PositionalEncoding(nn.Module):
         pe[:, :, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
-    def forward(self, x) -> Tensor:
+    def forward(self, batch_size) -> Tensor:
         """
         Arguments:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
-        batch_size = x.size(0)
         pe = self.pe.repeat(batch_size, 1, 1)
         return pe
 

@@ -99,9 +99,9 @@ def inference_worker(rank, args_dict, flush_interval = 100):
 
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
-        save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
+        save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'}, weights_only=False)
     else:
-        save_dict = torch.load(args_dict["model"], map_location='cpu')
+        save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
 
 

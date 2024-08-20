@@ -1,7 +1,9 @@
+import gc
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.dataloader_aug import load_dataset, NanoporeDataLoader
+from train.dataloader_v7 import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -12,10 +14,9 @@ import tqdm
 import numpy as np
 from utils.utils import printmessage
 import importlib
-from utils import augmentations as aug
+from utils import augmentations_dev as aug
 from functools import partial
-import pickle
-import gc
+from utils.interp1d import interp1d
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
@@ -71,6 +72,8 @@ def parse_args():
     parser.add_argument("--prefetch", type=int, default=512)
     parser.add_argument("--aug", dest="aug_fraction", type=float, default=0.1)
     parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
+    parser.add_argument("--no_bq", action="store_true", default=False)
+    parser.add_argument("--load_weight_only", action="store_true", default=False)
 
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--name", type=str, default=None)
@@ -78,7 +81,7 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.name is None:
-        args.name = f"AIRNA-{args.model.split('_')[-1]}-{strfttime}"
+        args.name = f"AIRNA-FT-{args.model.split('_')[-1]}-{strfttime}"
     if args.read_every is None:
         args.read_every = args.disk_shard_size
     if args.save_interval is None:
@@ -122,6 +125,7 @@ class Trainer:
             cut_overlap: bool = False,
             signal_stride: int = 6,
             aug_fraction: float = 0.1,
+            no_bq: bool = False,
     ) -> None:
 
         self.rank = rank
@@ -167,16 +171,11 @@ class Trainer:
         self.aug_fraction = aug_fraction
         self.aug_list = self._get_aug_list()
         self.histogram = False
-        self.kmer_size = model_config["kmer_size"]
-
+        self.no_bq = no_bq
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
         else:
             self.tb_writer = None
-
-        # self.profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        #                                        schedule=torch.profiler.schedule(wait=1, warmup=1, active=10, repeat=0),
-        #                                        on_trace_ready=torch.profiler.tensorboard_trace_handler(self.tb_path, self.devname))
 
         self.eval_sources, self.eval_targets = self._cache_eval_data()
 
@@ -185,25 +184,27 @@ class Trainer:
 
     def _get_aug_list(self):
         fraction = self.aug_fraction
+        ## MOVING AVERAGE MAGNITUDE WARP
+        movmag = partial(aug.moving_magnitude_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 40)
         ## WINDOWED TIME WARP
-        winwarp = partial(aug.window_warp, fraction=fraction, min_window_ratio = 0.05, max_window_ratio = 0.10,
-                          min_window_count = 5, max_window_count = 10, sigma = 0.2)
+        winwarp = partial(aug.window_warp, fraction=0.5, min_window_ratio = 0.05, max_window_ratio = 0.10,
+                          min_window_count = 5, max_window_count = 20, sigma = 0.4)
         ## TIME WARP
-        timewarp = partial(aug.time_warp, fraction=fraction, min_sigma=0.1, max_sigma=0.2, n_knots = 30)
+        timewarp = partial(aug.time_warp, fraction=0.5, min_sigma=0.2, max_sigma=0.5, n_knots = 30)
         ## GAUSSIAN JITTER
-        jitter = partial(aug.jitter, fraction=fraction, min_sigma=0.2, max_sigma=0.5)
+        jitter = partial(aug.jitter, fraction=fraction, min_sigma=0.15, max_sigma=0.3)
         ## SPIKE NOISE
-        spike = partial(aug.jitter, fraction=fraction, min_sigma=0.2, max_sigma=0.5, dropout = 0.9)
+        spike = partial(aug.jitter, fraction=fraction, min_sigma=0.3, max_sigma=1.0, dropout = 0.95)
         ## STEP NOISE
-        step = partial(aug.step, fraction=fraction, min_sigma=0.2, max_sigma=0.5, dropout = 0.9)
+        step = partial(aug.step, fraction=fraction, min_sigma=0.15, max_sigma=0.3, dropout = 0.95)
         ## SLOPE NOISE
-        slope = partial(aug.slope, fraction=fraction, magnitude = 0.3,)
+        slope = partial(aug.slope, fraction=fraction, magnitude = 0.5,)
         ## DRIFT NOISE
-        drift = partial(aug.drift, fraction=fraction, min_sigma=0.2, max_sigma=0.5, n_knots = 10)
-        aug_list = [winwarp, timewarp, jitter, spike, step, drift, slope]
+        drift = partial(aug.drift, fraction=fraction, min_sigma=0.15, max_sigma=0.3, n_knots = 10)
+        aug_list = [movmag, winwarp, timewarp, jitter, spike, step, drift, slope]
         return aug_list
 
-    def _augment_signal(self, signal, pad_mask, shuffle_order = True):
+    def _augment_signal(self, signal, pad_mask, seg_len, shuffle_order = True):
 
         with torch.no_grad():
             if shuffle_order:
@@ -212,9 +213,10 @@ class Trainer:
                 aug_list = self.aug_list
 
             for i, aug_func in enumerate(aug_list):
-                signal = aug_func(signal, pad_mask=pad_mask)
+                signal, pad_mask, seg_len = aug_func(signal, pad_mask=pad_mask, seg_len=seg_len)
 
-        return signal
+
+        return signal, pad_mask, seg_len
 
 
     def _cache_eval_data(self):
@@ -226,37 +228,26 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
-    def _feed_model(self, source, target, augment = False):
-        src_kmer = source["kmer_token"]
-        src_signal = source["signal_token"]
-        src_target_mask = source["target_mask"]
 
-        if self.cut_overlap:
-            src_signal = src_signal[:,:,10:15]
-
-        src_kmer = src_kmer.to(self.gpu_id)
-        src_signal = src_signal.to(self.gpu_id)
-        src_target_mask = src_target_mask.to(self.gpu_id)
+    def _feed_model(self, source, target):
         target = target.to(torch.float32).to(self.gpu_id)
-        src_pad_mask = (src_kmer > 0).to(torch.int)
+        src_kmer = source["kmer_token"].to(self.gpu_id)
+        src_signal = source["signal_token"].to(self.gpu_id)
+        src_seg_len = source["segment_len"].to(self.gpu_id)
 
-        if augment:
-            extra_pad = (self.kmer_size - 1) * self.signal_stride
-            src_pad_mask_signal = src_pad_mask.repeat_interleave(self.signal_stride, dim = 1)
-            src_pad_mask_signal = torch.cat([src_pad_mask_signal, torch.zeros(src_pad_mask_signal.shape[0], extra_pad, device=src_pad_mask_signal.device, dtype=torch.int)], dim=1)
-            src_signal = self._augment_signal(src_signal, src_pad_mask_signal, shuffle_order = True)
+        if not self.no_bq:
+            src_bq = source["bq_token"].to(self.gpu_id)
+            output = self.model(src_kmer, src_signal, src_seg_len, src_bq)
 
-        src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride).clip(-100,100) * src_pad_mask.unsqueeze(-1)
-        src_pad_mask = src_pad_mask.logical_not()
-
-        output = self.model(src_kmer, src_signal, src_pad_mask, src_target_mask)
+        else:
+            output = self.model(src_kmer, src_signal, src_seg_len)
 
         return output, target
 
 
     def _run_batch(self, source, target):
         self.optimizer.zero_grad()
-        output, target = self._feed_model(source, target, augment = True)
+        output, target = self._feed_model(source, target)
         loss = self.loss_func(output, target)
         loss.backward()
         if self.grad_clip > 0:
@@ -264,7 +255,7 @@ class Trainer:
         self.optimizer.step()
         self.current_batch_loss = loss.item()
         dist.barrier()
-        time.sleep(0.001*self.gpu_id)
+        time.sleep(0.0001*self.gpu_id)
         evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
         evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items() if (k in ["auroc","ap"])])
         self.pbar.update(1)
@@ -326,6 +317,8 @@ class Trainer:
                 self.current_batch += 1
                 self.current_step += 1
 
+        gc.collect()
+
         return None
 
 
@@ -335,7 +328,7 @@ class Trainer:
         outputs = []
         with torch.no_grad():
             for source, target in zip(self.eval_sources, self.eval_targets):
-                output, target = self._feed_model(source, target, augment = False)
+                output, target = self._feed_model(source, target)
                 loss = self.loss_func(output, target)
                 val_loss.append(loss.item())
                 outputs.append(output)
@@ -440,7 +433,7 @@ def prepare_dataloader(data_path, batch_size, eval_batch_size, disk_shard_size, 
     val_loader = load_dataset(val_pos_data_path, val_neg_data_path, eval_batch_size, disk_shard_size, rank, num_replicas,
                               buffer_size, read_every, seed = seed, shuffle = False, drop_last = True, class_ratio = class_ratio,
                               prefetch_factor = prefetch, pin_memory = pin_memory, soft_label=soft_label, num_workers = num_workers,
-                                signal_stride=signal_stride, kmer_size=kmer_size)
+                              signal_stride=signal_stride, kmer_size=kmer_size)
 
     return train_loader, val_loader
 
@@ -454,7 +447,8 @@ def main_worker(rank, args_dict):
                              t_act = args_dict["t_act"], lin_act = args_dict["lin_act"],
                              encoder_dropout = args_dict["enc_dropout"], lin_dropout = args_dict["lin_dropout"],
                              kmer_size = args_dict["kmer_size"], signal_size = args_dict["signal_size"],
-                             spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"], seq_len = args_dict["seq_len"])
+                             spectrogram_size = args_dict["spectrogram_size"], block_len = args_dict["block_len"],
+                             seq_len = args_dict["seq_len"], signal_stride = args_dict["signal_stride"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -465,22 +459,24 @@ def main_worker(rank, args_dict):
     model = model.to(gpu_id)
 
     if args_dict["load_checkpoint"] is not None:
-        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
-        model.load_state_dict(state_dict=save_dict["model_state_dict"])
+        if not args_dict["load_weight_only"]:
+            save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
+            model.load_state_dict(state_dict=save_dict["model_state_dict"], strict = True)
+        else:
+            save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=True)
+            keywords = ["transformer_encoder.", "signal_embedding."]
+            for name, param in model.named_parameters():
+                if any([kw in name for kw in keywords]):
+                    param.requires_grad = False
+                    param.data = save_dict["model_state_dict"][name]
     else:
         save_dict = {}
-
-    model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
     if args_dict["load_checkpoint"] is not None:
-        optimizer.load_state_dict(save_dict["optimizer_state_dict"])
-        # ## overwrite lr and weight_decay
-        # for param_group in optimizer.param_groups:
-        #     param_group['lr'] = args_dict["lr"]
-        #     param_group['weight_decay'] = args_dict["weight_decay"]
-
+        if not args_dict["load_weight_only"]:
+            optimizer.load_state_dict(save_dict["optimizer_state_dict"])
 
     if args_dict["rlrop"] is not None:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = "min", factor = 0.5, patience = args_dict["lr_step"],
@@ -490,9 +486,19 @@ def main_worker(rank, args_dict):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
     if args_dict["load_checkpoint"] is not None:
-        scheduler.load_state_dict(save_dict["scheduler_state_dict"])
-        save_dict.clear()
+        if not args_dict["load_weight_only"]:
+            scheduler.load_state_dict(save_dict["scheduler_state_dict"])
 
+    if args_dict["load_checkpoint"] is not None:
+        save_dict.clear()
+        del save_dict
+        gc.collect()
+
+    # if args_dict["load_checkpoint"] is not None:
+    #     if args_dict["load_weight_only"]:
+    #         model.freeze_and_reinit()
+
+    model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
@@ -520,7 +526,7 @@ def main_worker(rank, args_dict):
                       args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
                       args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict,
                       soft_label = args_dict["soft"], score_feature = args_dict["score_feature"], cut_overlap = args_dict["cut_overlap"],
-                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"])
+                      signal_stride = args_dict["signal_stride"], aug_fraction = args_dict["aug_fraction"], no_bq = args_dict["no_bq"])
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {gpu_id}] Training Loop Complete.")

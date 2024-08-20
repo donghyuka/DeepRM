@@ -4,7 +4,8 @@ import argparse
 import numpy as np
 import pandas as pd
 import torch.distributed as dist
-from evaluate.inference_dataloader_v9 import load_dataset
+from torch.nn.parallel import DistributedDataParallel as DDP
+from evaluate.inference_dataloader_bpp import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -37,7 +38,7 @@ def parse_args():
 def main():
     args = parse_args()
     ## Subdirectories for results: inference, pileup, evaluation, plot
-    inference_path = f"{args.output}/embedding"
+    inference_path = f"{args.output}/inference"
     plot_path = f"{args.output}/plot"
     os.makedirs(inference_path, exist_ok=True)
     os.makedirs(plot_path, exist_ok=True)
@@ -51,6 +52,9 @@ def setup_ddp(rank,world_size):
         return None
 
     else:
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12355'
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
         torch.cuda.set_device(rank)
 
     return None
@@ -81,7 +85,7 @@ def run_inference(args):
         printmessage(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
-        out_dir = f"{args_dict['output']}/embedding/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
+        out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
         if len(args_dict["postfix"]) > 0:
             out_dir = f"{out_dir}-{args_dict['postfix']}"
         print(out_dir)
@@ -100,50 +104,47 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
 
-    if "signal_stride" not in model_config:
-        model_config["signal_stride"] = 6
 
-    TransformerModel = importlib.import_module("model.airna_v3M").TransformerModel
+    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
                              spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"], return_embedding = True)
+                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
         printmessage(f"Total Params: {total_params:,}")
-
-
     if args_dict["gpu"] > 0:
         model.to(rank)
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
+    if args_dict["gpu"] > 0:
+        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
 
-
     data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
-                                args_dict["shard"],1, seed = 0, shuffle = False, drop_last = False, class_ratio = 1,
-                                prefetch_factor = args_dict["prefetch"], pin_memory = True, soft_label=False, num_workers = args_dict["worker"],
-                                signal_stride=model_config["signal_stride"], kmer_size=model_config["kmer_size"])
+                               num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"],
+                               worker = args_dict["worker"],
+                               cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
+                               kmer_len = model_config["kmer_size"],
+                               sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
+                               sig_window = model_config["kmer_size"])
 
     id_list = []
     pred_list = []
     block_id_list = []
-    emb_list = []
-    skip_flag = True
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
-
-
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
             src_signal = data["signal_token"].to(rank)
             src_seg_len = data["segment_len"].to(rank)
+            src_structure = data["structure_token"].to(rank)
             if not args_dict["no_bq"]:
                 src_bq = data["bq_token"].to(rank)
 
@@ -151,23 +152,21 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_kmer = data["kmer_token"]
             src_signal = data["signal_token"]
             src_seg_len = data["segment_len"]
+            src_structure = data["structure_token"]
             if not args_dict["no_bq"]:
                 src_bq = data["bq_token"]
 
         with torch.no_grad():
             if not args_dict["no_bq"]:
-                pred, emb = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq)
+                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq, src_structure=src_structure)
             else:
-                pred, emb = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
+                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_structure=src_structure)
 
 
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
-            emb_list.append(emb.cpu().detach().numpy())
         else:
             pred_list.append(pred.detach().numpy())
-            emb_list.append(emb.detach().numpy())
-
         id_list.append(np.array(data["label_id"]))
         block_id_list.append(np.array(data["block_id"]))
 
@@ -175,22 +174,19 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
             block_id_list = np.concatenate(block_id_list)
-            emb_list = list(np.concatenate(emb_list))
 
-            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding": emb_list})
+            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
             data_df.to_pickle(out_path)
             id_list = []
             pred_list = []
             block_id_list = []
-            emb_list = []
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
     block_id_list = np.concatenate(block_id_list)
-    emb_list = list(np.concatenate(emb_list))
 
-    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding": emb_list})
+    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
 

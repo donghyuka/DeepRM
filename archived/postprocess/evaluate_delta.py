@@ -85,7 +85,7 @@ def run_inference(args):
 
 def inference_worker(rank, args_dict):
     setup_ddp(rank, args_dict["gpu"])
-    save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'})
+    save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'}, weights_only=False)
     model_config = save_dict["model_config"]
     CNNModel = importlib.import_module(f"postprocess.{model_config['model']}").CNNModel
     model = CNNModel(input_height = model_config["input_height"],
