@@ -7,7 +7,7 @@ import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-i", type=str, required=True, help="Negative data path")
-    parser.add_argument("--seed", "-s", type=int, default=None, help="Random seed")
+    parser.add_argument("--seed", "-s", type=int, default=42, help="Random seed")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--val_ratio", "-v", type=float, default=0.1, help="Validation ratio")
 

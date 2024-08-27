@@ -621,7 +621,6 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["ref"] = signal_df["ref"].str.split(".").str[0]
         signal_df["ref_pos"] = signal_df["pos"].apply(lambda x: x[0])
         signal_df["query_pos"] = signal_df["pos"].apply(lambda x: x[1])
-
         signal_df["centre_nuc"] = signal_df.apply(lambda x: x["seq"][x["query_pos"]] if x["query_pos"] < len(x["seq"]) else None, axis=1)
 
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
@@ -649,7 +648,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["motif"] = signal_df.apply(lambda x: x["seq"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["segment_len_arr"] = signal_df["signal"].apply(lambda x: create_segment_len_arr(x, sampling))
         signal_df["token_len"] = signal_df["segment_len_arr"].apply(lambda x: np.sum(x[trim:-trim]))
-        signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) & (signal_df["token_len"] <= max_token_len)]
+        # signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) & (signal_df["token_len"] <= max_token_len)]
+        signal_df = signal_df[signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)]
         signal_df = signal_df[["label_id", "block_id", "signal", "bq", "motif"]].copy()
 
         gc.collect()

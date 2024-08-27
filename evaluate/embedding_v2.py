@@ -1,3 +1,5 @@
+import gc
+
 import torch
 import os, glob
 import argparse
@@ -9,6 +11,7 @@ from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import importlib
+import Bio.SeqIO as SeqIO
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -81,13 +84,39 @@ def run_inference(args):
         printmessage(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
-        out_dir = f"{args_dict['output']}/embedding/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
+        out_dir = f"{args_dict['output']}/embedding/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}-full"
         if len(args_dict["postfix"]) > 0:
             out_dir = f"{out_dir}-{args_dict['postfix']}"
         print(out_dir)
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
         mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
+
+        ref_path = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta"
+        ref_id_list = []
+        for record in SeqIO.parse(ref_path, "fasta"):
+            ref_id_list.append(record.id)
+
+        convert_dict = {x.split(".")[0]:x for x in ref_id_list}
+
+        paths = glob.glob(f"{out_dir}/*.pkl")
+        df_list = []
+
+        for path in tqdm.tqdm(paths):
+            df = pd.read_pickle(path)
+            df["NMID"] = df["label_id"].str.split(":").str[0]
+            df["NMID"] = df["NMID"].map(convert_dict)
+            df["pos"] = df["label_id"].str.split(":").str[1]
+            df["label_id"] = df["NMID"] + ":" + df["pos"]
+            df.drop(["NMID", "pos"], axis = 1, inplace = True)
+            df_list.append(df)
+
+        df_list = pd.concat(df_list)
+        print(df_list)
+        df_list.to_pickle(f"{out_dir}/merged.pkl")
+
+        del df_list, df
+
     return None
 
 
@@ -103,7 +132,7 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     if "signal_stride" not in model_config:
         model_config["signal_stride"] = 6
 
-    TransformerModel = importlib.import_module("model.airna_v3M").TransformerModel
+    TransformerModel = importlib.import_module("model.airna_v3M2").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
@@ -136,7 +165,8 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     id_list = []
     pred_list = []
     block_id_list = []
-    emb_list = []
+    emb_512_list = []
+    emb_128_list = []
     skip_flag = True
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
@@ -158,17 +188,20 @@ def inference_worker(rank, args_dict, flush_interval = 100):
 
         with torch.no_grad():
             if not args_dict["no_bq"]:
-                pred, emb = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq)
+                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq)
             else:
-                pred, emb = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
+                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
 
 
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
-            emb_list.append(emb.cpu().detach().numpy())
+            emb_512_list.extend(emb_512)
+            emb_128_list.extend(emb_128)
+
         else:
             pred_list.append(pred.detach().numpy())
-            emb_list.append(emb.detach().numpy())
+            emb_512_list.extend(emb_512)
+            emb_128_list.extend(emb_128)
 
         id_list.append(np.array(data["label_id"]))
         block_id_list.append(np.array(data["block_id"]))
@@ -177,22 +210,26 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
             block_id_list = np.concatenate(block_id_list)
-            emb_list = list(np.concatenate(emb_list))
 
-            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding": emb_list})
+            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
             data_df.to_pickle(out_path)
+
+            del data_df, id_list, pred_list, block_id_list, emb_512_list, emb_128_list
+            gc.collect()
+
             id_list = []
             pred_list = []
             block_id_list = []
-            emb_list = []
+            emb_128_list = []
+            emb_512_list = []
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
     block_id_list = np.concatenate(block_id_list)
-    emb_list = list(np.concatenate(emb_list))
+    # emb_list = list(np.concatenate(emb_list))
 
-    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding": emb_list})
+    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
 
