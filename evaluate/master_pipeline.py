@@ -198,7 +198,7 @@ def main():
         else:
             args.batch = ""
 
-        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A,m5C --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 

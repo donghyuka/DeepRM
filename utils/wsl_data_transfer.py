@@ -102,10 +102,11 @@ def main(config_path = "config.toml"):
     #         print("Aborting.")
     #         return None
 
+
     tar_command = f'tar cf - -C "{source_dir}" "./{source_subdir}"'
     pv_command = f"pv -s {source_disk_size}"
     pigz_command = f"pigz -{comp_level} -p {local_comp_thr}"
-    ssh_command = f"ssh {dest_user}@{dest_ip} -J {dest_user}@{jump_ip}:{dest_port}  'cd {dest_dir} ; pigz -dc -p {remote_comp_thr} - | tar xf -'"
+    ssh_command = f"ssh {dest_user}@{dest_ip} -J {dest_user}@{jump_ip}:{dest_port} 'cd {dest_dir} ; pigz -dc -p {remote_comp_thr} - | tar xf -'"
 
     composed_command = f"{tar_command} | {pv_command} | {pigz_command} | {ssh_command}"
 

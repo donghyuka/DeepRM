@@ -76,6 +76,8 @@ class NanoporeDatasetIterator:
         df["segment_len_arr"] = df["segment_len_arr"].apply(lambda x: x[self.trim:-self.trim])
         df["kmer_token"] = df["motif"].apply(lambda x: np.array(list(x)))
         df["bq_token"] = df["bq"].apply(lambda x: x[self.trim:-self.trim])
+        df["token_len"] = df["segment_len_arr"].apply(lambda x: np.sum(x))
+        df = df[df["token_len"] <= 200]
         df = df[["kmer_token", "signal_token", "bq_token", "segment_len_arr","label_id","block_id"]][df["signal_token"].notnull()].copy()
 
         self.current_iterator = df.itertuples(index=False)

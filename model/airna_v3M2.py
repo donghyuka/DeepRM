@@ -72,10 +72,10 @@ class TransformerModel(nn.Module):
         final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
 
         ## Transformer Encoder
-        intermediate = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        intermediate1 = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## Regression Head
-        output = self.regression_head(intermediate)
+        intermediate2, output = self.regression_head(intermediate1)
         output = output.squeeze(-1)
         output = output * target_mask
         output = output.sum(dim = 1)
@@ -88,12 +88,21 @@ class TransformerModel(nn.Module):
         target_start = target_mask * torch.arange(self.seq_len, device=src_signal.device).flip(dims = [0]).repeat(src_signal.size(0), 1)
         target_start = self.seq_len - target_start.max(dim = 1).values - 1
 
-        target_start = intermediate[torch.arange(intermediate.size(0), device=src_signal.device), target_start]
-        target_end = intermediate[torch.arange(intermediate.size(0), device=src_signal.device), target_end]
-        intermediate = torch.stack([target_start, target_end], dim = 1)
+        # target_start = intermediate[torch.arange(intermediate.size(0), device=src_signal.device), target_start]
+        # target_end = intermediate[torch.arange(intermediate.size(0), device=src_signal.device), target_end]
+        # intermediate = torch.stack([target_start, target_end], dim = 1)
+
+        intermediate1A = [intermediate1[i,target_start[i]:target_end[i]+1] for i in range(intermediate1.size(0))]
+        intermediate2A = [intermediate2[i,target_start[i]:target_end[i]+1] for i in range(intermediate2.size(0))]
+        intermediate1B = [intermediate1[i,0:1] for i in range(intermediate1.size(0))]
+        intermediate2B = [intermediate2[i,0:1] for i in range(intermediate2.size(0))]
+
+        intermediate1 = [torch.cat([intermediate1B[i], intermediate1A[i]], dim = 0).cpu().detach().numpy() for i in range(intermediate1.size(0))]
+        intermediate2 = [torch.cat([intermediate2B[i], intermediate2A[i]], dim = 0).cpu().detach().numpy() for i in range(intermediate2.size(0))]
+
 
         if self.return_embedding:
-            output = (output, intermediate)
+            output = (output, intermediate1, intermediate2)
 
         return output
 
@@ -142,7 +151,8 @@ class RegressionHead(nn.Module):
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         output = self.lin_layers(x)
-        return output
+        embedding = self.lin_layers[:-1](x)
+        return embedding, output
 
     def init_weights(self, initrange = 0.1):
         for layer in self.lin_layers:

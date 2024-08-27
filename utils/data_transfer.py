@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument("--size", "-sz", type = int, default = None)
     parser.add_argument("--no_size", "-ns", action = "store_true")
     parser.add_argument("--resume", "-r", action = "store_true")
+    parser.add_argument("--nocheck", "-nc", action = "store_true")
     args = parser.parse_args()
     return args
 
@@ -43,7 +44,7 @@ def main():
     print(f"Program start: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     if not args.no_size:
         if args.size is None:
-            source_disk_size = os.popen(f'du -sb {args.source}').read().split("\t")[0]
+            source_disk_size = os.popen(f'du -sbL {args.source}').read().split("\t")[0]
         else:
             source_disk_size = args.size
         print(f"Size: {pretty_size(int(source_disk_size))}")
@@ -67,10 +68,15 @@ def main():
             args.jump_port = args.port
         jump_option = f"-J {args.jump_user}@{args.jump_host}:{args.jump_port}"
 
+    if args.nocheck:
+        ssh_option = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    else:
+        ssh_option = ""
+
     if args.resume:
         ## First, get list of already transferred files from destination.
         ## Then, exclude them from tar command.
-        ssh_command = f"ssh {args.user}@{args.host} -p {args.port} {key_option} {jump_option} 'cd {args.hostdir}/{source_subdir} ; find . ! -type d -printf \"%T@ %Tc %p\\n\" | sort -n '"
+        ssh_command = f"ssh {args.user}@{args.host} -p {args.port} {key_option} {jump_option} {ssh_option} 'cd {args.hostdir}/{source_subdir} ; find . ! -type d -printf \"%T@ %Tc %p\\n\" | sort -n '"
         print(f"Command: {ssh_command}")
         out = subprocess.check_output(ssh_command, shell = True).decode("utf-8")
         out = [f"./{source_subdir}" + x.split(" ")[-1][1:] for x in out.split("\n") if len(x) > 0][:-1]
@@ -85,7 +91,7 @@ def main():
         if not args.no_size:
             ## Get total size of already transferred files from destination.
             ## Then, exclude them from pv command.
-            ssh_command = f"ssh {args.user}@{args.host} -p {args.port} {key_option} {jump_option} 'cd {args.hostdir}/{source_subdir} ; du -sb .'"
+            ssh_command = f"ssh {args.user}@{args.host} -p {args.port} {key_option} {jump_option} {ssh_option} 'cd {args.hostdir}/{source_subdir} ; du -sbL .'"
             print(f"Command: {ssh_command}")
             out = subprocess.check_output(ssh_command, shell = True).decode("utf-8")
             transferred_size = int(out.split("\t")[0])
