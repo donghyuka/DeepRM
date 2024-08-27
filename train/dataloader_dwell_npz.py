@@ -353,10 +353,8 @@ def pad_collate(batch, pad_to, signal_stride, kmer_size, trim = 2):
         dwell_token_list.append(source[3])
 
     target = torch.tensor(label_list, dtype=torch.float32)
-    try:
-        src_kmer = torch.tensor(np.stack(kmer_token_list).view(np.int32), dtype=torch.int32)
-    except:
-        print([x.shape for x in kmer_token_list])
+
+    src_kmer = torch.tensor(np.stack(kmer_token_list), dtype=torch.int32)
     src_seg_len = torch.tensor(np.stack(segment_len_list), dtype=torch.int32)
     src_dwell = torch.tensor(np.stack(dwell_token_list), dtype=torch.float32)
     src_signal = torch.tensor(np.stack(signal_token_list), dtype=torch.float32)
