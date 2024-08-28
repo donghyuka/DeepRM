@@ -114,7 +114,9 @@ def autoconfig(args):
 
     args.base = get_canonical_base(args.base)
 
-    restructure_directory(args)
+    if args.restructure:
+        restructure_directory(args)
+
     if args.output is None:
         args.output = f"{args.input}/result"
     os.makedirs(args.output, exist_ok=True)
@@ -158,11 +160,12 @@ def parse_args():
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
-    parser.add_argument("--ref", "-f", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta", help="Reference path")
+    parser.add_argument("--ref", "-f", type=str, default="", help="Reference path")
     parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
     parser.add_argument("--toml", "-m", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml", help="Dorado TOML file")
     parser.add_argument("--base", "-x", type=str, default="A", help="Base of Interest")
     parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
+    parser.add_argument("--restructure", "-e", type=bool, default=True, help="Restructure input directory")
     args = parser.parse_args()
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
@@ -198,7 +201,7 @@ def main():
         else:
             args.batch = ""
 
-        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A,pseU --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A pseU --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 
