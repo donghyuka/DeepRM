@@ -71,7 +71,7 @@ def parse_args():
     num_cpu = os.cpu_count()
     parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
     parser.add_argument("--out", "-o", dest = "output", type=str, default = None, help="Output directory")
-    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.2", help="Dorado path")
+    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.7.3", help="Dorado path")
     parser.add_argument("--cpu", "-t", type=int, default= int(math.floor(num_cpu * 0.95)), help="Number of CPUs")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
