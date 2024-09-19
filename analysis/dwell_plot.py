@@ -39,6 +39,7 @@ def plot(mean_dict, ci95_dict, length_dict, title, out_path):
 
     return
 
+
 def main():
     pos_path = "/extdata4/baeklab/Hyeonseo/m6A/dataset/ver082724_npz/score-perfect/train/pos"
     neg_path = "/extdata4/baeklab/Hyeonseo/m6A/dataset/ver082724_npz/score-perfect/train/neg"
@@ -53,6 +54,9 @@ def main():
 
     pos_data = np.concatenate([np.load(x)["dwell_token"] for x in pos_files])
     neg_data = np.concatenate([np.load(x)["dwell_token"] for x in neg_files])
+    pos_motif = np.concatenate([np.load(x)["kmer_token"] for x in pos_files])
+    neg_motif = np.concatenate([np.load(x)["kmer_token"] for x in neg_files])
+
 
     pos_mean = np.mean(pos_data, axis=0)
     pos_ci95 = 1.96 * np.std(pos_data, axis=0) / np.sqrt(len(pos_data))

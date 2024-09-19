@@ -11,7 +11,7 @@ def parse_args():
     parser.add_argument("--output", "-o", type=str, required=True, help="Output pileup file")
     parser.add_argument("--min_depth", "-m", type=int, default=5, help="Minimum depth")
     parser.add_argument("--max_depth", "-x", type=int, default=None, help="Maximum depth")
-    parser.add_argument("--base", "-b", type=int, nargs="+", default=["A"], help="Base to select")
+    parser.add_argument("--base", "-b", type=str, nargs="+", default=["A"], help="Base to select")
     parser.add_argument("--cpu", "-c",  type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args = parser.parse_args()
     return args

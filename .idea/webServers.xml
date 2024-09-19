@@ -40,6 +40,13 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
+      <webServer id="a48aada7-696b-486b-adae-5aebe2aa92af" name="NIPA">
+        <fileTransfer accessType="SFTP" host="proxy4.aitrain.ktcloud.com" port="10958" sshConfigId="87484c32-354b-46c8-beb0-2817fd43e2e5" sshConfig="NIPA" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
     </option>
     <groups>
       <group>
@@ -51,6 +58,7 @@
           <name value="AICA-A100" />
           <name value="BIOSCI" />
           <name value="Genome1" />
+          <name value="NIPA" />
         </servers>
       </group>
     </groups>

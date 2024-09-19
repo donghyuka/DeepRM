@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate.inference_dataloader_bpp import load_dataset
+from evaluate.inference_dataloader_npz import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -137,14 +137,13 @@ def inference_worker(rank, args_dict, flush_interval = 100):
 
     id_list = []
     pred_list = []
-    block_id_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
             src_signal = data["signal_token"].to(rank)
             src_seg_len = data["segment_len"].to(rank)
-            src_structure = data["structure_token"].to(rank)
+            src_dwell = data["dwell_token"].to(rank)
             if not args_dict["no_bq"]:
                 src_bq = data["bq_token"].to(rank)
 
@@ -152,15 +151,12 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_kmer = data["kmer_token"]
             src_signal = data["signal_token"]
             src_seg_len = data["segment_len"]
-            src_structure = data["structure_token"]
+            src_dwell = data["dwell_token"]
             if not args_dict["no_bq"]:
                 src_bq = data["bq_token"]
 
         with torch.no_grad():
-            if not args_dict["no_bq"]:
-                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq, src_structure=src_structure)
-            else:
-                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_structure=src_structure)
+            pred = model(src_kmer, src_signal, src_seg_len, src_dwell)
 
 
         if args_dict["gpu"] > 0:
@@ -168,25 +164,21 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         else:
             pred_list.append(pred.detach().numpy())
         id_list.append(np.array(data["label_id"]))
-        block_id_list.append(np.array(data["block_id"]))
 
         if idx % flush_interval == 0 and idx > 0:
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
-            block_id_list = np.concatenate(block_id_list)
 
-            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
+            data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
             data_df.to_pickle(out_path)
             id_list = []
             pred_list = []
-            block_id_list = []
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
-    block_id_list = np.concatenate(block_id_list)
 
-    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
+    data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
 

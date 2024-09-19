@@ -27,7 +27,7 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
     df["pm6a"] = np.log10(1-df["pm6a"]) * df["count_pm6a"]
     df["pos"] = df["label_id"].apply(lambda x: x.split(":")[1]).astype(int)
     df["coding"] = df["gene"].apply(lambda x: x.startswith("NM"))
-    df["depth"] = 1
+    df["isoforms"] = 1
 
     df = df.groupby("gene")
 
@@ -60,7 +60,7 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
     gene_df = pd.concat(local_collect)
     gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first",  "count_m6a": "sum",
                                                 "count_ca": "sum", "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first",
-                                                "depth": "sum", "coding": "max"})
+                                                "isoforms": "sum", "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
     collect_list.append(gene_df.copy())
 
@@ -118,7 +118,7 @@ def main():
     gc.collect()
 
     gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum", "count_ca": "sum",
-                                                "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first", "depth": "sum",
+                                                "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first", "isoforms": "sum",
                                                 "coding": "max"})
 
     gene_df["pm6a"] = 1 - 10**(gene_df["pm6a"] / gene_df["count_pm6a"])

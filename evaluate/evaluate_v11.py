@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate.inference_dataloader_v7 import load_dataset
+from evaluate.inference_dataloader_npz_v2 import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -23,13 +23,17 @@ def parse_args():
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
     parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
     parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
-    parser.add_argument("--batch", "-b", type=int, default=40000, help="Batch size")
+    parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
     parser.add_argument("--nfile", "-n", type=int, default=16, help="Number of files to load")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
+    parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
+    parser.add_argument("--no_bq", action="store_true", help="No BQ")
+    parser.add_argument("--motor_only", action="store_true", help="Motor Only")
+    parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
     args = parser.parse_args()
     return args
 
@@ -94,7 +98,7 @@ def run_inference(args):
     return None
 
 
-def inference_worker(rank, args_dict, flush_interval = 100):
+def inference_worker(rank, args_dict):
 
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
@@ -110,8 +114,8 @@ def inference_worker(rank, args_dict, flush_interval = 100):
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
-                             spectrogram_size = model_config["spectrogram_size"],
-                             block_len = model_config["block_len"], seq_len = model_config["seq_len"])
+                             spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
+                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -125,73 +129,109 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     if args_dict["gpu"] > 0:
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
+
+    if args_dict["resume"]:
+        saved = glob.glob(f"{args_dict['out_dir']}/inference_{rank}_*.pkl")
+        if len(saved) > 0:
+            saved = [int(x.split("/")[-1].split("_")[-1].split(".")[0]) for x in saved]
+            saved = max(saved)
+        else:
+            saved = 0
+    else:
+        saved = 0
+
     data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
                                num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"],
                                worker = args_dict["worker"],
                                cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
                                kmer_len = model_config["kmer_size"],
                                sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
-                               sig_window = model_config["kmer_size"])
+                               sig_window = model_config["kmer_size"],
+                               resume_from = saved)
 
     id_list = []
     pred_list = []
-    block_id_list = []
+
+    tensor_keys = ["kmer_token", "signal_token", "segment_len", "dwell_motor_token", "dwell_pore_token", "bq_token"]
+    data_buffer = {key: None for key in tensor_keys}
+    data_buffer["label_id"] = None
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
-        if args_dict["gpu"] > 0:
-            src_kmer = data["kmer_token"].to(rank)
-            # src_signal = data["signal_token"]
-            src_signal = data["signal_token"].to(rank)
-            src_bq = data["bq_token"].to(rank)
-            src_move = data["move_token"].to(rank)
-            src_pad_mask = (src_kmer == 0)
-            src_target_mask = data["target_mask"].to(rank)
+        for key in tensor_keys:
+            if data_buffer[key] is not None:
+                data[key] = torch.cat([data_buffer[key], data[key]], dim=0)
+        if data_buffer["label_id"] is not None:
+            data["label_id"] = np.concatenate([data_buffer["label_id"], data["label_id"]])
 
-        else:
-            src_kmer = data["kmer_token"]
-            # src_signal = data["signal_token"]
-            src_signal = data["signal_token"]
-            src_bq = data["bq_token"]
-            src_move = data["move_token"]
-            src_pad_mask = (src_kmer == 0)
-            src_target_mask = data["target_mask"]
+        data_size = len(data["label_id"])
 
-        with torch.no_grad():
-            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_bq=src_bq, src_move=src_move,
-                         src_pad_mask=src_pad_mask, src_target_mask=src_target_mask)
+        for batch_id in range(data_size // args_dict["batch"]):
+            batch_data = {key: data[key][batch_id * args_dict["batch"]:(batch_id + 1) * args_dict["batch"]] for key in tensor_keys}
+            batch_data["label_id"] = data["label_id"][batch_id * args_dict["batch"]:(batch_id + 1) * args_dict["batch"]]
+            src_kmer = batch_data["kmer_token"].to(rank)
+            src_signal = batch_data["signal_token"].to(rank)
+            src_seg_len = batch_data["segment_len"].to(rank)
+            src_dwell_motor = batch_data["dwell_motor_token"].to(rank)
+            src_dwell_pore = batch_data["dwell_pore_token"].to(rank)
+            src_bq = batch_data["bq_token"].to(rank)
 
-        ## if pred has additional dimension, remove it.
-        if len(pred.shape) > 1:
-            target_mask_sum = src_target_mask.sum(dim = 1)
-            pred = pred * src_target_mask
-            pred = pred.sum(dim = 1)
-            pred = pred / target_mask_sum
+            if args_dict["motor_only"]:
+                src_dwell_bq = src_dwell_motor
+            elif args_dict["no_bq"]:
+                src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore], dim=-1)
+            else:
+                src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
 
-        if args_dict["gpu"] > 0:
+            with torch.no_grad():
+                pred = model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
+
             pred_list.append(pred.cpu().detach().numpy())
+            id_list.append(np.array(batch_data["label_id"]))
+
+        ## remaining data to buffer
+        if data_size % args_dict["batch"] > 0:
+            data_buffer = {key: data[key][(data_size // args_dict["batch"]) * args_dict["batch"]:] for key in tensor_keys}
+            data_buffer["label_id"] = data["label_id"][(data_size // args_dict["batch"]) * args_dict["batch"]:]
         else:
-            pred_list.append(pred.detach().numpy())
-        id_list.append(np.array(data["label_id"]))
-        block_id_list.append(np.array(data["block_id"]))
+            data_buffer = {key: None for key in tensor_keys}
+            data_buffer["label_id"] = None
 
-
-        if idx % flush_interval == 0 and idx > 0:
+        if idx % args_dict["flush"] == 0 and idx > 0:
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
-            block_id_list = np.concatenate(block_id_list)
 
-            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
-            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
+            data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
+            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx+saved}.pkl"
             data_df.to_pickle(out_path)
             id_list = []
             pred_list = []
-            block_id_list = []
+
+    if data_buffer["label_id"] is not None:
+        batch_data = data_buffer
+        src_kmer = batch_data["kmer_token"].to(rank)
+        src_signal = batch_data["signal_token"].to(rank)
+        src_seg_len = batch_data["segment_len"].to(rank)
+        src_dwell_motor = batch_data["dwell_motor_token"].to(rank)
+        src_dwell_pore = batch_data["dwell_pore_token"].to(rank)
+        src_bq = batch_data["bq_token"].to(rank)
+
+        if args_dict["motor_only"]:
+            src_dwell_bq = src_dwell_motor
+        elif args_dict["no_bq"]:
+            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore], dim=-1)
+        else:
+            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
+
+        with torch.no_grad():
+            pred = model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
+
+        pred_list.append(pred.cpu().detach().numpy())
+        id_list.append(np.array(batch_data["label_id"]))
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
-    block_id_list = np.concatenate(block_id_list)
 
-    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
+    data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list})
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
 

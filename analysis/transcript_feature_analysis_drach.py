@@ -4,6 +4,47 @@ import numpy as np
 import pandas as pd
 from utils.utils import mean_phred, oom_killer, printmessage
 import math
+from matplotlib import pyplot as plt
+
+
+def get_label(dest_path):
+
+    df = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.GP3.depth5_None.twm6astrict.drach.tsv", sep="\t")
+
+    df = df[df["depth"] >= 5]
+    df = df[df["depth"] <= 500]
+    df = df[df["label"] == 1]
+
+    df_pos = df[df["m6A_level"] >= 0.9]
+    df_neg = df[df["m6A_level"] <= 0.3]
+
+    df_pos["label"] = 1
+    df_neg["label"] = 0
+
+    df_pos_5mer_groupby = df_pos.groupby("5mer")
+
+
+    df_pos_list = []
+    df_neg_list = []
+
+    for motif, df_pos_motif in df_pos_5mer_groupby:
+        pos_len = len(df_pos_motif)
+        if pos_len >= 10:
+            df_neg_motif = df_neg[df_neg["5mer"] == motif]
+            df_neg_motif = df_neg_motif.sample(min(pos_len * 5, len(df_neg_motif)), random_state=42)
+            df_neg_list.append(df_neg_motif)
+            df_pos_list.append(df_pos_motif)
+            print(motif, df_pos_motif["depth"].sum(), df_neg_motif["depth"].sum())
+
+    df_pos = pd.concat(df_pos_list, axis=0)
+    df_neg = pd.concat(df_neg_list, axis=0)
+    df = pd.concat([df_pos, df_neg], axis=0)
+
+    print(df)
+    df.to_pickle(dest_path)
+
+    return None
+
 
 
 
@@ -453,16 +494,20 @@ def get_label_pos_list(ref, start, cigar, label_df):
     except KeyError:
         return []
 
+    label_list = label_df_nmid["label"].values
     ref_pos_list = label_df_nmid["pos"].values
+    motif_list = label_df_nmid["5mer"].values
     query_pos_list = ref_pos_to_query_pos(ref_pos_list, cigar, start)
-    pos_tuple_list = list(zip(ref_pos_list, query_pos_list))
+
+    pos_tuple_list = list(zip(ref_pos_list, query_pos_list, label_list, motif_list))
     pos_tuple_list_filtered = [x for x in pos_tuple_list if x[1] is not None]
+
     return pos_tuple_list_filtered
 
 
 def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode, token_output_path,
-                             cb_len = 21, kmer_len = 5, chunk_size = 10000, max_token_len = 200, sampling = 6,
-                             boi = "A", dwell_shift = 10):
+                             cb_len = 21, kmer_len = 5, chunk_size = 100000, max_token_len = 200, sampling = 6,
+                             boi = "A", dwell_shift = 10, sig_window = 5):
 
     trim = kmer_len//2
     mean, stdev, quantile_a, quantile_b, shift_mult, scale_mult = None, None, None, None, None, None
@@ -512,7 +557,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         gc.collect()
 
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
-        signal_df["dwell_token"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5))
+        signal_df["dwell"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5))
 
         if norm_mode == "normalise":
             signal_df["signal"] = signal_df.apply(lambda x: normalise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
@@ -525,7 +570,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         else:
             raise ValueError(f"Invalid norm_mode: {norm_mode}")
 
-        signal_df = signal_df[["read_id", "ref", "bq", "seq", "signal", "dwell_token", "pos", "pt"]].copy()
+        signal_df = signal_df[["read_id", "ref", "bq", "seq", "signal", "dwell", "pos"]].copy()
         gc.collect()
 
         signal_df = signal_df[signal_df["pos"].apply(lambda x: len(x) > 0)]
@@ -538,6 +583,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["ref"] = signal_df["ref"].str.split(".").str[0]
         signal_df["ref_pos"] = signal_df["pos"].apply(lambda x: x[0])
         signal_df["query_pos"] = signal_df["pos"].apply(lambda x: x[1])
+        signal_df["label"] = signal_df["pos"].apply(lambda x: x[2])
+        signal_df["motif"] = signal_df["pos"].apply(lambda x: x[3])
         signal_df["centre_nuc"] = signal_df.apply(lambda x: x["seq"][x["query_pos"]] if x["query_pos"] < len(x["seq"]) else None, axis=1)
 
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
@@ -547,13 +594,11 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
             continue
 
         signal_df["label_id"] = signal_df["ref"].astype(str) + ":" + signal_df["ref_pos"].astype(str)
-        signal_df["block_id"] = signal_df["read_id"] + ":" + signal_df["query_pos"].astype(str)
         signal_df["start_pos"] = signal_df["query_pos"] - cb_half_len
         signal_df["end_pos"] = signal_df["query_pos"] + cb_half_len + 1
-        # signal_df["query_len"] = signal_df["seq"].apply(len) - signal_df["pt"]
         signal_df["query_len"] = signal_df["seq"].apply(len)
 
-        signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] + dwell_shift - trim < signal_df["query_len"])]
+        signal_df = signal_df[(signal_df["start_pos"] >= 0) & (signal_df["end_pos"] + dwell_shift < signal_df["query_len"])]
         signal_df.dropna(inplace=True)
 
         if len(signal_df) == 0:
@@ -561,15 +606,23 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
             continue
 
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)
+        signal_df["dwell"] = signal_df.apply(lambda x: x["dwell"][(x["start_pos"]+dwell_shift):(x["end_pos"]+dwell_shift)], axis=1)
         signal_df["bq"] = signal_df.apply(lambda x: x["bq"][x["start_pos"]:x["end_pos"]], axis=1)
-        signal_df["motif"] = signal_df.apply(lambda x: x["seq"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["segment_len_arr"] = signal_df["signal"].apply(lambda x: create_segment_len_arr(x, sampling))
-        signal_df["token_len"] = signal_df["segment_len_arr"].apply(lambda x: np.sum(x[trim:-trim]))
-        # signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) & (signal_df["token_len"] <= max_token_len)]
-        signal_df = signal_df[signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)]
-        signal_df = signal_df[["label_id", "block_id", "signal", "bq", "motif"]].copy()
 
-        gc.collect()
+        signal_df["token_len"] = signal_df["segment_len_arr"].apply(lambda x: np.sum(x[trim:-trim]))
+        signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) &
+                              (signal_df["token_len"] <= max_token_len) &
+                              (signal_df["token_len"] > 0) &
+                              (signal_df["signal"].notnull())]
+
+        if len(signal_df) == 0:
+            continue
+
+        signal_df = signal_df[["signal", "motif", "dwell", "bq", "label"]].copy()
+        signal_df["signal_mean"] = signal_df["signal"].apply(lambda x: np.array([np.mean(y) for y in x], dtype=np.float32))
+        signal_df["signal_std"] = signal_df["signal"].apply(lambda x: np.array([np.std(y) for y in x], dtype=np.float32))
+        signal_df.drop(columns=["signal"], inplace=True)
 
         if len(buffer) > 0:
             signal_df = pd.concat([buffer, signal_df], ignore_index=True)
@@ -581,7 +634,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         else:
             for chunk_idx in range(0, len(signal_df) // chunk_size):
                 chunk = signal_df.iloc[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size]
-                chunk.to_pickle(f"{out_path.split('.')[0]}-{chunk_idx}.pkl")
+                outpath = f"{out_path.split('.')[0]}-{chunk_idx}.npz"
+                save_npz(outpath, chunk)
 
             chunk = signal_df.iloc[(len(signal_df) // chunk_size) * chunk_size:].copy()
             if len(chunk) > 0:
@@ -591,17 +645,31 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         gc.collect()
 
 
-    out_path = f"{token_output_path}/last-{pid}.pkl"
-    ## For last chunk, append zero data and save
+    last_outpath = f"{token_output_path}/last-{pid}"
+
     if len(buffer) > 0:
         for chunk_idx in range(0, len(buffer) // chunk_size):
             chunk = buffer.iloc[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size]
-            chunk.to_pickle(f"{out_path.split('.')[0]}-{chunk_idx}.pkl")
+            outpath = f"{last_outpath}-{chunk_idx}.npz"
+            save_npz(outpath, chunk)
 
         chunk = buffer.iloc[(len(buffer) // chunk_size) * chunk_size:].copy()
         if len(chunk) > 0:
-            chunk.to_pickle(f"{out_path.split('.')[0]}-last.pkl")
+            outpath = f"{last_outpath}-last.npz"
+            save_npz(outpath, chunk)
 
+    return None
+
+
+
+def save_npz(save_path, df):
+    dwell = np.stack(df["dwell"].values)
+    signal_mean = np.stack(df["signal_mean"].values)
+    signal_std = np.stack(df["signal_std"].values)
+    bq = np.stack(df["bq"].values)
+    label = df["label"].values
+    motif = df["motif"].values
+    np.savez_compressed(save_path, dwell=dwell, signal_mean=signal_mean, signal_std=signal_std, bq=bq, label=label, motif=motif)
     return None
 
 
@@ -614,7 +682,7 @@ def parse_args():
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--chunk", "-k", type=int, default=10000, help="Chunk size")
+    parser.add_argument("--chunk", "-k", type=int, default=1000000, help="Chunk size")
     parser.add_argument("--pod5_chunk", "-j", type=int, default=1000, help="POD5 Chunk size")
     parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
@@ -724,10 +792,130 @@ def parse_toml(toml_path, norm_mode):
 
     return norm_factor
 
-def main():
-    args = parse_args()
 
+
+def read_path(path):
+    path_list = glob.glob(f"{path}/*.npz")
+    key_list = ["signal_mean", "signal_std", "dwell", "motif", "label", "bq"]
+    data_dict = {key: [] for key in key_list}
+    for path in tqdm.tqdm(path_list):
+        with np.load(path, allow_pickle=True) as data:
+            for key in key_list:
+                data_dict[key].append(data[key])
+    data_dict = {key: np.concatenate(data_dict[key], axis=0) for key in key_list}
+    data_dict["signal_mean"] = list(data_dict["signal_mean"])
+    data_dict["signal_std"] = list(data_dict["signal_std"])
+    data_dict["dwell"] = list(data_dict["dwell"])
+    data_dict["bq"] = list(data_dict["bq"].astype(np.float32))
+    df = pd.DataFrame(data_dict)
+    return df
+
+
+def plot(mean_dict, ci95_dict, length_dict, title, out_path):
+
+    plt.rcParams.update({'font.size': 24})
+    fig, ax = plt.subplots(figsize=(20,10))
+
+    colour_list = ['royalblue', 'tomato']
+
+    for i, key in enumerate(mean_dict.keys()):
+        colour = colour_list[i]
+        mean = mean_dict[key]
+        ci95 = ci95_dict[key]
+        length = length_dict[key]
+        width = len(mean)
+        ax.plot(mean, color=colour, label=f"{key} (n={length:,})")
+        ax.fill_between(np.arange(width), mean-ci95, mean+ci95,
+                        color=colour, alpha=0.3)
+
+    ax.set_title(title)
+    ax.set_xlabel("Position")
+    ax.set_ylabel(title)
+
+    ax.set_xticks(np.arange(0, width, 3))
+    ax.set_xticklabels(np.arange(0, width, 3))
+
+
+    ## Vline at center
+    ax.axvline(x=width//2, color="black", linestyle="--")
+
+    ax.legend()
+    plt.savefig(f"{out_path}/{title}.png", dpi=300)
+    plt.close()
+
+    return
+
+
+def plotting_main(path):
+    df = read_path(path)
+    out_path = "/extdata4/baeklab/Hyeonseo/m6A/analyses/transcript_feature_v4"
+    os.makedirs(out_path, exist_ok=True)
+
+    df_pos = df[df["label"] == 1]
+    df_neg = df[df["label"] == 0]
+
+    df_neg_sampled_list = []
+    df_pos_sampled_list = []
+    df_neg = df_neg.groupby("motif")
+    df_pos = df_pos.groupby("motif")
+
+    for motif in df_pos.groups.keys():
+        df_pos_motif = df_pos.get_group(motif)
+        df_neg_motif = df_neg.get_group(motif)
+
+        print(motif, len(df_pos_motif), len(df_neg_motif))
+
+        if len(df_pos_motif) < len(df_neg_motif):
+            df_neg_sampled = df_neg_motif.sample(len(df_pos_motif))
+            df_pos_sampled = df_pos_motif
+        else:
+            df_pos_sampled = df_pos_motif.sample(len(df_neg_motif))
+            df_neg_sampled = df_neg_motif
+
+        df_pos_sampled_list.append(df_pos_sampled)
+        df_neg_sampled_list.append(df_neg_sampled)
+
+
+    df_pos = pd.concat(df_pos_sampled_list)
+    df_neg = pd.concat(df_neg_sampled_list)
+
+    print(df_pos)
+    print(df_neg)
+
+    try:
+        feature_list = ["signal_mean", "signal_std", "dwell", "bq"]
+
+        for feature in feature_list:
+            pos_data = np.stack(df_pos[feature].values, axis=0)
+            neg_data = np.stack(df_neg[feature].values, axis=0)
+            pos_mean = np.mean(pos_data, axis=0)
+            pos_ci95 = 1.96 * np.std(pos_data, axis=0) / np.sqrt(len(pos_data))
+            pos_len = len(pos_data)
+            neg_mean = np.mean(neg_data, axis=0)
+            neg_ci95 = 1.96 * np.std(neg_data, axis=0) / np.sqrt(len(neg_data))
+            neg_len = len(neg_data)
+
+            mean_dict = {"m6A": pos_mean, "cA": neg_mean}
+            ci95_dict = {"m6A": pos_ci95, "cA": neg_ci95}
+            length_dict = {"m6A": pos_len, "cA": neg_len}
+
+            plot(mean_dict, ci95_dict, length_dict, feature, out_path)
+
+    except:
+        pass
+
+    df_pos.to_pickle(f"{out_path}/ON0090_pos.pkl")
+    df_neg.to_pickle(f"{out_path}/ON0090_neg.pkl")
+
+    return None
+
+def main():
+
+    args = parse_args()
     token_output_path = f"{args.output}/token_{args.norm_mode}_{args.postfix}/"
+
+    get_label(args.label)
+
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
@@ -781,8 +969,9 @@ def main():
     del signal_path_dict
     gc.collect()
 
-    label_df = pd.read_csv(args.label, sep='\t')
+    label_df = pd.read_pickle(args.label)
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+    label_df = label_df.sort_values(by=["nmid", "pos"])
 
     proc_list = []
     label_df = label_df.groupby("nmid")
@@ -800,6 +989,8 @@ def main():
         proc.join()
 
     gc.collect()
+
+    plotting_main(token_output_path)
 
     return None
 
