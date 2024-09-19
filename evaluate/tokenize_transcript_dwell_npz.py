@@ -479,8 +479,9 @@ def get_label_pos_list(ref, start, cigar, label_df):
     except KeyError:
         return []
 
-    index_list = label_df_nmid["index"].values
-    ref_pos_list = label_df_nmid["pos"].values
+
+    index_list = label_df_nmid[0]
+    ref_pos_list = label_df_nmid[1]
     query_pos_list = ref_pos_to_query_pos(ref_pos_list, cigar, start)
     pos_tuple_list = list(zip(index_list, query_pos_list))
     pos_tuple_list_filtered = [x for x in pos_tuple_list if x[1] is not None]
@@ -850,10 +851,12 @@ def main():
     label_df = pd.read_csv(args.label, sep='\t')
     label_df.reset_index()
     label_df["index"] = label_df.index.astype(np.int32)
+    label_df = label_df.groupby("nmid")
+    label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
+
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
 
     proc_list = []
-    label_df = label_df.groupby("nmid")
     for pid, signal_paths in enumerate(signal_path_arr_split):
         proc = mp.Process(target=segment_normalize_signal,
                           args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
