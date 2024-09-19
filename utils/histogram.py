@@ -39,7 +39,8 @@ def main():
     return_list = np.array(return_list)
     return_list = np.sum(return_list, axis=0)
     draw_histogram(return_list, args.output)
-
+    np.save(f"{args.output}/histogram.npy", return_list)
+    print(return_list)
     return None
 
 

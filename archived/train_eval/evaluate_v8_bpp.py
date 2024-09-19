@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from archived.train_eval.inference_dataloader_warp import load_dataset
+from archived.train_eval.inference_dataloader_bpp import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
+    parser.add_argument("--no_bq", action="store_true", help="No BQ")
     args = parser.parse_args()
     return args
 
@@ -143,14 +144,23 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             src_kmer = data["kmer_token"].to(rank)
             src_signal = data["signal_token"].to(rank)
             src_seg_len = data["segment_len"].to(rank)
+            src_structure = data["structure_token"].to(rank)
+            if not args_dict["no_bq"]:
+                src_bq = data["bq_token"].to(rank)
 
         else:
             src_kmer = data["kmer_token"]
             src_signal = data["signal_token"]
             src_seg_len = data["segment_len"]
+            src_structure = data["structure_token"]
+            if not args_dict["no_bq"]:
+                src_bq = data["bq_token"]
 
         with torch.no_grad():
-            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
+            if not args_dict["no_bq"]:
+                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq, src_structure=src_structure)
+            else:
+                pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_structure=src_structure)
 
 
         if args_dict["gpu"] > 0:

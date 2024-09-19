@@ -27,7 +27,7 @@ def parse_args():
 
 
 def worker(pid, file_paths, out_path, file_per_worker, threshold_neg = 0.10, threshold_pos = 0.98,
-           threshold_dom_neg = 0.20, threshold_dom_pos = 0.60, epsilon = 1e-6, percentile = False):
+           threshold_dom_neg = 0.20, threshold_dom_pos = 0.60, epsilon = 1e-20, percentile = False):
 
     for idx, path in enumerate(tqdm.tqdm(file_paths)):
 

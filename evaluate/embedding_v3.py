@@ -1,15 +1,17 @@
+import gc
+
 import torch
 import os, glob
 import argparse
 import numpy as np
 import pandas as pd
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from archived.train_eval.inference_dataloader_warp import load_dataset
+from evaluate.inference_dataloader_npz_v2 import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import importlib
+import Bio.SeqIO as SeqIO
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -30,6 +32,7 @@ def parse_args():
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
+    parser.add_argument("--no_bq", action="store_true", help="No BQ")
     args = parser.parse_args()
     return args
 
@@ -37,7 +40,7 @@ def parse_args():
 def main():
     args = parse_args()
     ## Subdirectories for results: inference, pileup, evaluation, plot
-    inference_path = f"{args.output}/inference"
+    inference_path = f"{args.output}/embedding_edge"
     plot_path = f"{args.output}/plot"
     os.makedirs(inference_path, exist_ok=True)
     os.makedirs(plot_path, exist_ok=True)
@@ -51,9 +54,6 @@ def setup_ddp(rank,world_size):
         return None
 
     else:
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12355'
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
         torch.cuda.set_device(rank)
 
     return None
@@ -84,17 +84,28 @@ def run_inference(args):
         printmessage(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
-        out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}"
+        out_dir = f"{args_dict['output']}/embedding_edge/{model.split('/')[-1].split('.')[0]}-{args_dict['data'].split('/')[-1]}-full"
         if len(args_dict["postfix"]) > 0:
             out_dir = f"{out_dir}-{args_dict['postfix']}"
         print(out_dir)
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
         mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
+
     return None
 
 
 def inference_worker(rank, args_dict, flush_interval = 100):
+
+    ref_path = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta"
+    ref_id_list = []
+    for record in SeqIO.parse(ref_path, "fasta"):
+        ref_id_list.append(record.id)
+
+    convert_dict = {x.split(".")[0]:x for x in ref_id_list}
+
+    del ref_id_list
+    gc.collect()
 
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
@@ -103,27 +114,29 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
 
+    if "signal_stride" not in model_config:
+        model_config["signal_stride"] = 6
 
-    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
+    TransformerModel = importlib.import_module("model.airna_v3M3").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
                              spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
+                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"], return_embedding = True)
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
         printmessage(f"Total Params: {total_params:,}")
+
+
     if args_dict["gpu"] > 0:
         model.to(rank)
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
-    if args_dict["gpu"] > 0:
-        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
 
     data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
@@ -136,52 +149,73 @@ def inference_worker(rank, args_dict, flush_interval = 100):
 
     id_list = []
     pred_list = []
-    block_id_list = []
+    emb_512_list = []
+    emb_128_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
+
+
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
             src_signal = data["signal_token"].to(rank)
             src_seg_len = data["segment_len"].to(rank)
+            if not args_dict["no_bq"]:
+                src_bq = data["bq_token"].to(rank)
 
         else:
             src_kmer = data["kmer_token"]
             src_signal = data["signal_token"]
             src_seg_len = data["segment_len"]
+            if not args_dict["no_bq"]:
+                src_bq = data["bq_token"]
 
         with torch.no_grad():
-            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
+            if not args_dict["no_bq"]:
+                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq)
+            else:
+                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
 
 
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
+            emb_512_list.extend(emb_512)
+            emb_128_list.extend(emb_128)
+
         else:
             pred_list.append(pred.detach().numpy())
+            emb_512_list.extend(emb_512)
+            emb_128_list.extend(emb_128)
+
         id_list.append(np.array(data["label_id"]))
-        block_id_list.append(np.array(data["block_id"]))
 
         if idx % flush_interval == 0 and idx > 0:
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
-            block_id_list = np.concatenate(block_id_list)
 
-            data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
+            data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
+            data_df["NMID"] = data_df["label_id"].str.split(":").str[0]
+            data_df["NMID"] = data_df["NMID"].map(convert_dict)
+            data_df["pos"]  = data_df["label_id"].str.split(":").str[1]
+            data_df["label_id"] = data_df["NMID"] + ":" + data_df["pos"]
+            data_df.drop(["NMID", "pos"], axis = 1, inplace = True)
             data_df.to_pickle(out_path)
+
+            del data_df, id_list, pred_list, emb_512_list, emb_128_list
+            gc.collect()
+
             id_list = []
             pred_list = []
-            block_id_list = []
+            emb_128_list = []
+            emb_512_list = []
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
-    block_id_list = np.concatenate(block_id_list)
+    # emb_list = list(np.concatenate(emb_list))
 
-    data_df = pd.DataFrame({"label_id": id_list, "block_id": block_id_list, "pred": pred_list})
+    data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
     data_df.to_pickle(out_path)
-
-    if args_dict["gpu"] > 0:
-        dist.destroy_process_group()
 
     return None
 

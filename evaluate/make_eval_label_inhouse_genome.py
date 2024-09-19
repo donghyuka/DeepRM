@@ -158,34 +158,6 @@ def remove_no_m6a_transripts(depth_df, strict_site_only = False):
     return depth_df
 
 
-def sample_eval_data(datid_df, seed = None, ratio = False, drach = False, non_drach = False, downsample = None):
-    if drach:
-        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-        datid_df = datid_df[datid_df["drach"]]
-        datid_df = datid_df.copy()
-        datid_df.drop("drach", axis=1, inplace=True)
-
-    elif non_drach:
-        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-        datid_df = datid_df[datid_df["drach"] == False]
-        datid_df = datid_df.copy()
-        datid_df.drop("drach", axis=1, inplace=True)
-
-    if ratio is not False:
-        datid_df_pos = datid_df[datid_df["label"] == 1]
-        datid_df_neg = datid_df[datid_df["label"] == 0]
-        if len(datid_df_pos) < len(datid_df_neg) // ratio:
-            datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
-        else:
-            datid_df_pos = datid_df_pos.sample(n=len(datid_df_neg)//ratio, random_state=seed)
-        if downsample is not None:
-            datid_df_pos = datid_df_pos.sample(frac=downsample, random_state=seed)
-            datid_df_neg = datid_df_neg.sample(frac=downsample, random_state=seed)
-        datid_df = pd.concat([datid_df_pos, datid_df_neg], ignore_index=True)
-    return datid_df
-
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess RNA-seq data for training')
     parser.add_argument('--depth', '-d', type=str, help='Depth file', required=True)
@@ -303,7 +275,7 @@ def main():
     gc.collect()
 
 
-    label_name = f"Genomic.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
+    label_name = f"v2Genomic.GP{gp_cutoff}.depth{min_depth}_{max_depth}"
     if filter_adjacent:
         label_name += f".adj{adjacent_distance}"
         if adjacent_strict:
@@ -315,9 +287,11 @@ def main():
 
     datid_df["drach"] = datid_df["5mer"].apply(is_drach)
     datid_df.to_csv(f"{args.out}.{label_name}.tsv", sep='\t', index=False)
+    datid_df.to_pickle(f"{args.out}.{label_name}.pkl")
 
     drach_df = datid_df[datid_df["drach"]]
     drach_df.to_csv(f"{args.out}.{label_name}.drach.tsv", sep='\t', index=False)
+    drach_df.to_pickle(f"{args.out}.{label_name}.drach.pkl")
 
     return None
 

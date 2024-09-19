@@ -10,7 +10,7 @@ import pandas as pd
 import tqdm
 import pysam
 from utils.utils import mean_phred, oom_killer, printmessage
-from evaluate.tokenize_transcript import preprocess_pod5
+from archived.train_eval.tokenize_transcript import preprocess_pod5
 
 def md_to_mismatch_arr(md):
     """

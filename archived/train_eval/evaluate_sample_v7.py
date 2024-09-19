@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from archived.train_eval.inference_dataloader_warp import load_dataset
+from archived.train_eval.inference_dataloader_v7 import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -110,8 +110,8 @@ def inference_worker(rank, args_dict, flush_interval = 100):
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
-                             spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
+                             spectrogram_size = model_config["spectrogram_size"],
+                             block_len = model_config["block_len"], seq_len = model_config["seq_len"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -125,7 +125,6 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     if args_dict["gpu"] > 0:
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     model.eval()
-
     data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
                                num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"],
                                worker = args_dict["worker"],
@@ -141,17 +140,32 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
         if args_dict["gpu"] > 0:
             src_kmer = data["kmer_token"].to(rank)
+            # src_signal = data["signal_token"]
             src_signal = data["signal_token"].to(rank)
-            src_seg_len = data["segment_len"].to(rank)
+            src_bq = data["bq_token"].to(rank)
+            src_move = data["move_token"].to(rank)
+            src_pad_mask = (src_kmer == 0)
+            src_target_mask = data["target_mask"].to(rank)
 
         else:
             src_kmer = data["kmer_token"]
+            # src_signal = data["signal_token"]
             src_signal = data["signal_token"]
-            src_seg_len = data["segment_len"]
+            src_bq = data["bq_token"]
+            src_move = data["move_token"]
+            src_pad_mask = (src_kmer == 0)
+            src_target_mask = data["target_mask"]
 
         with torch.no_grad():
-            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
+            pred = model(src_kmer=src_kmer, src_signal=src_signal, src_bq=src_bq, src_move=src_move,
+                         src_pad_mask=src_pad_mask, src_target_mask=src_target_mask)
 
+        ## if pred has additional dimension, remove it.
+        if len(pred.shape) > 1:
+            target_mask_sum = src_target_mask.sum(dim = 1)
+            pred = pred * src_target_mask
+            pred = pred.sum(dim = 1)
+            pred = pred / target_mask_sum
 
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
@@ -159,6 +173,7 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             pred_list.append(pred.detach().numpy())
         id_list.append(np.array(data["label_id"]))
         block_id_list.append(np.array(data["block_id"]))
+
 
         if idx % flush_interval == 0 and idx > 0:
             id_list = np.concatenate(id_list)
