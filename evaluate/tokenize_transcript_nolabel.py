@@ -852,6 +852,7 @@ def main():
     label_df["index"] = label_df.index.astype(np.int32)
     label_df = label_df.groupby("nmid")
     label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
+    gc.collect()
 
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
 

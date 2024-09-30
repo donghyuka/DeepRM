@@ -5,6 +5,7 @@ import argparse
 import glob
 import os
 import seaborn as sns
+import tqdm
 from matplotlib import pyplot as plt
 
 
@@ -12,8 +13,15 @@ def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument("--cpu", "-c", type=int, default=int(mp.cpu_count()*0.9), help="Number of CPUs")
     args.add_argument("--input", "-i", type=str, required=True, help="Input path")
-    args.add_argument("--output", "-o", type=str, required=True, help="Output path")
+    args.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/histogram", help="Output path")
     args = args.parse_args()
+    if args.input.endswith("/"):
+        args.input = args.input[:-1]
+    if args.output.endswith("/"):
+        args.output = args.output[:-1]
+
+    args.output = os.path.join(args.output, os.path.basename(args.input))
+    os.makedirs(args.output, exist_ok=True)
     return args
 
 
@@ -40,20 +48,15 @@ def main():
     return_list = np.sum(return_list, axis=0)
     draw_histogram(return_list, args.output)
     np.save(f"{args.output}/histogram.npy", return_list)
-    print(return_list)
     return None
 
 
 def worker(pid, file_paths, return_list):
-    if len(file_paths) > 1:
-        df_list = []
-        for path in file_paths:
-            data_df = pd.read_pickle(path)
-            df_list.append(data_df)
-        df = pd.concat(df_list, axis=0)
-    else:
-        df = pd.read_pickle(file_paths[0])
-    val_arr = df["pred"].to_numpy()
+    df_list = []
+    for path in tqdm.tqdm(file_paths):
+        data_df =  pd.read_pickle(path)
+        df_list.append(data_df["pred"].values)
+    val_arr = np.concatenate(df_list)
     hist, bin_edges = np.histogram(val_arr, bins = 1000, range = (0, 1))
     return_list.append(hist)
     return None

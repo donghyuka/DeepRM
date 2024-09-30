@@ -33,14 +33,18 @@ class NanoporeDatasetIterator:
 
     def _read_df(self, path):
         data = {}
-        with np.load(path, allow_pickle=True) as npz:
-            data["label_id"] = npz["label_id"]
-            data["segment_len"] = torch.tensor(npz["segment_len_arr"], dtype=torch.int32)
-            data["signal_token"] = torch.tensor(npz["signal_token"], dtype=torch.float32)
-            data["kmer_token"] = torch.tensor(npz["kmer_token"], dtype=torch.int32)
-            data["dwell_motor_token"] = torch.tensor(npz["dwell_motor_token"], dtype=torch.float32)
-            data["dwell_pore_token"] = torch.tensor(npz["dwell_pore_token"], dtype=torch.float32)
-            data["bq_token"] = torch.tensor(npz["bq_token"], dtype=torch.float32)
+        try:
+            with np.load(path) as npz:
+                data["label_id"] = npz["label_id"]
+                data["segment_len"] = torch.tensor(npz["segment_len_arr"], dtype=torch.int32)
+                data["signal_token"] = torch.tensor(npz["signal_token"], dtype=torch.float32)
+                data["kmer_token"] = torch.tensor(npz["kmer_token"], dtype=torch.int32)
+                data["dwell_motor_token"] = torch.tensor(npz["dwell_motor_token"], dtype=torch.float32)
+                data["dwell_pore_token"] = torch.tensor(npz["dwell_pore_token"], dtype=torch.float32)
+                data["bq_token"] = torch.tensor(npz["bq_token"], dtype=torch.float32)
+        except:
+            printmessage(f"Error loading {path}")
+            return None
         return data
 
     def __next__(self):

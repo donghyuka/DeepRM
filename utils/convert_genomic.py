@@ -13,18 +13,19 @@ def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument("--cpu", "-c", type=int, default=int(os.cpu_count()*0.95), help="Number of CPUs")
     args.add_argument("--input", "-i", type=str, required=True, help="Data path")
-    args.add_argument("--output", "-o", type=str, required=True, help="Output path")
+    args.add_argument("--output", "-o", type=str, default = None, help="Output path")
     args = args.parse_args()
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    if args.output is None:
+        args.output = f"{args.input}.genomic.pkl"
+    else:
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)
     return args
 
 
-def worker(df, refflat_df, collect_list, epsilon = 1e-6):
+def worker(df, refflat_df, collect_list):
 
     df["count_m6a"] = (df["count_dom"] * df["dom"]).astype(int)
     df["count_ca"] = df["count_dom"] - df["count_m6a"]
-    df["pm6a"] = np.clip(df["pm6a"], 0.0, 1.0 - epsilon)
-    df["pm6a"] = np.log10(1-df["pm6a"]) * df["count_pm6a"]
     df["pos"] = df["label_id"].apply(lambda x: x.split(":")[1]).astype(int)
     df["coding"] = df["gene"].apply(lambda x: x.startswith("NM"))
     df["isoforms"] = 1
@@ -58,16 +59,26 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
         local_collect.append(gene_df)
 
     gene_df = pd.concat(local_collect)
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first",  "count_m6a": "sum",
-                                                "count_ca": "sum", "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first",
-                                                "isoforms": "sum", "coding": "max"})
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first",
+                                                "count_m6a": "sum", "count_ca": "sum",
+                                                "count_all": "sum",
+                                                "logsum_1_p_pos": "sum", "count_pos": "sum",
+                                                "logsum_1_p_neg": "sum", "count_neg": "sum",
+                                                "gene_id": "first", "isoforms": "sum", "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
     collect_list.append(gene_df.copy())
 
     return None
 
 def load_split_data(data_path, cpu):
-    data_df = pd.read_pickle(data_path)
+    if data_path.endswith(".pkl"):
+        data_df = pd.read_pickle(data_path)
+    elif data_path.endswith(".npz"):
+        with np.load(data_path, allow_pickle=True) as data:
+            data_df = pd.DataFrame({k: data[k] for k in data.keys()})
+    else:
+        raise ValueError("Invalid data format: must be .pkl or .npz")
+
     print(data_df)
     data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
     geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
@@ -117,14 +128,17 @@ def main():
 
     gc.collect()
 
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum", "count_ca": "sum",
-                                                "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first", "isoforms": "sum",
-                                                "coding": "max"})
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first",
+                                                "count_m6a": "sum", "count_ca": "sum",
+                                                "count_all": "sum",
+                                                "logsum_1_p_pos": "sum", "count_pos": "sum",
+                                                "logsum_1_p_neg": "sum", "count_neg": "sum",
+                                                "gene_id": "first", "isoforms": "sum", "coding": "max"})
 
-    gene_df["pm6a"] = 1 - 10**(gene_df["pm6a"] / gene_df["count_pm6a"])
     gene_df["dom"] = gene_df["count_m6a"] / (gene_df["count_m6a"] + gene_df["count_ca"])
     gene_df["count_dom"] = gene_df["count_m6a"] + gene_df["count_ca"]
-    gene_df = gene_df[["genome_id", "gene_id", "dom", "pm6a", "depth", "count_dom", "count_pm6a", "coding"]].copy()
+    gene_df = gene_df[["genome_id", "gene_id", "coding", "dom", "count_dom", "logsum_1_p_pos",
+                          "logsum_1_p_neg", "count_neg", "count_all", "count_pos"]].copy()
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
     print(gene_df)

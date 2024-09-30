@@ -223,19 +223,30 @@ def inference_worker(rank, args_dict):
         src_kmer = batch_data["kmer_token"].to(rank)
         src_signal = batch_data["signal_token"].to(rank)
         src_seg_len = batch_data["segment_len"].to(rank)
-        src_dwell_motor = batch_data["dwell_motor_token"].to(rank)
-        src_dwell_pore = batch_data["dwell_pore_token"].to(rank)
-        src_bq = batch_data["bq_token"].to(rank)
 
-        if args_dict["motor_only"]:
-            src_dwell_bq = src_dwell_motor
-        elif args_dict["no_bq"]:
-            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore], dim=-1)
+        if args_dict["no_dwell"]:
+            if args_dict["no_bq"]:
+                with torch.no_grad():
+                    pred = model(src_kmer, src_signal, src_seg_len)
+            else:
+                src_bq = batch_data["bq_token"].to(rank)
+                with torch.no_grad():
+                    pred = model(src_kmer, src_signal, src_seg_len, src_bq)
+
         else:
-            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
+            src_dwell_motor = batch_data["dwell_motor_token"].to(rank)
+            src_bq = batch_data["bq_token"].to(rank)
+            if args_dict["motor_only"]:
+                src_dwell_bq = src_dwell_motor
+            else:
+                src_dwell_pore = batch_data["dwell_pore_token"].to(rank)
+                if args_dict["no_bq"]:
+                    src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore], dim=-1)
+                else:
+                    src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
 
-        with torch.no_grad():
-            pred = model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
+            with torch.no_grad():
+                pred = model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
 
         pred_list.append(pred.cpu().detach().numpy())
         id_list.append(np.array(batch_data["label_id"]))

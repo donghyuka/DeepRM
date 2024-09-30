@@ -160,7 +160,7 @@ def parse_args():
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
-    parser.add_argument("--ref", "-f", type=str, default="", help="Reference path")
+    parser.add_argument("--ref", "-f", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta", help="Reference path")
     parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
     parser.add_argument("--toml", "-m", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml", help="Dorado TOML file")
     parser.add_argument("--base", "-x", type=str, default="A", help="Base of Interest")

@@ -471,14 +471,13 @@ def ref_pos_to_query_pos(ref_pos_request_arr, cigar, start_pos):
     return query_pos_list
 
 
-def get_label_pos_list(ref, start, cigar, label_df):
-    ref = ref.split(".")[0]
 
+
+def get_label_pos_list(ref, start, cigar, label_df):
     try:
-        label_df_nmid = label_df.get_group(ref)
+        label_df_nmid = label_df[ref.split(".")[0]]
     except KeyError:
         return []
-
 
     index_list = label_df_nmid[0]
     ref_pos_list = label_df_nmid[1]
@@ -486,7 +485,6 @@ def get_label_pos_list(ref, start, cigar, label_df):
     pos_tuple_list = list(zip(index_list, query_pos_list))
     pos_tuple_list_filtered = [x for x in pos_tuple_list if x[1] is not None]
     return pos_tuple_list_filtered
-
 
 def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode, token_output_path,
                              cb_len = 21, kmer_len = 5, chunk_size = 10000, max_token_len = 200, sampling = 6,
@@ -808,6 +806,14 @@ def main():
     norm_factor = parse_toml(args.toml, args.norm_mode)
     printmessage(f"Normalisation factor: {norm_factor}", msg_type="info")
 
+    label_df = pd.read_csv(args.label, sep='\t')
+    label_df.reset_index()
+    label_df["index"] = label_df.index.astype(np.int32)
+
+    label_df = label_df.groupby("nmid")
+    label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
+    gc.collect()
+
     if not os.path.exists(signal_index_path):
         index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
         gc.collect()
@@ -847,12 +853,6 @@ def main():
 
     del signal_path_dict
     gc.collect()
-
-    label_df = pd.read_csv(args.label, sep='\t')
-    label_df.reset_index()
-    label_df["index"] = label_df.index.astype(np.int32)
-    label_df = label_df.groupby("nmid")
-    label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
 
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
 

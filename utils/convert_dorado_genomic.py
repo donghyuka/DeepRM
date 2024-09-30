@@ -11,32 +11,39 @@ from utils.utils import parse_refflat
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
-    args.add_argument("--data", type=str, required=True, help="Data path")
-    args.add_argument("--output", type=str, required=True, help="Output path")
-    args.add_argument("--label", type=str, required=True, help="Label path")
+    args.add_argument("--cpu", "-c", type=int, default=int(os.cpu_count()*0.95), help="Number of CPUs")
+    args.add_argument("--input", "-i", type=str, required=True, help="Data path")
+    args.add_argument("--output", "-o", type=str, default = None, help="Output path")
+    args.add_argument("--mod",  "-m", type=str, required=True, help="Modification code")
     args = args.parse_args()
-    os.makedirs(args.output, exist_ok=True)
+    if args.output is None:
+        args.output = f"{args.input}.{args.mod}.genomic.pkl"
+    else:
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)
     return args
 
 
-def process_dorado_inferece(data_path):
+def process_dorado_inferece(data_path, mod):
+    mod_code_dict = {"m6A": "a", "m5C": "m", "I": "17596", "pseU": "17802"}
+    mod_code = mod_code_dict[mod]
+
     if data_path is None:
         return None
     data_df = pd.read_csv(data_path, quoting = 3, sep = "\t", header = None, dtype=str)
     ## Keep column 0, 1, 4, 9
-    data_df = data_df[[0, 1, 4, 9]]
-    data_df.columns = ["nmid", "pos", "depth", "pred_dorado"]
+    data_df = data_df[[0, 1, 3, 4, 9]]
+    data_df.columns = ["nmid", "pos", "mod", "depth", "pred_dorado"]
+    data_df = data_df[data_df["mod"] == mod_code].copy()
     data_df["depth"] = data_df["depth"].astype(int)
-    # data_df = data_df[data_df["depth"] >= 10].copy()
     data_df["dom"] = data_df["pred_dorado"].str.split(" ").str[1].astype(float) / 100
     data_df["label_id"] = data_df["nmid"].str.split(".").str[0] + ":" + data_df["pos"]
     data_df = data_df[["label_id", "dom", "depth"]].copy()
     data_df.rename(columns = {"depth": "count_dom"}, inplace = True)
+    data_df.to_pickle(f"{data_path}.{mod}.pkl")
     return data_df
 
 
-def worker(df, refflat_df, collect_list, epsilon = 1e-6):
+def worker(df, refflat_df, collect_list):
 
     df["count_m6a"] = (df["count_dom"] * df["dom"]).astype(int)
     df["count_ca"] = df["count_dom"] - df["count_m6a"]
@@ -72,23 +79,25 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
         local_collect.append(gene_df)
 
     gene_df = pd.concat(local_collect)
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum",
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum",
                                                 "count_ca": "sum", "gene_id": "first",
-                                                "depth": "sum", "coding": "max"})
+                                                "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
     collect_list.append(gene_df.copy())
 
     return None
 
-def load_split_data(data_path, output_path, label_path, cpu):
-    data_df = process_dorado_inferece(data_path)
-    print(data_df)
+def load_split_data(data_path, output_path, mod, cpu):
+    if data_path.endswith(".bed"):
+        data_df = process_dorado_inferece(data_path, mod)
+        print(data_df)
+    elif data_path.endswith(".pkl"):
+        data_df = pd.read_pickle(data_path)
+        print(data_df)
+        data_df.rename(columns = {"dorado_count": "count_dom", "pred_dorado": "dom"}, inplace = True)
+    else:
+        raise ValueError("Invalid data format: must be .bed or .pkl")
 
-    label_df = pd.read_csv(label_path, sep="\t")
-
-    label_df = label_df[["id","5mer", "drach", "depth"]]
-    label_df.rename({"id":"label_id"}, axis=1, inplace=True)
-    data_df = data_df.merge(label_df, how="left", on="label_id")
     data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
 
     geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
@@ -97,8 +106,6 @@ def load_split_data(data_path, output_path, label_path, cpu):
     data_df.dropna(inplace=True)
 
     print(data_df)
-
-    data_df.to_pickle(output_path + "/data_df.pkl")
 
     data_df = data_df.groupby("gene_id")
     ## sort by size
@@ -115,7 +122,6 @@ def load_split_data(data_path, output_path, label_path, cpu):
 
     gc.collect()
 
-
     return df_list_split
 
 
@@ -124,7 +130,7 @@ def main():
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    df_list_split = load_split_data(args.data, args.output, args.label, args.cpu)
+    df_list_split = load_split_data(args.input, args.output, args.mod, args.cpu)
     refflat_df = parse_refflat(drop_y=True, drop_m=True)
     for pid, df in enumerate(df_list_split):
         proc = mp.Process(target=worker, args=(df, refflat_df, collect_list))
@@ -140,20 +146,18 @@ def main():
 
     gc.collect()
 
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum", "count_ca": "sum",
-                                                "gene_id": "first", "depth": "sum",
-                                                "coding": "max"})
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum", "count_ca": "sum",
+                                                "gene_id": "first", "coding": "max"})
 
     gene_df["dom"] = gene_df["count_m6a"] / (gene_df["count_m6a"] + gene_df["count_ca"])
-
     gene_df["count_dom"] = gene_df["count_m6a"] + gene_df["count_ca"]
-    gene_df = gene_df[["genome_id", "gene_id", "dom", "drach", "depth", "count_dom", "coding"]]
+
+    gene_df = gene_df[["genome_id", "gene_id", "dom", "count_dom", "coding"]]
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
     print(gene_df)
 
-    gene_df.to_pickle(args.output + "/gene_df_final.pkl")
-    gene_df.to_csv(args.output + "/gene_df_final.tsv", sep="\t", index=False)
+    gene_df.to_pickle(args.output)
     gc.collect()
 
     return None
