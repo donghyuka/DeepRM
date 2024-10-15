@@ -180,7 +180,7 @@ def main():
     bam_path = f"{wdir}/dorado_output.bam"
     block_df_path = f"{wdir}/block_df.pkl"
     signal_path = f"{wdir}/segmented_tokenized/"
-    dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v5.0.0"
+    dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v5.1.0"
     qc_path = f"{args.output}/qc/"
 
     os.makedirs(wdir, exist_ok=True)

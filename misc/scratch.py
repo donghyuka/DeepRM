@@ -1,263 +1,211 @@
-import argparse, os
+import os
+
 import pandas as pd
 import numpy as np
 import multiprocessing as mp
-from utils.utils import is_drach
-import tqdm
-import gc
+import argparse
+def chromosomal_to_transcript_coordinate(nmid, chr_coordinate, chrstrand, strand, refflat_df):
+    ## Purpose: convert chromosome coordinate to mrna coordinate, based on exon starts and ends
+    ## Expects and returns zero-based coordinates
+
+    ## Get the exon starts and ends
+    refflat_df_chrs = refflat_df[refflat_df["chrstrand"]==chrstrand]
+    exon_starts = refflat_df_chrs.loc[nmid,"exonStarts"]
+    exon_ends = refflat_df_chrs.loc[nmid,"exonEnds"]
 
 
+    exons=np.stack((exon_starts,exon_ends),axis=1)
+    exon_cumsum=np.concatenate(([0],np.cumsum(exons[:,1]-exons[:,0])))
+    try:
+        exon_index = np.searchsorted(exons[:,0],chr_coordinate,side="right")-1
+    except:
+        print(nmid,chr_coordinate,chrstrand,strand)
+        raise ValueError
+    mrna_coordinate=exon_cumsum[exon_index]+(chr_coordinate-exons[exon_index,0])
+    mrna_length=exon_cumsum[-1]
 
-def get_data_df(gp_cutoff,data_path ):
-    data_df = pd.read_pickle(data_path)
-    data_df["id"] = data_df["NMID"] + ":" + data_df["transcript_coordinate"].astype(str)
-    data_df["intersect"] = data_df["validated"] >= gp_cutoff
-    data_df["intersect"] = data_df["intersect"].astype(int)
-    data_df["label"] = 2 * data_df["intersect"] - 1
-    data_df = data_df[['id', 'NMID', 'DoM', 'label']]
-    data_df.rename({"DoM":"m6A_level"}, axis=1, inplace=True)
-    return data_df
+    if strand=="-":
+        mrna_coordinate=mrna_length-mrna_coordinate-1
 
-def make_label_df(return_list, data_df, depth_df,
-                  filter_adjacent, adjacent_distance , adjacent_strict,
-                  filter_no_m6a , no_m6a_strict ):
+    return mrna_coordinate
 
-    if len(depth_df) == 0:
-        return None
-    if len(data_df) == 0:
-        data_df = [pd.DataFrame(columns=["id","m6A_level","NMID","label"])]
-    data_df = pd.concat(data_df).reset_index(drop=True)
-    data_df.drop("NMID", axis=1, inplace=True)
-    depth_df = pd.concat(depth_df).reset_index(drop=True)
-    depth_df = depth_df.merge(data_df, how="left", on="id")
-    depth_df.fillna(0, inplace=True)
+def ncid_to_chr(ncid):
+    ncid_int=int(ncid.split(".")[0][3:])
+    if ncid_int<=22:
+        chr=f"chr{ncid_int}"
+    elif ncid_int==23:
+        chr="chrX"
+    elif ncid_int==24:
+        chr="chrY"
+    else:
+        chr="chrUnk"
+    return chr
 
-    del data_df
-    gc.collect()
 
-    if len(depth_df) == 0:
-        return None
+def parse_refflat(refflat_path):
+    col_list=["NMID","NCID","strand","txStart","txEnd","cdsStart","cdsEnd","exonCount","exonStarts","exonEnds"]
+    with open(refflat_path,"r") as infile:
+        refflat_df=pd.read_csv(infile,sep="\t",header=None,names=col_list)
 
-    depth_df["label"] = depth_df["label"].astype(int)
+    refflat_df["chr"]=refflat_df["NCID"].apply(lambda x: ncid_to_chr(x))
+    refflat_df["NMID"]=refflat_df["NMID"].str.split(".").str[0]
+    refflat_df = refflat_df[refflat_df["chr"]!="chrUnk"]
+    refflat_df=refflat_df[refflat_df["cdsEnd"]>=refflat_df["cdsStart"]]
+    refflat_df["chrstrand"]=refflat_df["chr"].astype(str)+refflat_df["strand"]
+    refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]]=refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]].astype(int)
+    refflat_df["exonStarts"]=refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df["exonEnds"]=refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
 
-    if filter_adjacent:
-        depth_df = remove_adjacent_sites(depth_df, strict_site_only = adjacent_strict, distance = adjacent_distance)
-        if depth_df is None:
-            return None
 
-    depth_df["label"] = depth_df["label"].astype(int)
+    ## Drop duplicates
+    chr_list = [f"chr{i}" for i in list(range(1,23))+["X","Y","M"]]
+    refflat_df_list=[]
+    for chr in chr_list:
+        refflat_df_chrs = refflat_df[refflat_df["chr"]==chr].copy()
+        refflat_df_chrs.drop_duplicates(subset='NMID',keep="first",inplace=True,ignore_index=True)
+        refflat_df_list.append(refflat_df_chrs)
 
-    if filter_no_m6a:
-        depth_df = remove_no_m6a_transripts(depth_df, strict_site_only = no_m6a_strict)
-        if depth_df is None:
-            return None
+    refflat_df = pd.concat(refflat_df_list,ignore_index=True)
+    refflat_df.set_index("NMID",inplace=True)
 
-    depth_df["label"] = depth_df["label"].astype(int)
+    return refflat_df
 
-    depth_df = depth_df.dropna()
-    return_list.append(depth_df)
+
+def check_in_exon(pos,exon_starts,exon_ends):
+    exon_zip = zip(exon_starts,exon_ends)
+    in_exon = [(pos >= exon_start) & (pos < exon_end) for exon_start,exon_end in exon_zip]
+    in_exon = np.array(np.any(in_exon))
+
+    return in_exon
+
+
+def match_site_to_gene(chrstrand, pos, refflat_df):
+    refflat_df_chrstrand = refflat_df[refflat_df["chrstrand"]==chrstrand]
+    refflat_df_gene = refflat_df_chrstrand[(refflat_df_chrstrand["txStart"]<=pos) & (refflat_df_chrstrand["txEnd"]>pos)]
+
+    if len(refflat_df_gene)==0:
+        return []
+
+    ## Check if the coordinate is in the exon.
+    refflat_df_gene["in_exon"]=refflat_df_gene.apply(lambda x: check_in_exon(pos,x["exonStarts"],x["exonEnds"]),axis=1)
+    refflat_df_gene = refflat_df_gene[refflat_df_gene["in_exon"]==True]
+
+    return refflat_df_gene.index.to_numpy()
+
+
+def mp_worker(m6a_df, refflat_df, pos_col, strand_col, m6a_df_list):
+
+    m6a_df["NMID"]=m6a_df.apply(lambda x: match_site_to_gene(x["chrstrand"],x[pos_col],refflat_df),axis=1)
+
+    print(m6a_df)
+
+    ## Filter out sites that do not match to a gene
+    m6a_df = m6a_df[m6a_df["NMID"].apply(lambda x: len(x)>0)]
+
+    ## Explode the NMID column
+    m6a_df = m6a_df.explode("NMID")
+
+    ## Second, convert chromosome coordinate to transcript coordinate
+    m6a_df["transcript_coordinate"]=m6a_df.apply(lambda x: chromosomal_to_transcript_coordinate(
+        x["NMID"],x[pos_col], x["chrstrand"], x[strand_col],refflat_df),axis=1)
+
+    m6a_df_list.append(m6a_df)
+
     return None
 
 
-def remove_adjacent_sites(depth_df, strict_site_only = False, distance = 10):
-    depth_df_groupby = depth_df.groupby("nmid")
-    depth_df_list = []
-    for nmid, group in depth_df_groupby:
-        group = group.sort_values("pos")
-        ## calculate distance from nearest m6A site
-        if strict_site_only:
-            m6a_pos_list = group[group["label"] == 1]["pos"].values
-        else:
-            m6a_pos_list = group[np.abs(group["label"]) == 1]["pos"].values
+def reformat_m6A_df(chr_col="chr",pos_col="pos",strand_col="str",pos_offset=0,neg_offset=0,
+                    infilename="m6A_Jungmin_110823.txt",outfilename="m6A_Jungmin_110823.tsv", ncpu=120
+                    ,refflat_path = ""):
 
-        if len(m6a_pos_list) == 0:
-            depth_df_list.append(group)
+    m6a_df = pd.read_csv(f"{infilename}",sep="\t")
 
-        else:
-            group["min_dist_from_m6a"] = group["pos"].apply(lambda x: np.min(np.abs(m6a_pos_list - x)))
-            group["label"] = group.apply(lambda row: -2 if (row["min_dist_from_m6a"] <= distance and row["label"] == 0) else row["label"], axis=1)
-            depth_df_list.append(group)
+    m6a_df=m6a_df[[chr_col,strand_col,pos_col]]
 
-    if len(depth_df_list) == 0:
-        depth_df = None
-    else:
-        depth_df = pd.concat(depth_df_list).reset_index(drop=True)
+    # m6a_df[strand_col] = m6a_df[strand_col].map({"A":"+", "T":"-"})
 
-    if "min_dist_from_m6a" in depth_df.columns:
-        depth_df.drop("min_dist_from_m6a", axis=1, inplace=True)
+    m6a_df_1 = m6a_df.copy()
+    m6a_df_2 = m6a_df.copy()
+    m6a_df_1[strand_col] = "+"
+    m6a_df_2[strand_col] = "-"
+    m6a_df = pd.concat([m6a_df_1,m6a_df_2],ignore_index=True)
 
-    return depth_df
+    ## Apply positive offset to positive strand sites
+    pos_idx = m6a_df[strand_col]=="+"
+    m6a_df.loc[pos_idx,pos_col] = m6a_df.loc[pos_idx,pos_col] + pos_offset
 
+    ## Apply negative offset to negative strand sites
+    neg_idx = m6a_df[strand_col]=="-"
+    m6a_df.loc[neg_idx,pos_col] = m6a_df.loc[neg_idx,pos_col] + neg_offset
 
-def remove_no_m6a_transripts(depth_df, strict_site_only = False):
-    depth_df_groupby = depth_df.groupby("nmid")
-    depth_df_list = []
-    for nmid, group in depth_df_groupby:
-        if strict_site_only:
-            if 1 not in group["label"].values:
-                group["label"] = -3
-        else:
-            if (1 not in np.abs(group["label"]).values):
-                group["label"] = -3
-        depth_df_list.append(group)
+    ## load refflat file
+    refflat_df = parse_refflat(refflat_path)
 
-    if len(depth_df_list) == 0:
-        depth_df = None
-    else:
-        depth_df = pd.concat(depth_df_list).reset_index(drop=True)
+    print(refflat_df.head())
+    ## First, match each site to a gene
+    m6a_df["chrstrand"]=m6a_df[chr_col].astype(str)+m6a_df[strand_col]
 
-    return depth_df
-
-
-def sample_eval_data(datid_df, seed = None, ratio = False, drach = False, non_drach = False, downsample = None):
-    if drach:
-        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-        datid_df = datid_df[datid_df["drach"]]
-        datid_df = datid_df.copy()
-        datid_df.drop("drach", axis=1, inplace=True)
-
-    elif non_drach:
-        datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-        datid_df = datid_df[datid_df["drach"] == False]
-        datid_df = datid_df.copy()
-        datid_df.drop("drach", axis=1, inplace=True)
-
-    if ratio is not False:
-        datid_df_pos = datid_df[datid_df["label"] == 1]
-        datid_df_neg = datid_df[datid_df["label"] == 0]
-        if len(datid_df_pos) < len(datid_df_neg) // ratio:
-            datid_df_neg = datid_df_neg.sample(n=int(len(datid_df_pos)*ratio), random_state=seed)
-        else:
-            datid_df_pos = datid_df_pos.sample(n=len(datid_df_neg)//ratio, random_state=seed)
-        if downsample is not None:
-            datid_df_pos = datid_df_pos.sample(frac=downsample, random_state=seed)
-            datid_df_neg = datid_df_neg.sample(frac=downsample, random_state=seed)
-        datid_df = pd.concat([datid_df_pos, datid_df_neg], ignore_index=True)
-    return datid_df
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description='Preprocess RNA-seq data for training')
-    parser.add_argument('--depth', '-d', type=str, help='Depth file', required=True)
-    parser.add_argument('--out', '-o', type=str, help='Output directory', required=True)
-    parser.add_argument('--data', '-a', type=str, help='Data file', default="/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/jungmin_glori_published.pkl")
-    parser.add_argument('--cpu', '-c', type=int, default=None, help='Number of threads')
-    parser.add_argument('--gp', type=int, default=3, help='GP cutoff')
-    parser.add_argument('--adj', type=bool, default=False, help='Filter adjacent sites')
-    parser.add_argument('--adj_strict', type=bool, default=False, help='Filter adjacent sites strictly')
-    parser.add_argument('--adj_distance', type=int, default=10, help='Distance to adjacent sites')
-    parser.add_argument('--nom6a', type=bool, default=True, help='Filter no m6A genes')
-    parser.add_argument('--nom6a_strict', type=bool, default=True, help='Filter no m6A genes strictly')
-    parser.add_argument('--min_depth', type=int, default=5, help='Minimum depth')
-    parser.add_argument('--max_depth', type=int, default=None, help='Maximum depth')
-
-    args = parser.parse_args()
-    if args.cpu is None:
-        args.cpu = int(os.cpu_count() * 0.9)
-
-    os.makedirs(args.out, exist_ok=True)
-    return args
-
-
-def main():
-
-    args = parse_args()
-
-    gp_cutoff = args.gp
-    filter_adjacent = args.adj
-    adjacent_strict = args.adj_strict
-    filter_no_m6a = args.nom6a
-    no_m6a_strict = args.nom6a_strict
-    min_depth = args.min_depth
-    max_depth = args.max_depth
-    adjacent_distance = args.adj_distance
-
-    data_df = get_data_df(gp_cutoff, args.data)
-    print(data_df)
-
-    depth_df = pd.read_pickle(args.depth)
-    depth_df.rename({"ref":"nmid"}, axis=1, inplace=True)
-    depth_df["nmid"] = depth_df["nmid"].str.split(".").str[0]
-    depth_df["pos"] = depth_df["pos"] - 1
-    depth_df["id"] = depth_df["nmid"] + ":" + depth_df["pos"].astype(str)
-    depth_df = depth_df[["id", "depth", "nmid", "pos", "5mer"]]
-    if min_depth is not None:
-        depth_df = depth_df[depth_df["depth"] > min_depth].copy()
-    if max_depth is not None:
-        depth_df = depth_df[depth_df["depth"] < max_depth].copy()
-    print(depth_df)
-
-    depth_df_groupby = depth_df.groupby("nmid")
-    data_df_groupby = data_df.groupby("NMID")
-
-    ## split into ncpu chunks, respecting the nmid groupby
-    depth_df_split = [[] for i in range(args.cpu)]
-    data_df_split = [[] for i in range(args.cpu)]
-
-    ## sort groups according to length
-    groups = [group for name, group in depth_df_groupby]
-    len_groups =len(groups)
-    groups = sorted(groups, key = lambda x: len(x), reverse = True)
-
-    for idx, group in tqdm.tqdm(enumerate(groups), desc="Splitting depth_df", total=len_groups):
-        nmid = group["nmid"].values[0]
-        split_idx = idx % (2*args.cpu)
-        if split_idx >= args.cpu:
-            split_idx = 2*args.cpu - split_idx - 1
-        depth_df_split[split_idx].append(group)
-        try:
-            data_df_group = data_df_groupby.get_group(nmid)
-            data_df_split[split_idx].append(data_df_group)
-        except KeyError:
-            pass
-
-    del depth_df, depth_df_groupby, data_df, data_df_groupby
-    gc.collect()
-
-    print("Splitting complete")
-
-    proc_list = []
+    m6a_df_split = np.array_split(m6a_df,ncpu)
     man = mp.Manager()
-    return_list = man.list()
+    m6a_df_list =  man.list()
+    proc_list = []
 
-    for depth_df, data_df in zip(depth_df_split, data_df_split):
-        proc = mp.Process(target=make_label_df, args=(return_list, data_df, depth_df,
-                                                      filter_adjacent, adjacent_distance, adjacent_strict,
-                                                      filter_no_m6a, no_m6a_strict))
-        proc_list.append(proc)
+    for m6a_df in m6a_df_split:
+        proc = mp.Process(target=mp_worker, args=(m6a_df, refflat_df, pos_col, strand_col, m6a_df_list))
         proc.start()
-
-    del depth_df_split, data_df_split
-    gc.collect()
+        proc_list.append(proc)
 
     for proc in proc_list:
         proc.join()
 
-    return_list = list(return_list)
-    datid_df = pd.concat(return_list)
-    datid_df = datid_df.dropna()
-    man.shutdown()
-    del return_list
-    gc.collect()
+    m6a_df_list = list(m6a_df_list)
+    m6a_df = pd.concat(m6a_df_list,ignore_index=True)
 
-    label_name = f"GP{gp_cutoff}.depth{min_depth}_{max_depth}"
-    if filter_adjacent:
-        label_name += f".adj{adjacent_distance}"
-        if adjacent_strict:
-            label_name += "strict"
-    if filter_no_m6a:
-        label_name += ".twm6a"
-        if no_m6a_strict:
-            label_name += "strict"
+    print(m6a_df.head())
 
-    datid_df["drach"] = datid_df["5mer"].apply(is_drach)
-    datid_df.to_csv(f"{args.out}.{label_name}.tsv", sep='\t', index=False)
-
-    drach_df = datid_df[datid_df["drach"]]
-    drach_df.to_csv(f"{args.out}.{label_name}.drach.tsv", sep='\t', index=False)
+    print(f"Writing output file to {outfilename}")
+    m6a_df.to_csv(f"{outfilename}",sep="\t",index=False)
 
     return None
 
+def parse_args():
 
-if __name__ == "__main__":
+
+
+    hg38_refflat_path="/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.gtf.refflat.txt"
+    hg19_refflat_path="/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh37_latest_genomic.gtf.refflat.txt"
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", "-i", type=str, help="Input file", default="/extdata3/baeklab/Hyeonseo/m6A/res/RMsites/m6Am_seq_hg19.txt")
+    parser.add_argument("--output", "-o", type=str, help="Output file", default="/extdata3/baeklab/Hyeonseo/m6A/res/RMsites/m6Am_seq_hg19.transcript.tsv")
+    parser.add_argument("--chr", "-c", type=str, help="Chromosome column", default="CHR")
+    parser.add_argument("--pos", "-p", type=str, help="Position column", default="star")
+    parser.add_argument("--strand", "-s", type=str, help="Strand column", default="base")
+    parser.add_argument("--pos_offset", "-po", type=int, help="Positive offset", default=1)
+    parser.add_argument("--neg_offset", "-no", type=int, help="Negative offset", default=1)
+    parser.add_argument("--threads", "-t", type=int, help="Number of CPUs", default=120)
+    parser.add_argument("--refflat", "-r", type=str, help="Refflat file", default=None)
+    parser.add_argument("--genome", "-g", type=str, help="Genome version", default="hg19")
+    args = parser.parse_args()
+
+    if args.refflat is None:
+        if args.genome=="hg38":
+            args.refflat = hg38_refflat_path
+        elif args.genome=="hg19":
+            args.refflat = hg19_refflat_path
+        else:
+            raise ValueError("Invalid genome version")
+
+    return args
+
+
+def main():
+    args = parse_args()
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    reformat_m6A_df(chr_col=args.chr,pos_col=args.pos,strand_col=args.strand,pos_offset=args.pos_offset,neg_offset=args.neg_offset,
+                    infilename=args.input,outfilename=args.output, ncpu=args.threads, refflat_path=args.refflat)
+    return None
+
+
+if __name__=="__main__":
     main()

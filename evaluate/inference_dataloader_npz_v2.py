@@ -34,7 +34,7 @@ class NanoporeDatasetIterator:
     def _read_df(self, path):
         data = {}
         try:
-            with np.load(path) as npz:
+            with np.load(path, allow_pickle=True) as npz:
                 data["label_id"] = npz["label_id"]
                 data["segment_len"] = torch.tensor(npz["segment_len_arr"], dtype=torch.int32)
                 data["signal_token"] = torch.tensor(npz["signal_token"], dtype=torch.float32)

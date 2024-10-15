@@ -61,7 +61,7 @@ def parse_args():
 def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
                     label_dict = {0:"neg", 1:"pos"},
                     set_split_dict = {"train":0.95, "val":0.05},
-                    score_name_list = ["all", "perfect"],
+                    score_name_list = [0.0, 1.0],
                     id_digit=9,
                     shuffle = True,
                     read_once = 100):
@@ -84,7 +84,7 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 
     for pid in range(ncpu):
         proc = mp.Process(target=sample_and_save_worker, args=(ncpu, pid, in_file_list[pid], out_path, label_str,
-                                                               set_split_dict, chunk, label,
+                                                               set_split_dict, score_name_list, chunk, label,
                                                                remainder_dict, id_digit, shuffle, read_once, column_keys))
         proc_list.append(proc)
         proc.start()
@@ -116,7 +116,7 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 def pad_signal(signal, max_len):
     return np.concatenate([signal, np.zeros(max_len - len(signal), dtype=np.float32)])
 
-def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict,
+def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict, score_name_list,
                            chunk, label, remainder_dict, id_digit, shuffle, read_once, column_keys):
     file_id = [-1]
     data_buffer = {x:[] for x in column_keys}
@@ -142,21 +142,11 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
             data_buffer = {x:[] for x in column_keys}
             gc.collect()
 
-            score_name = "0.0"
-            save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name,
-                            id_digit, buffer_dict)
-
-            idx_with
-
-            score_name = "0.5"
-            save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name,
-                            id_digit, buffer_dict)
-
-
-            score_name = "1.0"
-            save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name,
-                            id_digit, buffer_dict)
-
+            for score_name in score_name_list:
+                bool_idx = data["block_score"] >= score_name
+                score_data = {key:data[key][bool_idx] for key in column_keys}
+                save_split_data(ncpu, pid, file_id, score_data, column_keys, out_path, label_str, set_split_dict, chunk,
+                                score_name, id_digit, buffer_dict)
 
             del data
             gc.collect()
@@ -201,10 +191,12 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
         file_id[0] += 1
         out_data_id = (ncpu+1) * file_id[0] + pid
         chunk_data = {key:val[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len_set_data)] for key, val in set_data.items()}
+
         if len(chunk_data[column_keys[0]]) == chunk:
             save_path = f"{out_path}/score-{score_name}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
             if os.path.exists(save_path):
                 printmessage(f"File {save_path} already exists - overwriting.", msg_type="warning")
+            chunk_data.pop("block_score")
             np.savez_compressed(save_path, **chunk_data)
             del chunk_data
             gc.collect()
@@ -228,17 +220,18 @@ def main():
 
     os.makedirs(args.out_path, exist_ok=True)
 
+    score_list = [0.0, 0.5, 1.0]
+
     for set_name in ["train", "val"]:
-        # for score_name in ["all","perfect"]:
-        for score_name in ["0.0", "0.5","1.0"]:
+        for score_name in score_list:
             for label in ["pos", "neg"]:
                 os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
 
     if args.pos_path is not None:
-        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk)
+        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk, score_name_list = score_list)
 
     if args.neg_path is not None:
-        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk)
+        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk, score_name_list = score_list)
 
     return None
 

@@ -63,7 +63,6 @@ def worker(df, refflat_df, collect_list):
                                                 "count_m6a": "sum", "count_ca": "sum",
                                                 "count_all": "sum",
                                                 "logsum_1_p_pos": "sum", "count_pos": "sum",
-                                                "logsum_1_p_neg": "sum", "count_neg": "sum",
                                                 "gene_id": "first", "isoforms": "sum", "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
     collect_list.append(gene_df.copy())
@@ -132,18 +131,21 @@ def main():
                                                 "count_m6a": "sum", "count_ca": "sum",
                                                 "count_all": "sum",
                                                 "logsum_1_p_pos": "sum", "count_pos": "sum",
-                                                "logsum_1_p_neg": "sum", "count_neg": "sum",
                                                 "gene_id": "first", "isoforms": "sum", "coding": "max"})
 
     gene_df["dom"] = gene_df["count_m6a"] / (gene_df["count_m6a"] + gene_df["count_ca"])
     gene_df["count_dom"] = gene_df["count_m6a"] + gene_df["count_ca"]
-    gene_df = gene_df[["genome_id", "gene_id", "coding", "dom", "count_dom", "logsum_1_p_pos",
-                          "logsum_1_p_neg", "count_neg", "count_all", "count_pos"]].copy()
+    gene_df = gene_df[["genome_id", "gene_id", "coding", "dom", "count_dom", "logsum_1_p_pos", "count_pos", "count_all",
+                       "isoforms"]]
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
     print(gene_df)
-
-    gene_df.to_pickle(args.output)
+    if args.output.endswith(".pkl"):
+        gene_df.to_pickle(args.output)
+    elif args.output.endswith(".npz"):
+        np.savez_compressed(args.output, **{key: gene_df[key].values for key in gene_df.columns})
+    else:
+        raise ValueError("Invalid data format: must be .pkl or .npz")
     gc.collect()
 
     return None

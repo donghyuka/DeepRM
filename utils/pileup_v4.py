@@ -38,11 +38,11 @@ def parse_args():
 def worker(pid, file_paths, out_path, file_per_worker, threshold_neg = 0.10, threshold_pos = 0.98,
            threshold_dom_neg = 0.20, threshold_dom_pos = 0.60, epsilon = 1e-30):
 
-    keys = ["label_id", "p_sum", "logsum_1_p_pos", "count_all", "dom", "count_dom"]
+    keys = ["label_id", "p_sum", "logsum_1_p_pos", "count_all", "count_pos", "dom", "count_dom"]
 
     key_dict = {"str": ["label_id"],
                 "float32": ["p_sum", "logsum_1_p_pos", "dom"],
-                "int32": ["count_all", "count_dom"]}
+                "int32": ["count_all", "count_pos", "count_dom"]}
 
     data_dict = {"str": [], "float32": [], "int32": []}
 
@@ -71,12 +71,12 @@ def worker(pid, file_paths, out_path, file_per_worker, threshold_neg = 0.10, thr
         data_df_dom = data_df_all[(data_df_all["pred"] < threshold_dom_neg) | (data_df_all["pred"] >= threshold_dom_pos)]
 
         ## groupby label_id
-        data_df_pos = data_df_pos.groupby("label_id").agg({"logsum_1_p": "sum"}).reset_index()
-        data_df_dom = data_df_dom.groupby("label_id").agg({"dom": "sum", "count": "sum"}).reset_index()
+        data_df_pos = data_df_pos.groupby("label_id").agg({"count": "sum", "logsum_1_p": "sum"}).reset_index()
+        data_df_dom = data_df_dom.groupby("label_id").agg({"count": "sum", "dom": "sum"}).reset_index()
         data_df_all = data_df_all.groupby("label_id").agg({"count": "sum", "pred": "sum"}).reset_index()
 
 
-        data_df_pos.rename(columns = {"logsum_1_p": "logsum_1_p_pos"}, inplace = True)
+        data_df_pos.rename(columns = {"count": "count_pos", "logsum_1_p": "logsum_1_p_pos"}, inplace = True)
         data_df_all.rename(columns = {"count": "count_all", "pred":"p_sum"}, inplace = True)
         data_df_dom.rename(columns = {"count": "count_dom"}, inplace = True)
 
@@ -132,7 +132,7 @@ def main():
         proc.join()
     gc.collect()
 
-    keys = ["label_id", "p_sum", "logsum_1_p_pos", "count_all", "dom", "count_dom"]
+    keys = ["label_id", "p_sum", "logsum_1_p_pos", "dom", "count_all", "count_dom", "count_pos"]
 
     final_df = {key:[] for key in keys}
     for path in tqdm.tqdm(glob.glob(f"{args.output}/temp/pileup_temp_*.npz")):
@@ -147,9 +147,8 @@ def main():
     final_df.fillna(0, inplace = True)
 
     final_df["dom"] = final_df["dom"] / final_df["count_dom"].clip(1, None)
-    final_df["log_pm6a"] =  -(2-final_df["dom"])*final_df["logsum_1_p_pos"]/final_df["count_all"].clip(1, None)
 
-    keys = ["label_id", "p_sum", "logsum_1_p_pos", "count_all", "count_dom", "dom", "log_pm6a"]
+    keys = ["label_id", "p_sum", "logsum_1_p_pos", "dom", "count_all", "count_dom", "count_pos"]
 
     path = f"{args.output}/pileup.npz"
     np.savez_compressed(path, **{key: final_df[key].values for key in keys})

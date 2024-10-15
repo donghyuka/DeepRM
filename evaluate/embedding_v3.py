@@ -150,7 +150,6 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     id_list = []
     pred_list = []
     emb_512_list = []
-    emb_128_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
 
@@ -179,12 +178,10 @@ def inference_worker(rank, args_dict, flush_interval = 100):
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
             emb_512_list.extend(emb_512)
-            emb_128_list.extend(emb_128)
 
         else:
             pred_list.append(pred.detach().numpy())
             emb_512_list.extend(emb_512)
-            emb_128_list.extend(emb_128)
 
         id_list.append(np.array(data["label_id"]))
 

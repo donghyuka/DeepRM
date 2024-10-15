@@ -67,7 +67,7 @@ def parse_bam(bam_path, threads, bq_cutoff):
 
     :return A Pandas Dataframe.
     """
-    cols_list = ["mv", "read_id", "ts", "ns", "sp", "seq", "bq", "mapq", "flag", "md", "pi", "ref", "start", "cigar"]
+    cols_list = ["mv", "read_id", "ts", "ns", "sp", "seq", "bq", "mapq", "flag", "md", "pi", "ref", "start", "cigar", "read_index"]
     data_dict = {x:[] for x in cols_list}
 
     valid_count = 0
@@ -78,7 +78,7 @@ def parse_bam(bam_path, threads, bq_cutoff):
 
     with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=threads) as input_bam:
         with tqdm.tqdm(total=input_bam.mapped + input_bam.unmapped, desc="Parsing BAM File") as pbar:
-            for read in input_bam:
+            for read_index, read in enumerate(input_bam):
                 pbar.update(1)
                 pbar.set_postfix({"valid": valid_count, "invalid": missing_move + missing_bq + low_bq + unmapped})
                 if read.is_unmapped:
@@ -143,6 +143,7 @@ def parse_bam(bam_path, threads, bq_cutoff):
                 data_dict["pi"].append(pi)
                 data_dict["mapq"].append(read.mapping_quality)
                 data_dict["flag"].append(read.flag)
+                data_dict["read_index"].append(read_index)
 
                 valid_count += 1
 
@@ -296,7 +297,7 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
         return None, None, None, None, None
 
     label_arr = label_df["label"].values
-    dom_arr = label_df["m6A_level"].values
+    dom_arr = label_df["dom_level"].values
     ref_pos_arr = label_df["pos"].values
     query_pos_arr, error_arr = ref_pos_to_query_pos(ref_pos_arr, cigar, start, query_len, md_tag)
 
@@ -306,6 +307,14 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
     error_arr = np.delete(error_arr, index_to_drop, axis=0)
     label_arr = np.delete(label_arr, index_to_drop)
     dom_arr = np.delete(dom_arr, index_to_drop)
+
+    index_keep = np.where(query_pos_arr != -1)[0]
+    ref_pos_arr = ref_pos_arr[index_keep]
+    query_pos_arr = query_pos_arr[index_keep]
+    error_arr = error_arr[index_keep]
+    label_arr = label_arr[index_keep]
+    dom_arr = dom_arr[index_keep]
+
 
     if len(query_pos_arr) == 0:
         return None, None, None, None, None
@@ -351,7 +360,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
 
     bam_df["mv"] = bam_df["mv"].apply(lambda x: np.array(x, dtype=int))
 
-    bam_df = bam_df[["read_id", "ref", "bq", "seq", "ref_pos", "query_pos", "error", "label", "dom",
+    bam_df = bam_df[["read_index", "ref", "bq", "seq", "ref_pos", "query_pos", "error", "label", "dom",
                      "mapq", "flag", "pi", "left_soft_clip"]].copy()
     bam_df["read_bq"] = bam_df["bq"].apply(mean_phred)
 
@@ -371,7 +380,6 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
         return None
 
     bam_df["label_id"] = bam_df["ref"].astype(str) + ":" + bam_df["ref_pos"].astype(str)
-    bam_df["block_id"] = bam_df["read_id"] + ":" + bam_df["query_pos"].astype(str)
     bam_df["start_pos"] = bam_df["query_pos"] - cb_half_len
     bam_df["end_pos"] = bam_df["query_pos"] + cb_half_len + 1
     bam_df["query_len"] = bam_df["seq"].apply(len)
@@ -386,7 +394,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
     bam_df["block_bq"] = bam_df["bq"].apply(mean_phred)
     bam_df["base_bq"] = bam_df["bq"].apply(lambda x: x[cb_half_len])
 
-    bam_df = bam_df[["label_id", "block_id", "label", "dom", "bq", "motif",
+    bam_df = bam_df[["label_index", "read_index", "label", "dom", "bq", "motif",
                      "mapq", "flag", "pi", "read_bq", "block_bq", "base_bq",
                      "error", "query_pos", "query_len", "left_soft_clip"]].copy()
 
@@ -426,11 +434,18 @@ def main():
     if not len(os.listdir(intermediate_path)) == 0:
         raise FileExistsError(f"Output directory {intermediate_path} is not empty")
 
-    ## Read label and BAM files.
-    label_df = pd.read_csv(args.label, sep='\t')
+    ## Read label and BAM files.\
+    if args.label.endswith(".tsv"):
+        label_df = pd.read_csv(args.label, sep='\t')
+    elif args.label.endswith(".pkl"):
+        label_df = pd.read_pickle(args.label)
+    else:
+        raise ValueError("Label file must be either .tsv or .pkl")
+    label_df["nmid"] = label_df["label_id"].str.split(":").str[0]
+    label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(int)
     label_df = label_df.groupby("nmid")
-    bam_df = parse_bam(args.bam, args.cpu, args.qcut)
-    bam_df = np.array_split(bam_df, args.cpu)
+    bam_df = parse_bam(args.bam, args.thread, args.qcut)
+    bam_df = np.array_split(bam_df, args.thread)
 
     ## Extract metadata from BAM and write to intermediate files.
     proc_list = []

@@ -452,7 +452,7 @@ def parse_args():
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files")
-    parser.add_argument("--skip_intermediate", "-sk", action="store_true", help="Skip intermediate files")
+    parser.add_argument("--skip_intermediate", "-si", action="store_true", help="Skip intermediate files")
     args = parser.parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
