@@ -291,35 +291,29 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
     try:
         label_df = label_df.get_group(ref)
     except KeyError:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     if len(label_df) == 0:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     label_arr = label_df["label"].values
-    dom_arr = label_df["dom_level"].values
+    label_index_arr = label_df["label_index"].values
+    dom_arr = label_df["dom_label"].values
     ref_pos_arr = label_df["pos"].values
     query_pos_arr, error_arr = ref_pos_to_query_pos(ref_pos_arr, cigar, start, query_len, md_tag)
 
-    index_to_drop = [idx for idx, x in enumerate(query_pos_arr) if x == -1]
-    ref_pos_arr = np.delete(ref_pos_arr, index_to_drop)
-    query_pos_arr = np.delete(query_pos_arr, index_to_drop)
-    error_arr = np.delete(error_arr, index_to_drop, axis=0)
-    label_arr = np.delete(label_arr, index_to_drop)
-    dom_arr = np.delete(dom_arr, index_to_drop)
-
-    index_keep = np.where(query_pos_arr != -1)[0]
-    ref_pos_arr = ref_pos_arr[index_keep]
-    query_pos_arr = query_pos_arr[index_keep]
-    error_arr = error_arr[index_keep]
-    label_arr = label_arr[index_keep]
-    dom_arr = dom_arr[index_keep]
-
+    index_to_keep = [idx for idx, x in enumerate(query_pos_arr) if x != -1]
+    ref_pos_arr = ref_pos_arr[index_to_keep]
+    query_pos_arr = query_pos_arr[index_to_keep]
+    error_arr = error_arr[index_to_keep]
+    label_arr = label_arr[index_to_keep]
+    dom_arr = dom_arr[index_to_keep]
+    label_index_arr = label_index_arr[index_to_keep]
 
     if len(query_pos_arr) == 0:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
-    return ref_pos_arr, query_pos_arr, error_arr, label_arr, dom_arr
+    return ref_pos_arr, query_pos_arr, error_arr, label_arr, dom_arr, label_index_arr
 
 
 def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A"):
@@ -336,7 +330,11 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
     :param boi: A string. Base of interest.
     :return: None. Output is written to file.
     """
-    
+    if bam_df is None:
+        bam_df = pd.read_pickle(f"{out_dir}/bam/{pid}.pkl")
+    else:
+        bam_df.to_pickle(f"{out_dir}/bam/{pid}.pkl")
+
     cb_half_len = cb_len//2
     out_path = f"{out_dir}/{pid}.pkl"
 
@@ -347,7 +345,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
     bam_df["query_len"] = bam_df["seq"].apply(len)
 
     ## Extract positions in each query that corresponds to reference positions in label
-    bam_df[['ref_pos', 'query_pos', 'error', 'label', "dom"]] = bam_df.apply(lambda x: get_label_pos_list(
+    bam_df[['ref_pos', 'query_pos', 'error', 'label', "dom_label", 'label_index']] = bam_df.apply(lambda x: get_label_pos_list(
         x["ref"], x["start"], x["cigar"], x["query_len"], x["md"], label_df), axis=1, result_type="expand")
 
     bam_df = bam_df[bam_df["query_pos"].notnull()].copy()
@@ -360,13 +358,13 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
 
     bam_df["mv"] = bam_df["mv"].apply(lambda x: np.array(x, dtype=int))
 
-    bam_df = bam_df[["read_index", "ref", "bq", "seq", "ref_pos", "query_pos", "error", "label", "dom",
+    bam_df = bam_df[["label_index", "read_index", "ref", "bq", "seq", "ref_pos", "query_pos", "error", "label", "dom_label",
                      "mapq", "flag", "pi", "left_soft_clip"]].copy()
     bam_df["read_bq"] = bam_df["bq"].apply(mean_phred)
 
     ## Before explode: Each row is a query.
     ## After explode: Each row is a context block.
-    bam_df = bam_df.explode(["ref_pos", "query_pos", "error", "label", "dom"], ignore_index=True)
+    bam_df = bam_df.explode(["ref_pos", "query_pos", "error", "label", "dom_label", 'label_index'], ignore_index=True)
 
     if len(bam_df) == 0:
         return None
@@ -394,7 +392,7 @@ def extract_write_metadata(bam_df, label_df, pid, out_dir, cb_len = 21, boi = "A
     bam_df["block_bq"] = bam_df["bq"].apply(mean_phred)
     bam_df["base_bq"] = bam_df["bq"].apply(lambda x: x[cb_half_len])
 
-    bam_df = bam_df[["label_index", "read_index", "label", "dom", "bq", "motif",
+    bam_df = bam_df[["label_id", "label_index", "read_index", "label", "dom_label", "bq", "motif",
                      "mapq", "flag", "pi", "read_bq", "block_bq", "base_bq",
                      "error", "query_pos", "query_len", "left_soft_clip"]].copy()
 
@@ -428,11 +426,14 @@ def main():
         raise FileNotFoundError(f"BAM file {args.bam} does not exist")
 
     intermediate_path = f"{args.output}/intermediates/"
+    bam_path = f"{intermediate_path}/bam/"
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(intermediate_path, exist_ok=True)
 
-    if not len(os.listdir(intermediate_path)) == 0:
-        raise FileExistsError(f"Output directory {intermediate_path} is not empty")
+    # if not len(os.listdir(intermediate_path)) == 0:
+    #     raise FileExistsError(f"Output directory {intermediate_path} is not empty")
+
+    os.makedirs(bam_path, exist_ok=True)
 
     ## Read label and BAM files.\
     if args.label.endswith(".tsv"):
@@ -441,24 +442,37 @@ def main():
         label_df = pd.read_pickle(args.label)
     else:
         raise ValueError("Label file must be either .tsv or .pkl")
+
     label_df["nmid"] = label_df["label_id"].str.split(":").str[0]
     label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(int)
+    label_df = label_df.sort_values("pos")
     label_df = label_df.groupby("nmid")
-    bam_df = parse_bam(args.bam, args.thread, args.qcut)
-    bam_df = np.array_split(bam_df, args.thread)
+    # bam_df = parse_bam(args.bam, args.thread, args.qcut)
+    # bam_df = np.array_split(bam_df, args.thread)
+    #
+    # ## Extract metadata from BAM and write to intermediate files.
+    # proc_list = []
+    # for pid, bam_df_split in enumerate(bam_df):
+    #     proc = mp.Process(target=extract_write_metadata,
+    #                       args=(bam_df_split, label_df, pid, intermediate_path, args.cb_len, args.boi))
+    #     proc_list.append(proc)
+    #     proc.start()
+    #
+    # for proc in proc_list:
+    #     proc.join()
+    #
+    # del bam_df, label_df
+    # gc.collect()
 
-    ## Extract metadata from BAM and write to intermediate files.
     proc_list = []
-    for pid, bam_df_split in enumerate(bam_df):
+    for pid in range(args.thread):
         proc = mp.Process(target=extract_write_metadata,
-                          args=(bam_df_split, label_df, pid, intermediate_path, args.cb_len, args.boi))
+                          args=(None, label_df, pid, intermediate_path, args.cb_len, args.boi))
         proc_list.append(proc)
         proc.start()
-
     for proc in proc_list:
         proc.join()
-
-    del bam_df, label_df
+    del label_df
     gc.collect()
 
     intermediate_file_list = glob.glob(f"{intermediate_path}/*.pkl")
@@ -471,7 +485,7 @@ def main():
         final_df.append(pd.read_pickle(path))
         os.remove(path)
     final_df = pd.concat(final_df, axis=0).reset_index(drop=True)
-    final_df.to_pickle(f"{args.output}/metadata.pkl")
+    final_df.to_pickle(f"{args.output}/metadata_D200.pkl")
 
     return None
 

@@ -126,6 +126,7 @@ def reformat_m6A_df(chr_col="chr",pos_col="pos",strand_col="str",pos_offset=0,ne
 
     print(m6a_df)
     add_cols=["m6A_level_rep1","m6A_level_rep2","DoM","SAC","GLORI","MICLIP2","M6ACE","validated"]
+    add_cols=["m6A_level_rep1","m6A_level_rep2","DoM","SAC","GLORI","MICLIP2","M6ACE","validated"]
     add_cols = [col for col in add_cols if col in m6a_df.columns]
 
     m6a_df=m6a_df[[chr_col,strand_col,pos_col]+add_cols]

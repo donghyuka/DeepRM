@@ -114,11 +114,11 @@ def mp_worker(m6a_df, refflat_df, pos_col, strand_col, m6a_df_list):
 
 def reformat_m6A_df(chr_col="chr",pos_col="pos",strand_col="str",pos_offset=0,neg_offset=0,
                     infilename="m6A_Jungmin_110823.txt",outfilename="m6A_Jungmin_110823.tsv", ncpu=120
-                    ,refflat_path = ""):
+                    ,refflat_path = "", add_cols=[]):
 
     m6a_df = pd.read_csv(f"{infilename}",sep="\t")
 
-    m6a_df=m6a_df[[chr_col,strand_col,pos_col]]
+    m6a_df=m6a_df[[chr_col,strand_col,pos_col] + add_cols]
 
     ## Apply positive offset to positive strand sites
     pos_idx = m6a_df[strand_col]=="+"
@@ -176,6 +176,7 @@ def parse_args():
     parser.add_argument("--threads", "-t", type=int, help="Number of CPUs", default=120)
     parser.add_argument("--refflat", "-r", type=str, help="Refflat file", default=None)
     parser.add_argument("--genome", "-g", type=str, help="Genome version", default="hg38")
+    parser.add_argument("--add", "-a", type=str, nargs="+", help="Additional columns to include", default=[])
     args = parser.parse_args()
 
     if args.refflat is None:
@@ -193,7 +194,7 @@ def main():
     args = parse_args()
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     reformat_m6A_df(chr_col=args.chr,pos_col=args.pos,strand_col=args.strand,pos_offset=args.pos_offset,neg_offset=args.neg_offset,
-                    infilename=args.input,outfilename=args.output, ncpu=args.threads, refflat_path=args.refflat)
+                    infilename=args.input,outfilename=args.output, ncpu=args.threads, refflat_path=args.refflat, add_cols=args.add)
     return None
 
 

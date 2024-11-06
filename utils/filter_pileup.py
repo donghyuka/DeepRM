@@ -24,7 +24,8 @@ def filter_pileup(args):
         df = pd.read_pickle(args.input)
     else:
         raise ValueError("Input file must be either .tsv or .pkl")
-    df.to_pickle(args.input.replace(".tsv",".pkl"))
+    if args.input.endswith(".pkl"):
+        df.to_pickle(args.input.replace(".tsv",".pkl"))
     ## Create columns
     df.columns = ["ref","pos","base","depth","align","qual"]
     # df["depth"] = df["align"].str.count("\\.")

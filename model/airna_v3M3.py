@@ -77,7 +77,7 @@ class TransformerModel(nn.Module):
         intermediate1 = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## Regression Head
-        intermediate2, output = self.regression_head(intermediate1)
+        output = self.regression_head(intermediate1)
         output = output.squeeze(-1)
         output = output * target_mask
         output = output.sum(dim = 1)
@@ -86,18 +86,14 @@ class TransformerModel(nn.Module):
 
         target_end = target_mask * torch.arange(self.seq_len, device=src_signal.device).repeat(src_signal.size(0), 1)
         target_end = target_end.max(dim = 1).values
-
         target_prev_end = target_mask * torch.arange(self.seq_len, device=src_signal.device).flip(dims = [0]).repeat(src_signal.size(0), 1)
         target_prev_end = self.seq_len - target_prev_end.max(dim = 1).values - 2
-
         target_next_end = target_next_mask * torch.arange(self.seq_len, device=src_signal.device).repeat(src_signal.size(0), 1)
         target_next_end = target_next_end.max(dim = 1).values
-
         intermediate1 = [intermediate1[i,(target_prev_end[i], target_end[i], target_next_end[i])].cpu().detach().numpy() for i in range(intermediate1.size(0))]
-        intermediate2 = [intermediate2[i,(target_prev_end[i], target_end[i], target_next_end[i])].cpu().detach().numpy() for i in range(intermediate2.size(0))]
 
         if self.return_embedding:
-            output = (output, intermediate1, intermediate2)
+            output = (output, intermediate1)
 
         return output
 
@@ -146,8 +142,7 @@ class RegressionHead(nn.Module):
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         output = self.lin_layers(x)
-        embedding = self.lin_layers[:-1](x)
-        return embedding, output
+        return output
 
     def init_weights(self, initrange = 0.1):
         for layer in self.lin_layers:

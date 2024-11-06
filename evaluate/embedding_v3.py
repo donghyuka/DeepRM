@@ -6,7 +6,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import torch.distributed as dist
-from evaluate.inference_dataloader_npz_v2 import load_dataset
+from evaluate.inference_dataloader_npz_emb import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -45,6 +45,36 @@ def main():
     os.makedirs(inference_path, exist_ok=True)
     os.makedirs(plot_path, exist_ok=True)
     run_inference(args)
+    return None
+
+def merge_files(out_dir):
+
+    label_id_list = []
+    read_id_list = []
+    pred_list = []
+    emb_512_list = []
+
+    ## Merge all files
+    files = glob.glob(f"{out_dir}/*.npz")
+    for file in tqdm.tqdm(files, desc = "Merging Files", smoothing = 0):
+        with np.load(file) as data:
+            label_id_list.append(data["label_id"])
+            read_id_list.append(data["read_id"])
+            pred_list.append(data["pred"])
+            emb_512_list.append(data["emb_512"])
+
+    label_id_list = np.concatenate(label_id_list)
+    read_id_list = np.concatenate(read_id_list)
+    pred_list = np.concatenate(pred_list)
+    emb_512_list = np.concatenate(emb_512_list)
+
+    out_path = f"{out_dir}/inference_merged.npz"
+    np.savez(out_path,
+             label_id = label_id_list,
+             read_id = read_id_list,
+             pred = pred_list,
+             emb_512 = emb_512_list)
+
     return None
 
 
@@ -91,6 +121,7 @@ def run_inference(args):
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
         mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
+        merge_files(out_dir)
 
     return None
 
@@ -101,8 +132,6 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     ref_id_list = []
     for record in SeqIO.parse(ref_path, "fasta"):
         ref_id_list.append(record.id)
-
-    convert_dict = {x.split(".")[0]:x for x in ref_id_list}
 
     del ref_id_list
     gc.collect()
@@ -117,14 +146,14 @@ def inference_worker(rank, args_dict, flush_interval = 100):
     if "signal_stride" not in model_config:
         model_config["signal_stride"] = 6
 
-    TransformerModel = importlib.import_module("model.airna_v3M3").TransformerModel
+    TransformerModel = importlib.import_module("model.airna_dw_v4M").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
                              encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
                              kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
                              spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"], return_embedding = True)
+                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -147,33 +176,27 @@ def inference_worker(rank, args_dict, flush_interval = 100):
                                sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
                                sig_window = model_config["kmer_size"])
 
-    id_list = []
+    label_id_list = []
+    read_id_list = []
     pred_list = []
     emb_512_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
 
+        src_kmer = data["kmer_token"].to(rank)
+        src_signal = data["signal_token"].to(rank)
+        src_seg_len = data["segment_len"].to(rank)
+        src_dwell_motor = data["dwell_motor_token"].to(rank)
+        src_dwell_pore = data["dwell_pore_token"].to(rank)
+        src_bq = data["bq_token"].to(rank)
 
-        if args_dict["gpu"] > 0:
-            src_kmer = data["kmer_token"].to(rank)
-            src_signal = data["signal_token"].to(rank)
-            src_seg_len = data["segment_len"].to(rank)
-            if not args_dict["no_bq"]:
-                src_bq = data["bq_token"].to(rank)
-
+        if args_dict["no_bq"]:
+            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore], dim=-1)
         else:
-            src_kmer = data["kmer_token"]
-            src_signal = data["signal_token"]
-            src_seg_len = data["segment_len"]
-            if not args_dict["no_bq"]:
-                src_bq = data["bq_token"]
+            src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
 
         with torch.no_grad():
-            if not args_dict["no_bq"]:
-                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_bq=src_bq)
-            else:
-                pred, emb_512, emb_128 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len)
-
+            pred, emb_512 = model(src_kmer=src_kmer, src_signal=src_signal, src_seg_len=src_seg_len, src_dwell_bq=src_dwell_bq)
 
         if args_dict["gpu"] > 0:
             pred_list.append(pred.cpu().detach().numpy())
@@ -183,37 +206,30 @@ def inference_worker(rank, args_dict, flush_interval = 100):
             pred_list.append(pred.detach().numpy())
             emb_512_list.extend(emb_512)
 
-        id_list.append(np.array(data["label_id"]))
+        label_id_list.append(np.array(data["label_id"]))
+        read_id_list.append(np.array(data["read_id"]))
 
         if idx % flush_interval == 0 and idx > 0:
-            id_list = np.concatenate(id_list)
-            pred_list = np.concatenate(pred_list)
+            label_id_list = np.concatenate(label_id_list).astype(np.int32)
+            read_id_list = np.concatenate(read_id_list).astype(np.int32)
+            pred_list = np.concatenate(pred_list).astype(np.float32)
+            emb_512_list = np.stack(emb_512_list, axis = 0).astype(np.float32)
+            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.npz"
 
-            data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
-            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.pkl"
-            data_df["NMID"] = data_df["label_id"].str.split(":").str[0]
-            data_df["NMID"] = data_df["NMID"].map(convert_dict)
-            data_df["pos"]  = data_df["label_id"].str.split(":").str[1]
-            data_df["label_id"] = data_df["NMID"] + ":" + data_df["pos"]
-            data_df.drop(["NMID", "pos"], axis = 1, inplace = True)
-            data_df.to_pickle(out_path)
-
-            del data_df, id_list, pred_list, emb_512_list, emb_128_list
+            np.savez(out_path, label_id = label_id_list, read_id = read_id_list, pred = pred_list, emb_512 = emb_512_list)
             gc.collect()
 
-            id_list = []
+            label_id_list = []
+            read_id_list = []
             pred_list = []
-            emb_128_list = []
             emb_512_list = []
 
-    id_list = np.concatenate(id_list)
+    label_id_list = np.concatenate(label_id_list)
+    read_id_list = np.concatenate(read_id_list)
     pred_list = np.concatenate(pred_list)
-    # emb_list = list(np.concatenate(emb_list))
-
-    data_df = pd.DataFrame({"label_id": id_list, "pred": pred_list, "embedding_512": emb_512_list, "embedding_128": emb_128_list})
-    out_path = f"{args_dict['out_dir']}/inference_{rank}_last.pkl"
-    data_df.to_pickle(out_path)
-
+    emb_512_list = np.stack(emb_512_list, axis = 0)
+    out_path = f"{args_dict['out_dir']}/inference_{rank}_last.npz"
+    np.savez(out_path, label_id = label_id_list, read_id = read_id_list, pred = pred_list, emb_512 = emb_512_list)
     return None
 
 

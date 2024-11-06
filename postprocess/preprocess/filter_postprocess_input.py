@@ -423,7 +423,15 @@ INCREMENTS_CIGAR = {
 
 def ref_pos_to_query_pos(ref_pos_request_arr, cigar, start_pos):
     ## This function strictly assumes that the cigar string is well-formed and ref_pos_request_arr is sorted.
-    ## So better assert it before calling this function.
+    ## It is too redundant to do it every time here as the function is called in a loop. Do it outside the loop.
+
+    ## assert sorted
+    if not np.all(np.diff(ref_pos_request_arr) >= 0):
+        printmessage("Warning: ref_pos_request_arr is not sorted. It may degrade performance.", msg_type="warning")
+        print(ref_pos_request_arr)
+        ref_pos_request_arr = np.sort(ref_pos_request_arr)
+
+    ref_pos_request_arr = np.array(ref_pos_request_arr)
 
     x = [[start_pos - 1, -1]]
     for length, op in re.findall(r'(\d+)([MIDSN])', cigar):
@@ -507,10 +515,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
 
     cb_half_len = cb_len//2
     buffer = []
-
     for signal_path in tqdm.tqdm(signal_path_arr):
         oom_killer()
-
         out_path = f"{token_output_path}/{signal_path.split('/')[-1]}"
         if os.path.exists(out_path):
             printmessage(f"Already exists: {out_path}", msg_type="warning")
@@ -521,7 +527,6 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = pd.read_pickle(signal_path)
         if len(signal_df) == 0:
             continue
-
         move_df = pd.read_pickle(move_path)
         signal_df = signal_df.merge(move_df, on="read_id", how="inner")
         del move_df
@@ -534,9 +539,9 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         if len(signal_df) == 0:
             printmessage(f"Empty signal data (1): {signal_path}", msg_type="warning")
             continue
+
         del pos_list, alignment_zip
         gc.collect()
-
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["dwell_token"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5))
 
@@ -847,11 +852,13 @@ def main():
     gc.collect()
 
     label_df = pd.read_pickle(args.label)
-    label_df["nmid"] = label_df["label_id"].str.split(":").str[0]
+    label_df["ref"] = label_df["label_id"].str.split(":").str[0]
     label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(np.int32)
-    label_df = label_df[["ref", "pos"]].copy()
-    label_df = label_df.groupby("nmid")
-    label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
+    label_df = label_df.sort_values("pos")
+    label_df = label_df[["ref", "label_index", "pos"]].copy()
+    print(label_df)
+    label_df = label_df.groupby("ref")
+    label_df = {nmid:df[["label_index","pos"]].values.T for nmid, df in label_df}
     gc.collect()
 
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))

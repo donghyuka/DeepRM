@@ -422,7 +422,8 @@ INCREMENTS_CIGAR = {
 
 def ref_pos_to_query_pos(ref_pos_request_arr, cigar, start_pos):
     ## This function strictly assumes that the cigar string is well-formed and ref_pos_request_arr is sorted.
-    ## So better assert it before calling this function.
+    ## The ref_pos_request_arr will not be sorted in this function, since it corresponds to query_post_list return.
+    ## Do it outside.
 
     x = [[start_pos - 1, -1]]
     for length, op in re.findall(r'(\d+)([MIDSN])', cigar):
@@ -479,6 +480,15 @@ def get_label_pos_list(ref, start, cigar, label_df):
 
     index_list = label_df_nmid[0]
     ref_pos_list = label_df_nmid[1]
+
+    ## assert sorted
+    if not np.all(np.diff(ref_pos_list) >= 0):
+        printmessage("Warning: ref_pos_request_arr is not sorted. It may degrade performance.", msg_type="warning")
+        ## sort both lists
+        sort_ind = np.argsort(ref_pos_list)
+        ref_pos_list = ref_pos_list[sort_ind]
+        index_list = index_list[sort_ind]
+
     query_pos_list = ref_pos_to_query_pos(ref_pos_list, cigar, start)
     pos_tuple_list = list(zip(index_list, query_pos_list))
     pos_tuple_list_filtered = [x for x in pos_tuple_list if x[1] is not None]
@@ -845,6 +855,7 @@ def main():
 
     label_df = pd.read_pickle(args.label)
     label_df = label_df[["ref", "pos"]].copy()
+    label_df = label_df.sort_values("pos")
     label_df.rename({"ref":"nmid"}, axis=1, inplace=True)
     label_df["nmid"] = label_df["nmid"].str.split(".").str[0]
     label_df["pos"] = label_df["pos"] - 1
