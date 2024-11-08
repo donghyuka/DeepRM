@@ -33,6 +33,7 @@ def parse_args():
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args.add_argument("--chk", dest="chunk", type=int, default=4000, help="Chunk size")
     args.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
+    args.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
     args = args.parse_args()
 
     if os.path.exists(args.out_path):
@@ -59,15 +60,15 @@ def parse_args():
 
 
 def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
-                       label_dict = {0:"neg", 1:"pos"},
-                       set_split_dict = {"train":0.95, "val":0.05},
-                       score_name_list = ["all", "perfect"],
-                       id_digit=9,
-                       shuffle = True,
-                       read_once = 100):
+                    label_dict = {0:"neg", 1:"pos"},
+                    set_split_dict = {"train":0.95, "val":0.05},
+                    score_name_list = [0.0, 1.0],
+                    id_digit=9,
+                    shuffle = True,
+                    read_once = 100):
 
     in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.npz")]
-    column_keys = ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token"]
+    column_keys = ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token", "block_score"]
 
 
     if shuffle:
@@ -84,8 +85,8 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 
     for pid in range(ncpu):
         proc = mp.Process(target=sample_and_save_worker, args=(ncpu, pid, in_file_list[pid], out_path, label_str,
-                                                                  set_split_dict, chunk, label,
-                                                                  remainder_dict, id_digit, shuffle, read_once, column_keys))
+                                                               set_split_dict, score_name_list, chunk, label,
+                                                               remainder_dict, id_digit, shuffle, read_once, column_keys))
         proc_list.append(proc)
         proc.start()
 
@@ -104,7 +105,7 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
                 remainder_data[column_key] = np.concatenate([x[column_key] for x in remainder_data_list])
             buffer_dict = None
             chunk_save_data(ncpu, pid, file_id, remainder_data, column_keys, out_path, label_str, set_name, buffer_dict,
-                          chunk, score_name, id_digit)
+                            chunk, score_name, id_digit)
             del remainder_data
             gc.collect()
     del remainder_dict
@@ -116,8 +117,8 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 def pad_signal(signal, max_len):
     return np.concatenate([signal, np.zeros(max_len - len(signal), dtype=np.float32)])
 
-def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict,
-                              chunk, label, remainder_dict, id_digit, shuffle, read_once, column_keys):
+def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict, score_name_list,
+                           chunk, label, remainder_dict, id_digit, shuffle, read_once, column_keys):
     file_id = [-1]
     data_buffer = {x:[] for x in column_keys}
     buffer_dict = {key:None for key in remainder_dict.keys()}
@@ -142,9 +143,11 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
             data_buffer = {x:[] for x in column_keys}
             gc.collect()
 
-            score_name = "perfect"
-            save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name,
-                          id_digit, buffer_dict)
+            for score_name in score_name_list:
+                bool_idx = data["block_score"] >= score_name
+                score_data = {key:data[key][bool_idx] for key in column_keys}
+                save_split_data(ncpu, pid, file_id, score_data, column_keys, out_path, label_str, set_split_dict, chunk,
+                                score_name, id_digit, buffer_dict)
 
             del data
             gc.collect()
@@ -189,10 +192,15 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
         file_id[0] += 1
         out_data_id = (ncpu+1) * file_id[0] + pid
         chunk_data = {key:val[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len_set_data)] for key, val in set_data.items()}
+
+        ## Assign unique ID to each row
+        chunk_data["label_id"] = np.arange(chunk) + out_data_id * chunk
+
         if len(chunk_data[column_keys[0]]) == chunk:
             save_path = f"{out_path}/score-{score_name}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
             if os.path.exists(save_path):
                 printmessage(f"File {save_path} already exists - overwriting.", msg_type="warning")
+            chunk_data.pop("block_score")
             np.savez_compressed(save_path, **chunk_data)
             del chunk_data
             gc.collect()
@@ -217,19 +225,18 @@ def main():
     os.makedirs(args.out_path, exist_ok=True)
 
     for set_name in ["train", "val"]:
-        for score_name in ["perfect"]:
+        for score_name in args.score:
             for label in ["pos", "neg"]:
                 os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
 
     if args.pos_path is not None:
-        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk)
+        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk, score_name_list = args.score)
 
     if args.neg_path is not None:
-        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk)
+        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk, score_name_list = args.score)
 
     return None
 
 
 if __name__ == "__main__":
     main()
-

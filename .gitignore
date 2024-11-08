@@ -1,3 +1,6 @@
 ## Notebooks
-*.ipynb
-*.ipynb_checkpoints
+# *.ipynb
+# *.ipynb_checkpoints
+
+## Large Files
+/notebooks/scatter_041124.ipynb

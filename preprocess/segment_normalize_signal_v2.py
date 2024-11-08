@@ -320,7 +320,7 @@ def trim_scale_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shif
     return signal
 
 
-def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5, cb_len = 21, sampling = 6,
+def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor, kmer = 5, cb_len = 21, sampling = 6,
                              sig_window = 5, max_penalty = 10, chunk_size = 1000, max_token_len = 200, dwell_shift = 10):
 
     trim = kmer//2
@@ -341,7 +341,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
         if not os.path.exists(f"{seg_df_path}/intermediates/block_df_split/{file_id}"):
             continue
 
-        out_path = f"{seg_df_path}/token_dwell_bq/{file_id}"
+        out_path = f"{seg_df_path}/{postfix}/{file_id}"
         if os.path.exists(out_path):
             continue
 
@@ -443,21 +443,22 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
+    parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
-    parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe path")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--block", "-k", type=str, default=None, help="Block dataframe path")
+    parser.add_argument("--output", "-o", type=str, default=None, help="Output directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
-    parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files")
+    parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files", default=True)
     parser.add_argument("--skip_intermediate", "-si", action="store_true", help="Skip intermediate files")
+    parser.add_argument("--postfix", "-x", type=str, default="token_dwell_bq", help="Output file postfix")
     args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    # if not os.path.exists(args.pod5):
+    #     raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+    # if not os.path.exists(args.bam):
+    #     raise FileNotFoundError(f"BAM file {args.bam} does not exist")
     return args
 
 
@@ -546,7 +547,7 @@ def main():
 
     norm_factor = parse_toml(args.toml)
 
-    token_output_path = f"{args.output}/token_dwell_bq/"
+    token_output_path = f"{args.output}/{args.postfix}/"
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
@@ -603,7 +604,7 @@ def main():
     proc_list = []
     for signal_paths in signal_path_arr_split:
         proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, norm_factor))
+                          args=(args.output, args.postfix, signal_paths, norm_factor))
         proc_list.append(proc)
         proc.start()
 

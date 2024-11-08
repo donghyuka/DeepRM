@@ -33,6 +33,7 @@ def parse_args():
     args.add_argument("--cpu", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args.add_argument("--chk", dest="chunk", type=int, default=4000, help="Chunk size")
     args.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
+    args.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
     args = args.parse_args()
 
     if os.path.exists(args.out_path):
@@ -220,18 +221,16 @@ def main():
 
     os.makedirs(args.out_path, exist_ok=True)
 
-    score_list = [0.0, 0.5, 1.0]
-
     for set_name in ["train", "val"]:
-        for score_name in score_list:
+        for score_name in args.score:
             for label in ["pos", "neg"]:
                 os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
 
     if args.pos_path is not None:
-        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk, score_name_list = score_list)
+        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk, score_name_list = args.score)
 
     if args.neg_path is not None:
-        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk, score_name_list = score_list)
+        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk, score_name_list = args.score)
 
     return None
 
