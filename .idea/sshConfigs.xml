@@ -2,7 +2,7 @@
 <project version="4">
   <component name="SshConfigs">
     <configs>
-      <sshConfig host="proxy4.aitrain.ktcloud.com" id="87484c32-354b-46c8-beb0-2817fd43e2e5" keyPath="C:\Users\User\.ssh\id_container_proxy" port="10836" customName="NIPA" nameFormat="CUSTOM" username="work" useOpenSSHConfig="false">
+      <sshConfig host="proxy5.aitrain.ktcloud.com" id="87484c32-354b-46c8-beb0-2817fd43e2e5" keyPath="C:\Users\User\.ssh\id_container_proxy" port="10802" customName="NIPA" nameFormat="CUSTOM" username="work" useOpenSSHConfig="false">
         <option name="customName" value="NIPA" />
       </sshConfig>
     </configs>

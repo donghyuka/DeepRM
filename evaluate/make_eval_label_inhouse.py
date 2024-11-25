@@ -140,7 +140,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess RNA-seq data for training')
     parser.add_argument('--depth', '-d', type=str, help='Depth file', required=True)
     parser.add_argument('--out', '-o', type=str, help='Output directory', required=True)
-    parser.add_argument('--data', '-a', type=str, help='Data file', default="/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/m6A_Jungmin_110823.tsv")
+    parser.add_argument('--data', '-a', type=str, help='Data file', default="/extdata3/baeklab/Hyeonseo/m6A/res/m6asites/GLORI_unconv5nt.tsv")
     parser.add_argument('--cpu', '-c', type=int, default=None, help='Number of threads')
     parser.add_argument('--gp', type=int, default=3, help='GP cutoff')
     parser.add_argument('--adj', type=bool, default=False, help='Filter adjacent sites')

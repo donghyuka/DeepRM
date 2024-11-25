@@ -679,7 +679,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.95), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
+    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
@@ -697,11 +697,8 @@ def parse_args():
     parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
     parser.add_argument("--kmer_len", "-e", type=int, default=5, help="Kmer length")
     parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
+    parser.add_argument("--max_depth", "-d", type=int, default=None, help="Maximum depth")
     args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
     if args.wdir is None:
         args.wdir = f"{args.output}/intermediates/"
     os.makedirs(args.output, exist_ok=True)
@@ -851,14 +848,30 @@ def main():
     del signal_path_dict
     gc.collect()
 
+
+    # label_df = pd.read_pickle(args.label)
+    # label_df["index"] = label_df.index.astype(np.int32)
+    # if args.max_depth is not None:
+    #     label_df = label_df[label_df["depth"] <= args.max_depth]
+    # label_df = label_df[["ref", "pos", "index"]].copy()
+    # label_df = label_df.sort_values("pos")
+    # label_df.rename({"ref":"nmid"}, axis=1, inplace=True)
+    # label_df["nmid"] = label_df["nmid"].str.split(".").str[0]
+    # label_df["pos"] = label_df["pos"] - 1
+
     label_df = pd.read_pickle(args.label)
-    label_df["ref"] = label_df["label_id"].str.split(":").str[0]
-    label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(np.int32)
+    label_df["index"] = label_df.index.astype(np.int32)
+    if args.max_depth is not None:
+        label_df = label_df[label_df["depth"] <= args.max_depth]
+    label_df = label_df[["nmid", "pos", "index"]].copy()
     label_df = label_df.sort_values("pos")
-    label_df = label_df[["ref", "label_index", "pos"]].copy()
+    label_df["nmid"] = label_df["nmid"].str.split(".").str[0]
+    label_df["pos"] = label_df["pos"] - 1
+
     print(label_df)
-    label_df = label_df.groupby("ref")
-    label_df = {nmid:df[["label_index","pos"]].values.T for nmid, df in label_df}
+
+    label_df = label_df.groupby("nmid")
+    label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
     gc.collect()
 
     signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))

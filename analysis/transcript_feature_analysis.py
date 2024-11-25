@@ -9,38 +9,35 @@ from matplotlib import pyplot as plt
 
 def get_label(dest_path):
 
-    df = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/Baeklab.070.GP3.depth5_None.twm6astrict.pkl")
+    df = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/BaeklabFinal.GP3.depth5_None.twm6astrict.pkl")
 
-    df = df[df["depth"] >= 20]
-    df = df[df["depth"] <= 100]
+    # df = df[df["depth"] >= 10]
+    df = df[df["depth"] <= 1000]
 
     df_pos = df[df["label"] == 1]
-    df_pos = df_pos[df_pos["m6A_level"] >= 0.9]
+    df_pos = df_pos[df_pos["m6A_level"] >= 0.8]
     df_neg = df[df["label"] == 0]
 
-    df_pos_5mer_groupby = df_pos.groupby("5mer")
+    # df_pos_5mer_groupby = df_pos.groupby("5mer")
+    # df_neg_5mer_groupby = df_neg.groupby("5mer")
+    #
+    # df_pos_list = []
+    # df_neg_list = []
+    #
+    # for motif, df_pos_motif in df_pos_5mer_groupby:
+    #     # if len(df_pos_motif) >= 10:
+    #     df_pos_list.append(df_pos_motif)
+    #
+    # for motif, df_neg_motif in df_neg_5mer_groupby:
+    #     # if len(df_neg_motif) >= 10:
+    #     df_neg_list.append(df_neg_motif)
+    #
+    # df_pos = pd.concat(df_pos_list, axis=0)
+    # df_neg = pd.concat(df_neg_list, axis=0)
 
-
-    df_pos_list = []
-    df_neg_list = []
-
-    for motif, df_pos_motif in df_pos_5mer_groupby:
-        pos_len = len(df_pos_motif)
-        if pos_len >= 10:
-            df_neg_motif = df_neg[df_neg["5mer"] == motif]
-            df_neg_motif = df_neg_motif.sample(min(pos_len * 5, len(df_neg_motif)), random_state=42)
-            df_neg_list.append(df_neg_motif)
-            df_pos_list.append(df_pos_motif)
-            print(motif, df_pos_motif["depth"].sum(), df_neg_motif["depth"].sum())
-            assert df_neg_motif["depth"].sum() > df_pos_motif["depth"].sum()
-
-    df_pos = pd.concat(df_pos_list, axis=0)
-    df_neg = pd.concat(df_neg_list, axis=0)
     df = pd.concat([df_pos, df_neg], axis=0)
 
     print(df)
-    df.to_pickle(dest_path)
-
     return None
 
 
@@ -582,7 +579,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["ref_pos"] = signal_df["pos"].apply(lambda x: x[0])
         signal_df["query_pos"] = signal_df["pos"].apply(lambda x: x[1])
         signal_df["label"] = signal_df["pos"].apply(lambda x: x[2])
-        signal_df["motif"] = signal_df["pos"].apply(lambda x: x[3])
+        signal_df["5mer"] = signal_df["pos"].apply(lambda x: x[3])
         signal_df["centre_nuc"] = signal_df.apply(lambda x: x["seq"][x["query_pos"]] if x["query_pos"] < len(x["seq"]) else None, axis=1)
 
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
@@ -607,7 +604,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["dwell"] = signal_df.apply(lambda x: x["dwell"][(x["start_pos"]+dwell_shift):(x["end_pos"]+dwell_shift)], axis=1)
         signal_df["bq"] = signal_df.apply(lambda x: x["bq"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["segment_len_arr"] = signal_df["signal"].apply(lambda x: create_segment_len_arr(x, sampling))
-
+        signal_df["motif"] = signal_df.apply(lambda x: x["seq"][x["start_pos"]:x["end_pos"]], axis=1)
         signal_df["token_len"] = signal_df["segment_len_arr"].apply(lambda x: np.sum(x[trim:-trim]))
         signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) &
                               (signal_df["token_len"] <= max_token_len) &
@@ -617,7 +614,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         if len(signal_df) == 0:
             continue
 
-        signal_df = signal_df[["signal", "motif", "dwell", "bq", "label"]].copy()
+        signal_df = signal_df[["signal", "5mer", "motif", "dwell", "bq", "label"]].copy()
         signal_df["signal_mean"] = signal_df["signal"].apply(lambda x: np.array([np.mean(y) for y in x], dtype=np.float32))
         signal_df["signal_std"] = signal_df["signal"].apply(lambda x: np.array([np.std(y) for y in x], dtype=np.float32))
         signal_df.drop(columns=["signal"], inplace=True)
@@ -675,29 +672,29 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
+    parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block_070", help="Output directory")
     parser.add_argument("--chunk", "-k", type=int, default=1000000, help="Chunk size")
     parser.add_argument("--pod5_chunk", "-j", type=int, default=1000, help="POD5 Chunk size")
-    parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
+    parser.add_argument("--label", "-l", type=str, default = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/label/BaeklabFinal.GP3.depth5_None.twm6astrict.pkl", help="Label file")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
-    parser.add_argument("--norm_mode", "-n", type=str, required=True, help="Normalisation mode: normalise or standardise")
-    parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output files")
+    parser.add_argument("--norm_mode", "-n", type=str, default="normalise", help="Normalisation mode: normalise or standardise")
+    parser.add_argument("--postfix", "-x", type=str, default="feature_analysis_v6", help="Postfix for output files")
     parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
     parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
     parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
     parser.add_argument("--kmer_len", "-e", type=int, default=5, help="Kmer length")
     parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
     args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    # if not os.path.exists(args.pod5):
+    #     raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+    # if not os.path.exists(args.bam):
+    #     raise FileNotFoundError(f"BAM file {args.bam} does not exist")
     if args.wdir is None:
         args.wdir = f"{args.output}/intermediates/"
     os.makedirs(args.output, exist_ok=True)
@@ -912,83 +909,83 @@ def main():
     args = parse_args()
     token_output_path = f"{args.output}/token_{args.norm_mode}_{args.postfix}/"
 
-    # get_label(args.label)
-    #
-    # intermediate_path = f"{args.output}/intermediates/"
-    # signal_raw_path = f"{intermediate_path}/signal_raw/"
-    # signal_index_path = f"{intermediate_path}/signal_index.pkl"
-    #
-    # os.makedirs(args.output, exist_ok=True)
-    # os.makedirs(token_output_path, exist_ok=True)
-    # os.makedirs(intermediate_path, exist_ok=True)
-    # os.makedirs(signal_raw_path, exist_ok=True)
-    # os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    #
-    # norm_factor = parse_toml(args.toml, args.norm_mode)
-    # printmessage(f"Normalisation factor: {norm_factor}", msg_type="info")
-    #
-    # if not os.path.exists(signal_index_path):
-    #     index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
-    #     gc.collect()
-    #
-    #     with open(signal_index_path, "wb") as outfile:
-    #         pickle.dump(index_dict, outfile)
-    #     gc.collect()
-    #
-    #     signal_path_dict = {}
-    #     for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
-    #         for read_id in id_list:
-    #             signal_path_dict[read_id] = signal_path.split('/')[-1]
-    #     signal_path_arr = list(index_dict.keys())
-    #
-    # else:
-    #     printmessage("Signal data already exists. Skipping extraction.", msg_type="info")
-    #     with open(signal_index_path, "rb") as infile:
-    #         index_dict = pickle.load(infile)
-    #
-    #     signal_path_dict = {}
-    #     for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
-    #         for read_id in id_list:
-    #             signal_path_dict[read_id] = signal_path.split('/')[-1]
-    #     signal_path_arr = list(index_dict.keys())
-    #
-    #
-    # del index_dict
-    # gc.collect()
-    #
-    # if os.path.exists(f"{intermediate_path}/move_df_split") and len(glob.glob(f"{intermediate_path}/move_df_split/*.pkl")) > 0:
-    #     printmessage("Move data already exists. Skipping extraction.", msg_type="info")
-    #
-    # else:
-    #     signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
-    #     extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
-    #
-    #
-    # del signal_path_dict
-    # gc.collect()
-    #
-    # label_df = pd.read_pickle(args.label)
-    # signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
-    # label_df = label_df.sort_values(by=["nmid", "pos"])
-    #
-    # proc_list = []
-    # label_df = label_df.groupby("nmid")
-    # for pid, signal_paths in enumerate(signal_path_arr_split):
-    #     proc = mp.Process(target=segment_normalize_signal,
-    #                       args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
-    #                             args.cb_len, args.kmer_len, args.chunk, args.max_token_len, args.sampling, args.boi))
-    #     proc_list.append(proc)
-    #     proc.start()
-    #
-    # del signal_path_arr_split
-    # gc.collect()
-    #
-    # for proc in proc_list:
-    #     proc.join()
-    #
-    # gc.collect()
+    get_label(args.label)
 
-    plotting_main(token_output_path)
+    intermediate_path = f"{args.output}/intermediates/"
+    signal_raw_path = f"{intermediate_path}/signal_raw/"
+    signal_index_path = f"{intermediate_path}/signal_index.pkl"
+
+    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(token_output_path, exist_ok=True)
+    os.makedirs(intermediate_path, exist_ok=True)
+    os.makedirs(signal_raw_path, exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+
+    norm_factor = parse_toml(args.toml, args.norm_mode)
+    printmessage(f"Normalisation factor: {norm_factor}", msg_type="info")
+
+    if not os.path.exists(signal_index_path):
+        index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.pod5_chunk, args.min_size, args.max_size)
+        gc.collect()
+
+        with open(signal_index_path, "wb") as outfile:
+            pickle.dump(index_dict, outfile)
+        gc.collect()
+
+        signal_path_dict = {}
+        for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+            for read_id in id_list:
+                signal_path_dict[read_id] = signal_path.split('/')[-1]
+        signal_path_arr = list(index_dict.keys())
+
+    else:
+        printmessage("Signal data already exists. Skipping extraction.", msg_type="info")
+        with open(signal_index_path, "rb") as infile:
+            index_dict = pickle.load(infile)
+
+        signal_path_dict = {}
+        for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+            for read_id in id_list:
+                signal_path_dict[read_id] = signal_path.split('/')[-1]
+        signal_path_arr = list(index_dict.keys())
+
+
+    del index_dict
+    gc.collect()
+
+    if os.path.exists(f"{intermediate_path}/move_df_split") and len(glob.glob(f"{intermediate_path}/move_df_split/*.pkl")) > 0:
+        printmessage("Move data already exists. Skipping extraction.", msg_type="info")
+
+    else:
+        signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+        extract_move(args.bam, args.cpu, args.qcut, signal_path_dict, signal_name_arr, intermediate_path)
+
+
+    del signal_path_dict
+    gc.collect()
+
+    label_df = pd.read_pickle(args.label)
+    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+    label_df = label_df.sort_values(by=["nmid", "pos"])
+
+    proc_list = []
+    label_df = label_df.groupby("nmid")
+    for pid, signal_paths in enumerate(signal_path_arr_split):
+        proc = mp.Process(target=segment_normalize_signal,
+                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
+                                args.cb_len, args.kmer_len, args.chunk, args.max_token_len, args.sampling, args.boi))
+        proc_list.append(proc)
+        proc.start()
+
+    del signal_path_arr_split
+    gc.collect()
+
+    for proc in proc_list:
+        proc.join()
+
+    gc.collect()
+
+    # plotting_main(token_output_path)
 
     return None
 

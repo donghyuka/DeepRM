@@ -13,6 +13,7 @@ def parse_args():
     parser.add_argument("--cpu", "-c", type=int, default=None, help="Number of CPUs to use")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input path")
     parser.add_argument("--output", "-o", type=str, default ="/extdata4/baeklab/Hyeonseo/m6A/inference/pileup", help="Output path")
+    parser.add_argument("--label", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/dorado-070-aligned/intermediates/dorado_output.pileup.filtered.pkl.sorted.pkl", help="Label file path")
     parser.add_argument("--pos", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", type=float, default=1e-30, help="Epsilon value")
     parser.add_argument("--postfix", "-x", type=str, default="final", help="Comment")
@@ -138,7 +139,31 @@ def main():
     # delete temp files
     shutil.rmtree(f"{args.output}/temp")
 
-    print(final_df)
+    reindex_flag = False
+
+    if isinstance(final_df["label_id"][0],str):
+        if final_df["label_id"][0].isnumeric():
+            reindex_flag = True
+        else:
+            reindex_flag = False
+    else:
+        reindex_flag = True
+
+    if reindex_flag:
+        if args.label.endswith(".pkl"):
+            label_df = pd.read_pickle(args.label)
+        elif args.label.endswith(".tsv"):
+            label_df = pd.read_csv(args.label, sep="\t")
+        else:
+            raise ValueError("Depth label file must be either .tsv or .pkl")
+
+        index_id_dict = dict(zip(label_df["index"], label_df["label_id"]))
+        final_df["label_id"] = final_df["label_id"].map(index_id_dict)
+
+        path = f"{args.output}/pileup_strid.npz"
+        np.savez_compressed(path, **{key: final_df[key].values for key in keys})
+        print(final_df)
+
     return None
 
 

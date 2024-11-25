@@ -136,9 +136,13 @@ def parse_args():
     else:
         name = []
         for path in args.block:
-            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(path)))
-            name.append(os.path.basename(parent_dir))
+            name_candidate = set([x for x in path.split("/") if (x.startswith("ON") and x[2:].isdigit())])
+            if len(name_candidate) == 1:
+                name.append(name_candidate.pop())
+            else:
+                raise ValueError("Unable to detect name from block file. Supply --name manually.")
         args.name = name
+        printmessage("Names detected:",args.name)
     return args
 
 def plot_violin(block_df_dict, color_dict, output):

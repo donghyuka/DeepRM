@@ -135,7 +135,7 @@ def main():
     gene_df["pm6a"] = -(2-gene_df["dom"])*gene_df["logsum_1_p_pos"]/gene_df["count_all"] + ((1-gene_df["dom"])*np.log10(np.clip(1-gene_df["dom"],1e-30,1)) + gene_df["dom"] * np.log10(np.clip(gene_df["dom"],1e-30,1)))*(gene_df["count_pos"]/gene_df["count_all"])
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
-    keys = ["genome_id", "gene_symbol", "coding", "isoforms", "pm6a", "dom", "count_all"]
+    keys = ["genome_id", "gene_symbol", "coding", "isoforms", "pm6a", "dom", "count_all", "logsum_1_p_pos", "kl_div_pos", "kl_div_neg"]
     gene_df = gene_df[keys]
 
     print(gene_df)

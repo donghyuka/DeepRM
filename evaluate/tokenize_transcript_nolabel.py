@@ -681,8 +681,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
+    parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--wdir", "-w", type=str, default=None, help="Working directory")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
@@ -699,13 +699,17 @@ def parse_args():
     parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
     parser.add_argument("--kmer_len", "-e", type=int, default=5, help="Kmer length")
     parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
+    parser.add_argument("--max_depth", "-d", type=int, default=None, help="Max Depth")
     args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    if not os.path.exists(args.label):
+        raise FileNotFoundError(f"Label (SAMtools Pileup) file {args.label} does not exist")
     if args.wdir is None:
         args.wdir = f"{args.output}/intermediates/"
+    if not os.path.exists(args.wdir):
+        if not os.path.exists(args.pod5):
+            raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+        if not os.path.exists(args.bam):
+            raise FileNotFoundError(f"BAM file {args.bam} does not exist")
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(args.wdir, exist_ok=True)
     if args.toml is None:
@@ -854,13 +858,14 @@ def main():
     gc.collect()
 
     label_df = pd.read_pickle(args.label)
-    label_df = label_df[["ref", "pos"]].copy()
+    label_df["index"] = label_df.index.astype(np.int32)
+    if args.max_depth is not None:
+        label_df = label_df[label_df["depth"] <= args.max_depth]
+    label_df = label_df[["ref", "pos", "index"]].copy()
     label_df = label_df.sort_values("pos")
     label_df.rename({"ref":"nmid"}, axis=1, inplace=True)
     label_df["nmid"] = label_df["nmid"].str.split(".").str[0]
     label_df["pos"] = label_df["pos"] - 1
-    label_df.reset_index(inplace=True)
-    label_df["index"] = label_df.index.astype(np.int32)
     label_df = label_df.groupby("nmid")
     label_df = {nmid:df[["index","pos"]].values.T for nmid, df in label_df}
     gc.collect()

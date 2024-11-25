@@ -14,9 +14,7 @@ def parse_args():
     args.add_argument("--cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of CPUs")
     args.add_argument("--data", type=str, required=True, help="Data path")
     args.add_argument("--output", type=str, required=True, help="Output path")
-    args.add_argument("--label", type=str, required=True, help="Label path")
     args = args.parse_args()
-    os.makedirs(args.output, exist_ok=True)
     return args
 
 
@@ -67,23 +65,17 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
         local_collect.append(gene_df)
 
     gene_df = pd.concat(local_collect)
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum",
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum",
                                                 "count_ca": "sum", "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first",
-                                                "depth": "sum", "coding": "max"})
+                                                "coding": "max"})
     gene_df = gene_df.reset_index(drop=True)
     collect_list.append(gene_df.copy())
 
     return None
 
-def load_split_data(data_path, output_path, label_path, cpu):
+def load_split_data(data_path, output_path, cpu):
     data_df = process_m6anet_inferece(data_path)
     print(data_df)
-
-    label_df = pd.read_csv(label_path, sep="\t")
-
-    label_df = label_df[["id","5mer", "drach", "depth"]]
-    label_df.rename({"id":"label_id"}, axis=1, inplace=True)
-    data_df = data_df.merge(label_df, how="left", on="label_id")
     data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
 
     geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
@@ -119,7 +111,7 @@ def main():
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    df_list_split = load_split_data(args.data, args.output, args.label, args.cpu)
+    df_list_split = load_split_data(args.data, args.output, args.cpu)
     refflat_df = parse_refflat(drop_y=True, drop_m=True)
     for pid, df in enumerate(df_list_split):
         proc = mp.Process(target=worker, args=(df, refflat_df, collect_list))
@@ -135,20 +127,19 @@ def main():
 
     gc.collect()
 
-    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "drach": "max", "count_m6a": "sum", "count_ca": "sum",
-                                                "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first", "depth": "sum",
+    gene_df = gene_df.groupby("genome_id").agg({"genome_id": "first", "count_m6a": "sum", "count_ca": "sum",
+                                                "pm6a": "sum", "count_pm6a": "sum", "gene_id": "first",
                                                 "coding": "max"})
 
     gene_df["pm6a"] = 1 - 10**(gene_df["pm6a"] / gene_df["count_pm6a"])
     gene_df["dom"] = gene_df["count_m6a"] / (gene_df["count_m6a"] + gene_df["count_ca"])
     gene_df["count_dom"] = gene_df["count_m6a"] + gene_df["count_ca"]
-    gene_df = gene_df[["genome_id", "gene_id", "dom", "pm6a", "drach", "depth", "count_dom", "count_pm6a", "coding"]].copy()
+    gene_df = gene_df[["genome_id", "gene_id", "dom", "pm6a", "count_dom", "count_pm6a", "coding"]].copy()
     gene_df.rename({"gene_id":"gene_symbol"}, axis=1, inplace=True)
 
     print(gene_df)
 
-    gene_df.to_csv(args.output, sep="\t", index=False)
-    gene_df.to_pickle(args.output.replace("tsv", "pkl"))
+    gene_df.to_pickle(args.output + "/gene_df.pkl")
     gc.collect()
 
     return None

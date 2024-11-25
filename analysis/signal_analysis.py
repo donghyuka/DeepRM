@@ -422,37 +422,37 @@ def main():
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
 
 
-    # norm_factor = parse_toml(args.toml)
-    #
-    # os.makedirs(args.output, exist_ok=True)
-    # os.makedirs(temp_path, exist_ok=True)
-    # os.makedirs(token_output_path, exist_ok=True)
-    # os.makedirs(intermediate_path, exist_ok=True)
-    # os.makedirs(signal_raw_path, exist_ok=True)
-    # os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    # os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
-    #
-    # with open(signal_index_path, "rb") as infile:
-    #     index_dict = pickle.load(infile)
-    # signal_path_arr = list(index_dict.keys())
-    # del index_dict
-    # gc.collect()
-    #
-    # np.random.shuffle(signal_path_arr)
-    # signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
-    #
-    # proc_list = []
-    # for signal_paths in signal_path_arr_split:
-    #     proc = mp.Process(target=segment_normalize_signal,
-    #                       args=(args.output, signal_paths, norm_factor))
-    #     proc_list.append(proc)
-    #     proc.start()
-    #
-    # del signal_path_arr_split
-    # gc.collect()
-    #
-    # for proc in proc_list:
-    #     proc.join()
+    norm_factor = parse_toml(args.toml)
+
+    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(temp_path, exist_ok=True)
+    os.makedirs(token_output_path, exist_ok=True)
+    os.makedirs(intermediate_path, exist_ok=True)
+    os.makedirs(signal_raw_path, exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
+
+    with open(signal_index_path, "rb") as infile:
+        index_dict = pickle.load(infile)
+    signal_path_arr = list(index_dict.keys())
+    del index_dict
+    gc.collect()
+
+    np.random.shuffle(signal_path_arr)
+    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+
+    proc_list = []
+    for signal_paths in signal_path_arr_split:
+        proc = mp.Process(target=segment_normalize_signal,
+                          args=(args.output, signal_paths, norm_factor))
+        proc_list.append(proc)
+        proc.start()
+
+    del signal_path_arr_split
+    gc.collect()
+
+    for proc in proc_list:
+        proc.join()
 
     printmessage("Signal Segmentation and Tokenization Complete", msg_type="success")
     printmessage("Saved to: " + args.output, msg_type="success")

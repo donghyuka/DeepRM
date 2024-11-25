@@ -115,7 +115,7 @@ def mp_worker(m6a_df, refflat_df, pos_col, strand_col, m6a_df_list):
 
 
 def reformat_m6A_df(chr_col="chr",pos_col="pos",strand_col="str",pos_offset=0,neg_offset=0,
-                    infilename="m6A_Jungmin_110823.txt",outfilename="m6A_Jungmin_110823.tsv", ncpu=120):
+                    infilename="GLORI_unconv5nt.txt",outfilename="GLORI_unconv5nt.tsv", ncpu=120):
 
     m6a_df = pd.read_csv(f"{WDIR}/{infilename}",sep="\t")
 
@@ -125,7 +125,6 @@ def reformat_m6A_df(chr_col="chr",pos_col="pos",strand_col="str",pos_offset=0,ne
     m6a_df.loc[m6a_df["GLORI"]==False,"DoM"]=0
 
     print(m6a_df)
-    add_cols=["m6A_level_rep1","m6A_level_rep2","DoM","SAC","GLORI","MICLIP2","M6ACE","validated"]
     add_cols=["m6A_level_rep1","m6A_level_rep2","DoM","SAC","GLORI","MICLIP2","M6ACE","validated"]
     add_cols = [col for col in add_cols if col in m6a_df.columns]
 

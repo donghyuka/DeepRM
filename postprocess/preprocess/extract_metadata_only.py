@@ -298,7 +298,7 @@ def get_label_pos_list(ref, start, cigar, query_len, md_tag, label_df):
 
     label_arr = label_df["label"].values
     label_index_arr = label_df["label_index"].values
-    dom_arr = label_df["dom_label"].values
+    dom_arr = label_df["m6A_level"].values
     ref_pos_arr = label_df["pos"].values
     query_pos_arr, error_arr = ref_pos_to_query_pos(ref_pos_arr, cigar, start, query_len, md_tag)
 
@@ -407,7 +407,7 @@ def parse_args():
     num_cpu = os.cpu_count()
     parser.add_argument("--thread", "-t", type=int, default=int(num_cpu * 0.9), help="Number of threads")
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
@@ -422,8 +422,9 @@ def main():
     args = parse_args()
     if not os.path.exists(args.pod5):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    if args.bam is not None:
+        if not os.path.exists(args.bam):
+            raise FileNotFoundError(f"BAM file {args.bam} does not exist")
 
     intermediate_path = f"{args.output}/intermediates/"
     bam_path = f"{intermediate_path}/bam/"
@@ -443,36 +444,32 @@ def main():
     else:
         raise ValueError("Label file must be either .tsv or .pkl")
 
-    label_df["nmid"] = label_df["label_id"].str.split(":").str[0]
-    label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(int)
+    # label_df["nmid"] = label_df["label_id"].str.split(":").str[0]
+    # label_df["pos"] = label_df["label_id"].str.split(":").str[1].astype(int)
+
+    label_df["label_index"] = label_df.index.astype(np.int32)
     label_df = label_df.sort_values("pos")
     label_df = label_df.groupby("nmid")
-    # bam_df = parse_bam(args.bam, args.thread, args.qcut)
-    # bam_df = np.array_split(bam_df, args.thread)
-    #
-    # ## Extract metadata from BAM and write to intermediate files.
-    # proc_list = []
-    # for pid, bam_df_split in enumerate(bam_df):
-    #     proc = mp.Process(target=extract_write_metadata,
-    #                       args=(bam_df_split, label_df, pid, intermediate_path, args.cb_len, args.boi))
-    #     proc_list.append(proc)
-    #     proc.start()
-    #
-    # for proc in proc_list:
-    #     proc.join()
-    #
-    # del bam_df, label_df
-    # gc.collect()
 
+    if not args.bam == None:
+        bam_df = parse_bam(args.bam, args.thread, args.qcut)
+        bam_df = np.array_split(bam_df, args.thread)
+
+    else:
+        bam_df = [None] * args.thread
+
+    ## Extract metadata from BAM and write to intermediate files.
     proc_list = []
-    for pid in range(args.thread):
+    for pid, bam_df_split in enumerate(bam_df):
         proc = mp.Process(target=extract_write_metadata,
-                          args=(None, label_df, pid, intermediate_path, args.cb_len, args.boi))
+                          args=(bam_df_split, label_df, pid, intermediate_path, args.cb_len, args.boi))
         proc_list.append(proc)
         proc.start()
+
     for proc in proc_list:
         proc.join()
-    del label_df
+
+    del bam_df, label_df
     gc.collect()
 
     intermediate_file_list = glob.glob(f"{intermediate_path}/*.pkl")
@@ -485,7 +482,7 @@ def main():
         final_df.append(pd.read_pickle(path))
         os.remove(path)
     final_df = pd.concat(final_df, axis=0).reset_index(drop=True)
-    final_df.to_pickle(f"{args.output}/metadata_D200.pkl")
+    final_df.to_pickle(f"{args.output}/metadata.pkl")
 
     return None
 

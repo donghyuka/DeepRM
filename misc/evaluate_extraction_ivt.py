@@ -13,6 +13,9 @@ BLOCK_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/b
 ALIGNMENT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/intermediates/dorado_output.aligned.filtered.sorted.pentamer.subsampled.subsampled.bam"
 # CORRECT_POSITION = [123+60*n+i for n in range(5) for i in [16, 27+16]]
 CORRECT_POSITION = [72+51*n+25 for n in range(6)]
+plt.style.use('default')
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.framealpha': 1, "legend.frameon": 1, "lines.linewidth": 2})
 
 def read_bam(id_list):
     read_dict = {}
@@ -78,6 +81,8 @@ def plot_pr_curve(block_df):
     ax.plot(recall, precision, label=f"PR AUC = {pr_auc:.2f}")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.legend()
     plt.savefig(PLOTPATH, dpi=300)
     return None
@@ -92,22 +97,24 @@ def main2():
     bb55_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/block/1cb_sp15_rand12.pkl_with_align_pairs_correct.pkl"
     bb51_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/block/1cb_sp15_rand10.pkl_with_align_pairs_correct.pkl"
     bb87_df = pd.read_pickle(bb87_path)
-    bb60_df = pd.read_pickle(bb60_path)
-    bb66_df = pd.read_pickle(bb66_path)
-    bb45_df = pd.read_pickle(bb45_path)
+    # bb60_df = pd.read_pickle(bb60_path)
+    # bb66_df = pd.read_pickle(bb66_path)
+    # bb45_df = pd.read_pickle(bb45_path)
     # bb49_df = pd.read_pickle(bb49_path)
     # bb55_df = pd.read_pickle(bb55_path)
-    bb51_df = pd.read_pickle(bb51_path)
+    # bb51_df = pd.read_pickle(bb51_path)
     df_dict = {"87BB: 21CB x 3 + 6SP x 4": bb87_df,
-               "60BB: 21CB x 2 + 6SP x 3": bb60_df,
-               "66BB: 21CB x 2 + 8SP x 3": bb66_df,
-               "45BB: 21CB x 1 + 12SP x 2": bb45_df,
-               "51BB: 21CB x 1 + 15SP x 2": bb51_df,}
+               # "60BB: 21CB x 2 + 6SP x 3": bb60_df,
+               # "66BB: 21CB x 2 + 8SP x 3": bb66_df,
+               # "45BB: 21CB x 1 + 12SP x 2": bb45_df,
+               # "51BB: 21CB x 1 + 15SP x 2": bb51_df,
+               }
     total_dict = {"87BB: 21CB x 3 + 6SP x 4": 15*100000,
-                  "60BB: 21CB x 2 + 6SP x 3": 10*100000,
-                  "66BB: 21CB x 2 + 8SP x 3": 10*100000,
-                  "45BB: 21CB x 1 + 12SP x 2": 6*15475,
-                  "51BB: 21CB x 1 + 15SP x 2": 6*15475,}
+                  # "60BB: 21CB x 2 + 6SP x 3": 10*100000,
+                  # "66BB: 21CB x 2 + 8SP x 3": 10*100000,
+                  # "45BB: 21CB x 1 + 12SP x 2": 6*15475,
+                  # "51BB: 21CB x 1 + 15SP x 2": 6*15475,
+                  }
     colour_list = ["royalblue", "tomato", "forestgreen", "orchid", "darkgoldenrod", "turquoise"]
     plot_pr_curve_2(df_dict, colour_list, total_dict)
     return None
@@ -125,9 +132,23 @@ def plot_pr_curve_2(df_dict, colour_list, total_dict):
         precision, recall, _ = precision_recall_curve(y, x)
         max_f1 = max_f1_score(y, x)
         ax.plot(recall[1:], precision[1:], label=f"{name} (Max-F1 = {max_f1:.3f})", color=colour_list[i], linewidth=5)
+
+        ## Plot the point with the highest precision
+        max_precision = np.max(precision[1:])
+        max_precision_idx = np.argmax(precision[1:])
+        max_precision_recall = recall[1:][max_precision_idx]
+        print(f"{name}: Max Precision = {max_precision:.3f}, Recall = {max_precision_recall:.3f}")
+        ax.text(max_precision_recall, max_precision, f"{name}", fontsize=20, color=colour_list[i])
+        ax.vline(x=max_precision_recall, color="grey", linestyle="--", linewidth=2)
+        ax.hline(y=max_precision, color="grey", linestyle="--", linewidth=2)
+
+
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.legend()
+    plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/plot/pr_curve_compare_v4.pdf")
     plt.savefig("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_IVT/ON0095/ON0095/result/plot/pr_curve_compare_v4.png", dpi=300)
     return None
 
