@@ -1,4 +1,7 @@
 import os, argparse
+
+from sympy.physics.units import action
+
 from utils.utils import printmessage
 import glob
 import math
@@ -158,7 +161,7 @@ def parse_args():
     parser.add_argument("--cpu", "-t", type=int, default=int(math.floor(num_cpu * 0.95)), help="Number of threads")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
-    parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
+    parser.add_argument("--qcut", "-q", type=int, default=0, help="Dorado BQ cutoff")
     parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
     parser.add_argument("--ref", "-f", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta", help="Reference path")
     parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
@@ -166,6 +169,8 @@ def parse_args():
     parser.add_argument("--base", "-x", type=str, default="A", help="Base of Interest")
     parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
     parser.add_argument("--restructure", "-e", type=bool, default=True, help="Restructure input directory")
+    parser.add_argument("--comment", "-c", type=str, default="", help="Comment")
+    parser.add_argument("--ivt", "-v", action="store_true", default=False, help="Option for IVT sample. Disables trimming.")
     args = parser.parse_args()
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input directory {args.input} does not exist")
@@ -201,7 +206,15 @@ def main():
         else:
             args.batch = ""
 
-        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} --modified-bases m6A pseU --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
+        trimming = ""
+        if args.ivt:
+            trimming = "--no-trim"
+            ## When auto-trimming is enabled and the 3’ sequence is unconventional, the move table is corrupted.
+            ## It is a weird bug in Dorado.
+            ## To avoid this, we disable trimming for IVT samples.
+            ## Manual trimming is unnecessary since minimap2 can simply clip it.
+
+        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} {trimming} --modified-bases m6A pseU --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 
@@ -234,7 +247,7 @@ def main():
         printmessage(cmd)
         os.system(cmd)
 
-        cmd = f"python -m utils.filter_pileup -i {raw_pileup_path} -o {pileup_path} -c {args.cpu}"
+        cmd = f"python -m utils.filter_pileup -i {raw_pileup_path} -o {pileup_path} -c {args.cpu} -m 1"
         printmessage(cmd)
         os.system(cmd)
 
@@ -246,19 +259,9 @@ def main():
     if 3 in args.step:
         ## Step 3. Run tokenize_transcript.py
         printmessage(f"[Step 3/3] Tokenize Transcript")
-        cmd = f"python -m evaluate.tokenize_transcript_dwell_npz --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n normalise -x drach"
+        cmd = f"python -m evaluate.tokenize_transcript_nolabel --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {pileup_path} -c {args.cpu} -n normalise -x {args.comment}"
         printmessage(cmd)
         os.system(cmd)
-
-        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.drach.tsv -c {args.cpu} -n standardise -x drach"
-        # printmessage(cmd)
-        # os.system(cmd)
-        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n normalise -x all"
-        # printmessage(cmd)
-        # os.system(cmd)
-        # cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -p {args.pod5} -b {bam_path} -o {block_path} -l {label_path}.GP3.depth5_None.twm6astrict.tsv -c {args.cpu} -n standardise -x all"
-        # printmessage(cmd)
-        # os.system(cmd)
 
     return None
 

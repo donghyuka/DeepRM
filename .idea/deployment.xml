@@ -4,14 +4,14 @@
     <option name="confirmBeforeDeletion" value="false" />
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="AICA-A100">
+      <paths name="AICA-067">
         <serverdata>
           <mappings>
             <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="AICA-H100">
+      <paths name="AICA-079">
         <serverdata>
           <mappings>
             <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />

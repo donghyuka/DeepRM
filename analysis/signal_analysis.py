@@ -116,7 +116,7 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
 
 def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):
     ## Extract mv tag from bam and save to separate file
-    data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": []} for x in signal_path_arr}
+    data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": [], "bq": []} for x in signal_path_arr}
     count = 0
 
     with pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=ncpu) as input_bam:
@@ -159,6 +159,7 @@ def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate
                 data["ns"].append(ns)
                 data["mv"].append(mv)
                 data["sp"].append(sp)
+                data["bq"].append(np.array(read.query_qualities, dtype=int))
                 count += 1
 
                 pbar.update(1)
@@ -169,7 +170,7 @@ def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate
         move_df = pd.DataFrame.from_dict(data, orient="columns")
         df_len = len(move_df)
         if df_len > 0:
-            move_df.to_pickle(f"{intermediate_path}/move_df_split/{signal_path}")
+            move_df.to_pickle(f"{intermediate_path}/move_df_split_extended/{signal_path}")
         del move_df
 
     del data_dict
@@ -251,18 +252,22 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
         file_id = signal_path.split('/')[-1]
 
         if not os.path.exists(signal_path):
+            print(f"Signal file {signal_path} not found")
             continue
-        if not os.path.exists(f"{seg_df_path}/intermediates/move_df_split/{file_id}"):
+        if not os.path.exists(f"{seg_df_path}/intermediates/move_df_split_extended/{file_id}"):
+            print(f"Move file {file_id} not found")
             continue
         if not os.path.exists(f"{seg_df_path}/intermediates/block_df_split/{file_id}"):
+            print(f"Block file {file_id} not found")
             continue
 
-        out_path = f"{seg_df_path}/signal_analysis/temp/{file_id}"
+        out_path = f"{seg_df_path}/signal_analysis_extended/temp/{file_id}"
         if os.path.exists(out_path):
+            print(f"File {out_path} already exists")
             continue
 
         signal_df = pd.read_pickle(signal_path)
-        move_df = pd.read_pickle(f"{seg_df_path}/intermediates/move_df_split/{signal_path.split('/')[-1]}")
+        move_df = pd.read_pickle(f"{seg_df_path}/intermediates/move_df_split_extended/{signal_path.split('/')[-1]}")
         signal_df = signal_df.merge(move_df, on="read_id", how="inner")
         del move_df
 
@@ -270,12 +275,14 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
         signal_df["signal"] = signal_df.apply(lambda x: trim_scale_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
                                                                                   quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
 
-        signal_df = signal_df[signal_df["signal"].notnull()][["read_id", "signal"]].copy()
+        signal_df = signal_df[signal_df["signal"].notnull()][["read_id", "signal", "bq"]].copy()
 
         block_df = pd.read_pickle(f"{seg_df_path}/intermediates/block_df_split/{signal_path.split('/')[-1]}")
         block_df = block_df[block_df["penalty"] == 0]
+        block_df.drop("bq", axis=1, inplace=True)
 
         if len(block_df) == 0:
+            print(f"No valid blocks found in {signal_path}")
             continue
 
         signal_df = block_df.merge(signal_df, on="read_id", how="inner")
@@ -283,10 +290,12 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, kmer = 5
         gc.collect()
 
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]-3:x["end_pos"]+3], axis=1)
+        signal_df["bq"] = signal_df.apply(lambda x: x["bq"][x["start_pos"]-3:x["end_pos"]+3], axis=1)
 
         signal_df = signal_df[signal_df["signal"].apply(lambda x: len(x) == cb_len + 6)]
 
         if len(signal_df) == 0:
+            print(f"No valid blocks found in {signal_path}")
             continue
 
         signal_df = signal_df[["signal", "bq", "motif", "cb_idx"]].copy()
@@ -327,7 +336,7 @@ def parse_args():
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
     parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files")
-    parser.add_argument("--skip_intermediate", "-sk", action="store_true", help="Skip intermediate files")
+    parser.add_argument("--skip_intermediate", "-si", action="store_true", help="Skip intermediate files")
     args = parser.parse_args()
     return args
 
@@ -414,8 +423,7 @@ def parse_toml(toml_path):
 def main():
     args = parse_args()
 
-
-    token_output_path = f"{args.output}/signal_analysis/"
+    token_output_path = f"{args.output}/signal_analysis_extended/"
     temp_path = f"{token_output_path}/temp/"
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
@@ -429,34 +437,44 @@ def main():
     os.makedirs(token_output_path, exist_ok=True)
     os.makedirs(intermediate_path, exist_ok=True)
     os.makedirs(signal_raw_path, exist_ok=True)
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split_extended", exist_ok=True)
     os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
+    #
+    # with open(signal_index_path, "rb") as infile:
+    #     index_dict = pickle.load(infile)
+    # signal_path_arr = list(index_dict.keys())
+    # signal_path_dict = {}
+    # for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+    #     for read_id in id_list:
+    #         signal_path_dict[read_id] = signal_path.split('/')[-1]
+    #
+    # del index_dict
+    # gc.collect()
+    #
+    # if not args.skip_intermediate:
+    #     signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+    #     extract_move(args.bam, args.cpu, signal_path_dict, signal_name_arr, intermediate_path)
+    #
+    # np.random.shuffle(signal_path_arr)
+    # signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
+    #
+    # proc_list = []
+    # for signal_paths in signal_path_arr_split:
+    #     proc = mp.Process(target=segment_normalize_signal,
+    #                       args=(args.output, signal_paths, norm_factor))
+    #     proc_list.append(proc)
+    #     proc.start()
+    #
+    # del signal_path_arr_split
+    # gc.collect()
+    #
+    # for proc in proc_list:
+    #     proc.join()
+    #
+    # printmessage("Signal Segmentation and Tokenization Complete", msg_type="success")
+    # printmessage("Saved to: " + args.output, msg_type="success")
 
-    with open(signal_index_path, "rb") as infile:
-        index_dict = pickle.load(infile)
-    signal_path_arr = list(index_dict.keys())
-    del index_dict
-    gc.collect()
-
-    np.random.shuffle(signal_path_arr)
-    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.cpu))
-
-    proc_list = []
-    for signal_paths in signal_path_arr_split:
-        proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, norm_factor))
-        proc_list.append(proc)
-        proc.start()
-
-    del signal_path_arr_split
-    gc.collect()
-
-    for proc in proc_list:
-        proc.join()
-
-    printmessage("Signal Segmentation and Tokenization Complete", msg_type="success")
-    printmessage("Saved to: " + args.output, msg_type="success")
-    orig_df = read_path(token_output_path)
+    orig_df = read_path(token_output_path, args.cpu)
 
     result_df_list = []
 
@@ -499,26 +517,28 @@ def main():
     df = pd.concat(result_df_list, axis = 0).reset_index()
     print(df)
 
+    df.to_pickle(f"{token_output_path}/sampled.pkl")
     del result_df_list
-    result_dict = {}
-    column_list = ["signal_mean","signal_median","signal_std","signal_len_log10","signal_amp","signal_rms","bq"]
-    for column in column_list:
-        values = np.stack(df[column].values, axis = 0)
-        mean = np.mean(values, axis = 0)
-        std = np.std(values, axis = 0)
-        ci95 = 1.96 * std / np.sqrt(len(df))
-        result_dict[column] = {"mean":mean, "std":std, "ci95":ci95, "len":len(df)}
+    gc.collect()
 
-    result_df = pd.DataFrame(result_dict)
-    result_df.to_pickle(f"{token_output_path}/result.pkl")
+    # result_dict = {}
+    # column_list = ["signal_mean","signal_median","signal_std","signal_len_log10","signal_amp","signal_rms","bq"]
+    # for column in column_list:
+    #     values = np.stack(df[column].values, axis = 0)
+    #     mean = np.mean(values, axis = 0)
+    #     std = np.std(values, axis = 0)
+    #     ci95 = 1.96 * std / np.sqrt(len(df))
+    #     result_dict[column] = {"mean":mean, "std":std, "ci95":ci95, "len":len(df)}
+    # result_df = pd.DataFrame(result_dict)
+    # result_df.to_pickle(f"{token_output_path}/result.pkl")
 
     return None
 
 
 def read_path(path, ncpu = 120):
     path_list = glob.glob(f"{path}/temp/*.pkl")
-    if "ON0092" in path or "ON0096" in path:
-        path_list = np.random.choice(path_list, 10000, replace = False)
+    print(f"{path}/temp/*.pkl")
+    print(f"Reading {len(path_list)} files")
     man = mp.Manager()
     return_list = man.list()
     path_list = np.array_split(path_list, ncpu)

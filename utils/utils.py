@@ -97,7 +97,20 @@ def parse_refflat(refflat_path=REFFLAT_PATH, drop_y = False, drop_m = True, drop
 
     return refflat_df
 
+REFFLAT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/anno/agat_refflat.base0.pkl"
+def parse_refflat_v2(refflat_path=REFFLAT_PATH, drop_y = False, drop_m = False, drop_unk = True, drop_ver = True, reindex = True):
+    refflat_df = pd.read_pickle(refflat_path)
+    refflat_df=refflat_df[refflat_df["cdsEnd"]>=refflat_df["cdsStart"]]
+    refflat_df["chrstrand"]=refflat_df["chr"].astype(str)+refflat_df["strand"]
+    refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]]=refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]].astype(int)
+    refflat_df["exonStarts"]=refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df["exonEnds"]=refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    return refflat_df
 
+def reformat_transcript_id(transcript_id):
+    if transcript_id.startswith("EN"):
+        transcript_id = transcript_id.split(".")[0]
+    return transcript_id
 
 def reformat_nmid(nmid):
     nmid_prefix = nmid.split("_")[0]

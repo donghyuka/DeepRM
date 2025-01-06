@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 from tqdm import tqdm
 from archived.misc.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
-from utils.utils import parse_refflat
+from utils.utils import parse_refflat_v2, reformat_transcript_id
 
 def parse_args():
     args = argparse.ArgumentParser()
@@ -20,7 +20,7 @@ def parse_args():
 
 def process_m6anet_inferece(data_path):
     data_df = pd.read_csv(data_path)
-    data_df["id"] = data_df["transcript_id"].str.split(".").str[0]
+    data_df["id"] = data_df["transcript_id"].apply(reformat_transcript_id)
     data_df["id"] = data_df["id"] + ":" + data_df["transcript_position"].astype(str)
     data_df.rename(columns = {"id": "label_id", "probability_modified": "pm6a", "mod_ratio": "dom", "n_reads": "count_pm6a"}, inplace = True)
     data_df = data_df[["label_id", "pm6a", "dom", "count_pm6a"]].copy()
@@ -34,7 +34,6 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
     df["pm6a"] = np.clip(df["pm6a"], 0.0, 1.0 - epsilon)
     df["pm6a"] = np.log10(1-df["pm6a"]) * df["count_pm6a"]
     df["pos"] = df["label_id"].apply(lambda x: x.split(":")[1]).astype(int)
-    df["coding"] = df["gene"].apply(lambda x: x.startswith("NM"))
 
     df = df.groupby("gene")
 
@@ -73,14 +72,12 @@ def worker(df, refflat_df, collect_list, epsilon = 1e-6):
 
     return None
 
-def load_split_data(data_path, output_path, cpu):
+def load_split_data(data_path, output_path, cpu, refflat_df):
     data_df = process_m6anet_inferece(data_path)
     print(data_df)
     data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
-
-    geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
-    geneid_table.rename({"transcript_id":"gene"}, axis=1, inplace=True)
-    data_df = data_df.merge(geneid_table, how="left", on="gene")
+    geneid_table = refflat_df[["gene_id", "transcript_id", "coding"]]
+    data_df = data_df.merge(geneid_table, how="left", left_on="gene", right_on="transcript_id")
     data_df.dropna(inplace=True)
 
     print(data_df)
@@ -111,8 +108,10 @@ def main():
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    df_list_split = load_split_data(args.data, args.output, args.cpu)
-    refflat_df = parse_refflat(drop_y=True, drop_m=True)
+    refflat_df = parse_refflat_v2("/extdata4/baeklab/Hyeonseo/m6A/anno/agat_refflat.base0.pkl")
+    print(refflat_df)
+    df_list_split = load_split_data(args.data, args.output, args.cpu, refflat_df)
+    refflat_df.set_index("transcript_id", inplace=True)
     for pid, df in enumerate(df_list_split):
         proc = mp.Process(target=worker, args=(df, refflat_df, collect_list))
         proc.start()

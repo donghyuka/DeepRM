@@ -74,6 +74,7 @@ def parse_args():
     parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
     parser.add_argument("--no_bq", action="store_true", default=False)
     parser.add_argument("--load_weight_only", action="store_true", default=False)
+    parser.add_argument("--override_lr", action="store_true", default=False)
     parser.add_argument("--comment", type=str, default="None")
 
     strfttime = time.strftime("%Y%m%d-%H%M%S")
@@ -476,6 +477,10 @@ def main_worker(rank, args_dict):
     if args_dict["load_checkpoint"] is not None:
         if not args_dict["load_weight_only"]:
             optimizer.load_state_dict(save_dict["optimizer_state_dict"])
+            if args_dict["override_lr"]:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = args_dict["lr"]
+
 
 
     if args_dict["rlrop"] is not None:
@@ -486,8 +491,9 @@ def main_worker(rank, args_dict):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
     if args_dict["load_checkpoint"] is not None:
-        if not args_dict["load_weight_only"]:
+        if not (args_dict["load_weight_only"] or args_dict["override_lr"]):
             scheduler.load_state_dict(save_dict["scheduler_state_dict"])
+
 
     if args_dict["load_checkpoint"] is not None:
         save_dict.clear()

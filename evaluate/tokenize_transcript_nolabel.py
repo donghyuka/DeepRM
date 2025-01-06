@@ -541,7 +541,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["pos"] = pos_list
         signal_df = signal_df[signal_df["pos"].apply(lambda x: len(x) > 0)]
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data (1): {signal_path}", msg_type="warning")
+            # printmessage(f"Empty signal data (1): {signal_path}", msg_type="warning")
             continue
         del pos_list, alignment_zip
         gc.collect()
@@ -567,7 +567,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df.explode("pos").reset_index(drop=True)
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data (2): {signal_path}", msg_type="warning")
+            # printmessage(f"Empty signal data (2): {signal_path}", msg_type="warning")
             continue
 
         signal_df["label_id"] = signal_df["pos"].apply(lambda x: x[0])
@@ -577,7 +577,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df = signal_df[signal_df["centre_nuc"] == boi]
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data (3): {signal_path}", msg_type="warning")
+            # printmessage(f"Empty signal data (3): {signal_path}", msg_type="warning")
             continue
 
         signal_df["start_pos"] = signal_df["query_pos"] - cb_half_len
@@ -588,7 +588,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df.dropna(inplace=True)
 
         if len(signal_df) == 0:
-            printmessage(f"Empty signal data (4): {signal_path}", msg_type="warning")
+            # printmessage(f"Empty signal data (4): {signal_path}", msg_type="warning")
             continue
 
         signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)

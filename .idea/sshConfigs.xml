@@ -5,6 +5,12 @@
       <sshConfig host="proxy5.aitrain.ktcloud.com" id="87484c32-354b-46c8-beb0-2817fd43e2e5" keyPath="C:\Users\User\.ssh\id_container_proxy" port="10802" customName="NIPA" nameFormat="CUSTOM" username="work" useOpenSSHConfig="false">
         <option name="customName" value="NIPA" />
       </sshConfig>
+      <sshConfig host="114.110.129.10" id="3ec5c58b-b6d8-49d5-93b0-85d2953888c9" keyPath="C:\Users\User\Documents\ssh\AICA_067.pem" port="22" customName="AICA-067" nameFormat="CUSTOM" username="ubuntu" useOpenSSHConfig="true">
+        <option name="customName" value="AICA-067" />
+      </sshConfig>
+      <sshConfig host="114.110.128.77" id="b27f743e-408f-439b-85c5-f3f3b209b11c" keyPath="C:\Users\User\Documents\ssh\AICA_079.pem" port="22" customName="AICA-079" nameFormat="CUSTOM" username="ubuntu" useOpenSSHConfig="true">
+        <option name="customName" value="AICA-079" />
+      </sshConfig>
     </configs>
   </component>
 </project>

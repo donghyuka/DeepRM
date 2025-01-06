@@ -2,13 +2,6 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="11104950-90ad-4009-9512-922ba16acdf8" name="AICA-H100">
-        <fileTransfer accessType="SFTP" host="114.110.128.196" port="22" sshConfigId="b3cce7f4-9100-4fd5-8d4d-8a3d806cc50e" sshConfig="AICA-H100" keyPair="true">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
-      </webServer>
       <webServer id="5d9d47ef-78be-4482-919e-06e70c9c9c53" name="SNU-BIO">
         <fileTransfer accessType="SFTP" host="147.47.218.124" port="22" sshConfigId="a024a542-0faf-4502-b333-e9ac0faba7b6" sshConfig="sonic@147.47.218.124:22 password">
           <advancedOptions>
@@ -18,13 +11,6 @@
       </webServer>
       <webServer id="68ae0b22-2945-45c8-9b44-38e9ddd56e3e" name="Deep1">
         <fileTransfer accessType="SFTP" host="147.47.218.58" port="7777" sshConfigId="56d0a24b-3e5a-4368-baa9-666f08acbc1a" sshConfig="sonic@147.47.218.58:7777 password" />
-      </webServer>
-      <webServer id="8e08423e-ee04-4b4c-b8b5-75287ced06a1" name="AICA-A100">
-        <fileTransfer accessType="SFTP" host="114.110.135.154" port="22" sshConfigId="f98bed4e-6d7d-401c-b11c-3e9a6d416f10" sshConfig="AICA-A100" keyPair="true">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
       </webServer>
       <webServer id="79eb2e34-ba0b-4bfb-baa2-c781f640e47c" name="BIOSCI">
         <fileTransfer accessType="SFTP" host="147.47.52.151" port="7777" sshConfigId="aa53bcb9-0d3d-4ba5-a27f-b67c050e8cf0" sshConfig="BIOSCI">
@@ -47,18 +33,32 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
+      <webServer id="2d8ad313-9e48-4840-98d6-1e18e9cc1736" name="AICA-067">
+        <fileTransfer accessType="SFTP" host="114.110.129.10" port="22" sshConfigId="3ec5c58b-b6d8-49d5-93b0-85d2953888c9" sshConfig="AICA-067" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+      <webServer id="7a3544ed-6b08-4b12-87ef-b66d98282745" name="AICA-079">
+        <fileTransfer accessType="SFTP" host="114.110.128.77" port="22" sshConfigId="b27f743e-408f-439b-85c5-f3f3b209b11c" sshConfig="AICA-079" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
     </option>
     <groups>
       <group>
         <name>modformer</name>
         <servers>
-          <name value="AICA-H100" />
           <name value="SNU-BIO" />
           <name value="Deep1" />
-          <name value="AICA-A100" />
           <name value="BIOSCI" />
           <name value="Genome1" />
           <name value="NIPA" />
+          <name value="AICA-067" />
+          <name value="AICA-079" />
         </servers>
       </group>
     </groups>

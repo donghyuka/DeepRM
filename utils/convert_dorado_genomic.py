@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 from tqdm import tqdm
 from archived.misc.dorado_transcript_to_genome import transcript_to_chromosomal_coordinate
-from utils.utils import parse_refflat
+from utils.utils import parse_refflat_v2, reformat_transcript_id
 
 def parse_args():
     args = argparse.ArgumentParser()
@@ -33,10 +33,11 @@ def process_dorado_inferece(data_path, mod):
     ## Keep column 0, 1, 4, 9
     data_df = data_df[[0, 1, 3, 4, 9]]
     data_df.columns = ["nmid", "pos", "mod", "depth", "pred_dorado"]
+    data_df["nmid"] = data_df["nmid"].apply(reformat_transcript_id)
     data_df = data_df[data_df["mod"] == mod_code].copy()
     data_df["depth"] = data_df["depth"].astype(int)
     data_df["dom"] = data_df["pred_dorado"].str.split(" ").str[1].astype(float) / 100
-    data_df["label_id"] = data_df["nmid"].str.split(".").str[0] + ":" + data_df["pos"]
+    data_df["label_id"] = data_df["nmid"] + ":" + data_df["pos"]
     data_df = data_df[["label_id", "dom", "depth"]].copy()
     data_df.rename(columns = {"depth": "count_dom"}, inplace = True)
     data_df.to_pickle(f"{data_path}.{mod}.pkl")
@@ -48,7 +49,6 @@ def worker(df, refflat_df, collect_list):
     df["count_m6a"] = (df["count_dom"] * df["dom"]).astype(int)
     df["count_ca"] = df["count_dom"] - df["count_m6a"]
     df["pos"] = df["label_id"].apply(lambda x: x.split(":")[1]).astype(int)
-    df["coding"] = df["gene"].apply(lambda x: x.startswith("NM"))
 
     df = df.groupby("gene")
 
@@ -87,7 +87,7 @@ def worker(df, refflat_df, collect_list):
 
     return None
 
-def load_split_data(data_path, output_path, mod, cpu):
+def load_split_data(data_path, mod, cpu, refflat_df):
     if data_path.endswith(".bed"):
         data_df = process_dorado_inferece(data_path, mod)
         print(data_df)
@@ -100,9 +100,8 @@ def load_split_data(data_path, output_path, mod, cpu):
 
     data_df["gene"] = data_df["label_id"].apply(lambda x: x.split(":")[0])
 
-    geneid_table = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/res/ref/GRCh38_latest_genomic.convert_table.pkl")
-    geneid_table.rename({"transcript_id":"gene"}, axis=1, inplace=True)
-    data_df = data_df.merge(geneid_table, how="left", on="gene")
+    geneid_table = refflat_df[["gene_id", "transcript_id", "coding"]]
+    data_df = data_df.merge(geneid_table, how="left", left_on="gene", right_on="transcript_id")
     data_df.dropna(inplace=True)
 
     print(data_df)
@@ -130,8 +129,9 @@ def main():
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    df_list_split = load_split_data(args.input, args.output, args.mod, args.cpu)
-    refflat_df = parse_refflat(drop_y=True, drop_m=True)
+    refflat_df = parse_refflat_v2()
+    df_list_split = load_split_data(args.input, args.mod, args.cpu, refflat_df)
+    refflat_df.set_index("transcript_id", inplace=True)
     for pid, df in enumerate(df_list_split):
         proc = mp.Process(target=worker, args=(df, refflat_df, collect_list))
         proc.start()

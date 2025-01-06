@@ -5,7 +5,7 @@
       <list>
         <JupyterConnectionParameters>
           <option name="authType" value="notebook" />
-          <option name="urlString" value="http://localhost:8888" />
+          <option name="urlString" value="http://localhost:8888/" />
           <authParams2>
             <map />
           </authParams2>
@@ -18,7 +18,7 @@
           <value>
             <JupyterConnectionParameters>
               <option name="authType" value="notebook" />
-              <option name="urlString" value="http://localhost:8888" />
+              <option name="urlString" value="http://localhost:8888/" />
               <authParams2>
                 <map />
               </authParams2>

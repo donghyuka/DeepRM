@@ -394,43 +394,43 @@ def main(spacer_size = 15, n_blocks=2, cb_pad = 12, ncpu = 100):
     block_list = [f"block_{i}" for i in range(n_blocks)]
 
 
-    # sequence_df = generate_candidates(ncpu=ncpu, n_blocks=n_blocks, kmer=spacer_size)
-    # print("1. Candidates generated")
-    # print(sequence_df)
-    # sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.pkl")
-    #
-    # sequence_df = leven_filtering(sequence_df, min_ed=spacer_size//2, ncpu=ncpu, n_blocks=n_blocks)
-    # print("2. Levenshtein filtered")
-    # print(sequence_df)
-    # sequence_df.to_pickle(f"{wdir}/spacer_candidates.leven_filtered_{spacer_size}x{n_blocks}.pkl")
-    #
-    # sequence_df = mark_revcomp(sequence_df, kmer=5, ncpu=ncpu, n_block=2)
-    # sequence_df = sequence_df[~sequence_df["is_revcomp"]]
-    # sequence_df.drop(columns=["is_revcomp"], inplace=True)
-    #
-    # print("3. Revcomp filtered")
-    # print(sequence_df)
-    # sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.pkl")
-    # # error_dict = extract_error_dict(kmer=5,ncpu=ncpu)
-    # # with open(f"{wdir}/error_dict.pkl","wb") as f:
-    # #     pickle.dump(error_dict,f)
-    # with open(f"{wdir}/error_dict.pkl","rb") as f:
-    #     error_dict = pickle.load(f)
-    #
-    # sequence_df = pd.read_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.pkl")
-    # sequence_df["error_rate"] = sequence_df.apply(lambda row: calculate_error(row[block_list],error_dict,kmer=5), axis=1)
-    # sequence_df = sequence_df[sequence_df["error_rate"].apply(lambda x: None not in x)]
-    # sequence_df["mean_error_rate"] = sequence_df["error_rate"].apply(lambda x: np.mean(x))
-    # sequence_df["max_error_rate"] = sequence_df["error_rate"].apply(lambda x: np.max(x))
-    # print("4. Error rate calculated")
-    # print(sequence_df)
-    # sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.error_rate.pkl")
-    #
-    # sequence_df = sequence_df[sequence_df["mean_error_rate"] < 0.05]
-    # sequence_df.sort_values(by="mean_error_rate", inplace=True)
-    # print("5. Error rate filtered")
-    # print(sequence_df)
-    # sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.error_rate_filtered.pkl")
+    sequence_df = generate_candidates(ncpu=ncpu, n_blocks=n_blocks, kmer=spacer_size)
+    print("1. Candidates generated")
+    print(sequence_df)
+    sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.pkl")
+
+    sequence_df = leven_filtering(sequence_df, min_ed=spacer_size//2, ncpu=ncpu, n_blocks=n_blocks)
+    print("2. Levenshtein filtered")
+    print(sequence_df)
+    sequence_df.to_pickle(f"{wdir}/spacer_candidates.leven_filtered_{spacer_size}x{n_blocks}.pkl")
+
+    sequence_df = mark_revcomp(sequence_df, kmer=5, ncpu=ncpu, n_block=2)
+    sequence_df = sequence_df[~sequence_df["is_revcomp"]]
+    sequence_df.drop(columns=["is_revcomp"], inplace=True)
+
+    print("3. Revcomp filtered")
+    print(sequence_df)
+    sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.pkl")
+    error_dict = extract_error_dict(kmer=5,ncpu=ncpu)
+    with open(f"{wdir}/error_dict.pkl","wb") as f:
+        pickle.dump(error_dict,f)
+    with open(f"{wdir}/error_dict.pkl","rb") as f:
+        error_dict = pickle.load(f)
+
+    sequence_df = pd.read_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.pkl")
+    sequence_df["error_rate"] = sequence_df.apply(lambda row: calculate_error(row[block_list],error_dict,kmer=5), axis=1)
+    sequence_df = sequence_df[sequence_df["error_rate"].apply(lambda x: None not in x)]
+    sequence_df["mean_error_rate"] = sequence_df["error_rate"].apply(lambda x: np.mean(x))
+    sequence_df["max_error_rate"] = sequence_df["error_rate"].apply(lambda x: np.max(x))
+    print("4. Error rate calculated")
+    print(sequence_df)
+    sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.error_rate.pkl")
+
+    sequence_df = sequence_df[sequence_df["mean_error_rate"] < 0.05]
+    sequence_df.sort_values(by="mean_error_rate", inplace=True)
+    print("5. Error rate filtered")
+    print(sequence_df)
+    sequence_df.to_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.error_rate_filtered.pkl")
     sequence_df = pd.read_pickle(f"{wdir}/spacer_candidates_{spacer_size}x{n_blocks}.leven_filtered.revcomp_filtered.error_rate_filtered.pkl")
     sequence_df.sort_values(by="mean_error_rate", inplace=True, ascending=True)
     ## sort by mean_error_rate and select top 5%

@@ -44,10 +44,11 @@ def main(threads = 120):
     ON0096_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0096/result/dorado-070/intermediates/segmented_tokenized/signal_analysis_unnorm/temp"
     ON0098_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0098/result/dorado-070/intermediates/segmented_tokenized/signal_analysis_unnorm/temp"
     ON0099_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/exp_BB87/ON0099/result/dorado-070/intermediates/segmented_tokenized/signal_analysis_unnorm/temp"
+    ON0118_df_path = "/extdata4/baeklab/Hyeonseo/m6A/runs/ON0118/ON0118/result/intermediates/segmented_tokenized/signal_analysis/temp"
 
     # paths = [ON0092_df_path, ON0093_df_path, ON0096_df_path, ON0098_df_path, ON0099_df_path]
+    paths = [ON0092_df_path, ON0096_df_path, ON0098_df_path, ON0118_df_path]
 
-    paths = [ON0093_df_path,ON0099_df_path]
 
     for df_path in paths:
         print(df_path)
