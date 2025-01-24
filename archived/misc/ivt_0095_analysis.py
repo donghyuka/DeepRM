@@ -142,8 +142,6 @@ def plot_block_score(joint_df, path = "/extdata4/baeklab/Hyeonseo/m6A/plot/misc"
     return None
 
 
-
-
 def main():
     pentamer_rl, trimer_rl = read_bam()
     plot_rl_dist(pentamer_rl, trimer_rl)

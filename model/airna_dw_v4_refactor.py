@@ -13,7 +13,7 @@ class TransformerModel(nn.Module):
                  encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, max_bq: int = 40, block_len = 17, seq_len: int = 200,
                  t_act : str = 'gelu', lin_act : str = 'relu',
-                 lin_depth: int = 1, signal_stride = 6) -> None:
+                 lin_depth: int = 1, signal_stride = 6, **kwargs) -> None:
 
         super().__init__()
 

@@ -175,6 +175,7 @@ def printmessage(*string, color=None, color_time="green", end='\n', msg_type=Non
             print(timestr, '[Printmessage warning] Argument color_time not recognized.')
 
     str_out = ' '.join(str(x) for x in string)
+
     if color:
         color = color.lower()
         if color in COLOR_FORE_DICT:
@@ -193,10 +194,11 @@ def printmessage(*string, color=None, color_time="green", end='\n', msg_type=Non
             str_type = COLOR_FORE_DICT['green'] + '[success]' + Style.RESET_ALL
         else:
             str_type = COLOR_FORE_DICT['white'] + f'[{msg_type}]' + Style.RESET_ALL
-        print(timestr, str_type, str_out, end=end)
+        timestr = f"{timestr} {str_type}"
 
-    else:
-        print(timestr, str_out, end=end)
+    len_timestr = len(timestr)
+    str_out = str_out.replace('\n', f'\n{" " * len_timestr}')
+    print(timestr, str_out, end=end)
 
     if error is not None:
         if not (isinstance(error, Exception) or issubclass(error, Exception)):

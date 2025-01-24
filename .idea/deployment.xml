@@ -1,55 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="modformer" deleteMissingItems="true" confirmBeforeUploading="false" confirmBeforeDeletion="false">
-    <option name="confirmBeforeDeletion" value="false" />
-    <option name="confirmBeforeUploading" value="false" />
+  <component name="PublishConfigData" autoUpload="Always" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="AICA-067">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="AICA-079">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/data/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="BIOSCI">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/extdata2/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Deep1">
+      <paths name="sonic@147.47.218.58:7777 password">
         <serverdata>
           <mappings>
             <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Genome1">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/extdata1/baeklab/Hyeonseo/m6A/workspace" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="NIPA">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/home/work/extdata4/m6A/modformer" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="SNU-BIO">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/extdata2/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

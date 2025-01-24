@@ -2,10 +2,11 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="jdk" jdkName="Deep1 Python 3.9.0 Torch" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Remote Python 3.9.0 (sftp://sonic@147.47.218.58:7777/home/sonic/baeklab/Junhak/anaconda3/envs/Hyeonseo_torch/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
-    <option name="renderExternalDocumentation" value="true" />
+    <option name="format" value="PLAIN" />
+    <option name="myDocStringFormat" value="Plain" />
   </component>
 </module>
