@@ -1,6 +1,0 @@
-version	description	positive	negative	total_count	disk_size	ratio	score_cutoff
-ver021324	prototype dataset	ON0093	ON0092	59,407,000	2.2TB	1:1	0
-ver030924	prototype dataset	ON0093	ON0092	 	 	1:4	0.6
-ver031524	prototype dataset	ON0093	ON0092+ON0096	 	 	N/A 	0.0 / 0.5 / 0.8
-ver032124	prototype dataset	ON0093+ON0098+ON0099	N/A 			N/A 	0.0 / 0.5 / 0.8 / 0.9
-ver032224	complete dataset	ON0093+ON0098+ON0099	ON0092+ON0096	319,224,000	~30TB	N/A 	0.0 / 0.5 / 0.8 / 0.9

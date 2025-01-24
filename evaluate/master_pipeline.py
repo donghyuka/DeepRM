@@ -247,11 +247,7 @@ def main():
         printmessage(cmd)
         os.system(cmd)
 
-        cmd = f"python -m utils.filter_pileup -i {raw_pileup_path} -o {pileup_path} -c {args.cpu} -m 1"
-        printmessage(cmd)
-        os.system(cmd)
-
-        cmd = f"python -m evaluate.make_eval_label_inhouse -d {pileup_path} -o {label_path} -c {args.cpu}"
+        cmd = f"python -m utils.filter_mpileup -i {raw_pileup_path} -o {pileup_path} -c {args.cpu} -m 1"
         printmessage(cmd)
         os.system(cmd)
 
@@ -259,7 +255,7 @@ def main():
     if 3 in args.step:
         ## Step 3. Run tokenize_transcript.py
         printmessage(f"[Step 3/3] Tokenize Transcript")
-        cmd = f"python -m evaluate.tokenize_transcript_nolabel --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {pileup_path} -c {args.cpu} -n normalise -x {args.comment}"
+        cmd = f"python -m evaluate.tokenize_transcript --boi {args.base} --toml {args.toml} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {pileup_path} -c {args.cpu} -n normalise -x {args.comment}"
         printmessage(cmd)
         os.system(cmd)
 

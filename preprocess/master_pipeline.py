@@ -218,7 +218,7 @@ def main():
     if 3 in args.step:
         ## Step 3. Run segment_normalize_signal.py
         printmessage(f"[Step 3/3] Running Signal Segmentation, Normalization, and FFT")
-        cmd = f"python -m preprocess.segment_normalize_signal_v2 --keep_intermediate --cpu {args.cpu} --pod5 {args.pod5} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {args.toml}"
+        cmd = f"python -m preprocess.segment_normalize_signal --keep_intermediate --cpu {args.cpu} --pod5 {args.pod5} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {args.toml}"
         printmessage(cmd)
         os.system(cmd)
 

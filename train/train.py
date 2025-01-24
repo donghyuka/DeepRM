@@ -1,6 +1,12 @@
+import gc
+
 import torch
-from postprocess.train.dataloader import load_dataset, NanoporeDataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from train.dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
+import torch.multiprocessing as mp
+import torchmetrics.classification as cm
 import argparse
 import os
 import time
@@ -8,74 +14,82 @@ import tqdm
 import numpy as np
 from utils.utils import printmessage
 import importlib
-import torchmetrics as tm
-import postprocess.train.custom_loss as clf
-from datetime import datetime
 
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
-    parser.add_argument("--gpu", type=int, default = 4)
-    parser.add_argument("--batch", dest="batch_size", type=int, default=128)
+    parser.add_argument("--gpu", dest = "num_gpu",type=int, default = 4)
+    parser.add_argument("--batch", dest="batch_size", type=int, default=1024)
     parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--data", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/dataset_v11")
-    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/model")
-    parser.add_argument("--tb", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/postprocess/tensorboard")
-    parser.add_argument("--model", type=str, default="cnn_model_v1")
+    parser.add_argument("--data", dest="data_path", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
+    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
+    parser.add_argument("--tb", dest = "tb_path", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
+    parser.add_argument("--model", dest = "model_type", type=str, default="transformer_prototype_v11")
     parser.add_argument("--es_delta", type=float, default=1e-5)
-    parser.add_argument("--es_patience", type=int, default=100000)
-    parser.add_argument("--es_start", type=int, default=100000)
-    parser.add_argument("--disk_shard_size", type=int, default=1000)
+    parser.add_argument("--es_patience", type=int, default=50)
+    parser.add_argument("--es_start", type=int, default=1000)
+    parser.add_argument("--disk_shard_size", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--enc_dim", type=int, default=512)
+    parser.add_argument("--lin_dim", type=int, default=1024)
+    parser.add_argument("--head", type=int, default=8)
+    parser.add_argument("--enc_layer", type=int, default=6)
+    parser.add_argument("--lin_layer", type=int, default=4)
+    parser.add_argument("--enc_dropout", type=float, default=0.1)
+    parser.add_argument("--lin_dropout", type=float, default=0.2)
     parser.add_argument("--period", type=int, default=30)
-    parser.add_argument("--buffer_size", type=int, default=10000)
-    parser.add_argument("--lr_step", type=int, default=3000)
-    parser.add_argument("--lr_interval", type=int, default=1000)
+    parser.add_argument("--buffer_size", dest = "shuffle_buffer_size", type=int, default=10000)
+    parser.add_argument("--kmer_size", type=int, default=5)
+    parser.add_argument("--signal_size", type=int, default=30)
+    parser.add_argument("--block_len", type=int, default=17)
+    parser.add_argument("--seq_len", type=int, default=200)
+    parser.add_argument("--t_act", type=str, default="gelu")
+    parser.add_argument("--lin_act", type=str, default="gelu")
+    parser.add_argument("--lr_step", type=int, default=1000)
+    parser.add_argument("--lr_interval", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0.1)
+    parser.add_argument("--class_ratio", type=int, default=None)
     parser.add_argument("--log_interval", type=int, default=10)
-    parser.add_argument("--eval_interval", type=int, default=50)
+    parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=None)
-    parser.add_argument("--grad_clip", type=float, default=0.0)
+    parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--profiler", type=int, default=0)
-    parser.add_argument("--pin_memory", type=int, default=0)
-    parser.add_argument("--read_every", type=int, default=None)
+    parser.add_argument("--pin_memory", type=int, default=1)
+    parser.add_argument("--yield_period", type=int, default=None)
     parser.add_argument("--rlrop", type=float, default=None)
-    parser.add_argument("--loss", type=str, default="Fuchsia")
+    parser.add_argument("--loss", type=str, default="BCE")
+    parser.add_argument("--score_feature", type=bool, default=False)
     parser.add_argument("--gpu_pool", type=int, nargs="+", default=None)
+    parser.add_argument("--cut_overlap", type=bool, default=False)
     parser.add_argument("--load_checkpoint", type=str, default=None)
-    parser.add_argument("--input_height", type=int, default=20)
-    parser.add_argument("--input_width", type=int, default=21)
-    parser.add_argument("--hidden_dim", type=int, default=256)
-    parser.add_argument("--output_dim", type=int, default=1)
-    parser.add_argument("--num_err_layers", type=int, default=8)
-    parser.add_argument("--num_meta_layers", type=int, default=4)
-    parser.add_argument("--num_pred_layers", type=int, default=4)
-    parser.add_argument("--num_output_layers", type=int, default=4)
-    parser.add_argument("--dropout_rate", type=float, default=0.1)
-    parser.add_argument("--kernel_size", type=int, default=5)
-    parser.add_argument("--name", type=str, default=None)
+    parser.add_argument("--workers", dest="num_workers", type=int, default=8)
+    parser.add_argument("--prefetch", type=int, default=512)
+    parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
+    parser.add_argument("--no_bq", action="store_true", default=False)
+    parser.add_argument("--load_weight_only", action="store_true", default=False)
+    parser.add_argument("--override_lr", action="store_true", default=False)
+    parser.add_argument("--comment", type=str, default="None")
 
+    strfttime = time.strftime("%Y%m%d-%H%M%S")
+    parser.add_argument("--model_name", type=str, default=None)
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
-    if args.seed is None:
-        args.seed = np.random.randint(0, 100000000)
-    seedstring = str(args.seed).zfill(8)
-    strfttime = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    if args.name is None:
-        args.name = f"Postprocess-ResNet-{args.model.split('_')[-1]}-D20-{args.loss}-{strfttime}-{seedstring}"
-    if args.read_every is None:
-        args.read_every = args.disk_shard_size
+    if args.model_name is None:
+        args.model_name = f"AIRNA-DW-{args.model_type.split('_')[-1]}-{args.comment}-{strfttime}"
+    if args.yield_period is None:
+        args.yield_period = args.disk_shard_size
     if args.save_interval is None:
         args.save_interval = args.eval_interval
     if args.gpu_pool is None:
-        args.gpu_pool = list(range(args.gpu))
+        args.gpu_pool = list(range(args.num_gpu))
     else:
-        if len(args.gpu_pool) < args.gpu:
+        if len(args.gpu_pool) < args.num_gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
     return args
+
 
 
 class Trainer:
@@ -103,6 +117,12 @@ class Trainer:
             log_interval: int,
             save_interval: int,
             model_config: dict = None,
+            soft_label: float = None,
+            score_feature: bool = False,
+            cut_overlap: bool = False,
+            signal_stride: int = 6,
+            no_bq: bool = False,
+            **kwargs
     ) -> None:
 
         self.rank = rank
@@ -141,15 +161,16 @@ class Trainer:
         self.model_config = model_config
         self.devname = f"{os.uname()[1]}-{self.gpu_id}"
         self.tb_path = tb_path
-
+        self.soft_label = soft_label
+        self.score_feature = score_feature
+        self.cut_overlap = cut_overlap
+        self.signal_stride = signal_stride
+        self.histogram = False
+        self.no_bq = no_bq
         if self.rank == 0:
             self.tb_writer = SummaryWriter(tb_path)
         else:
             self.tb_writer = None
-
-        # self.profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        #                                        schedule=torch.profiler.schedule(wait=1, warmup=1, active=10, repeat=0),
-        #                                        on_trace_ready=torch.profiler.tensorboard_trace_handler(self.tb_path, self.devname))
 
         self.eval_sources, self.eval_targets = self._cache_eval_data()
 
@@ -164,15 +185,20 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
+
     def _feed_model(self, source, target):
-        error, re_error, metadata, pred, mask = source
-        error = error.to(self.gpu_id)
-        re_error = re_error.to(self.gpu_id)
-        metadata = metadata.to(self.gpu_id)
-        pred = pred.to(self.gpu_id)
-        mask = mask.to(self.gpu_id)
-        target = target.to(self.gpu_id)
-        output = self.model(error, re_error, metadata, pred, mask)
+        target = target.to(torch.float32).to(self.gpu_id)
+        src_kmer = source["kmer_token"].to(self.gpu_id)
+        src_signal = source["signal_token"].to(self.gpu_id)
+        src_seg_len = source["segment_len"].to(self.gpu_id)
+
+        if self.no_bq:
+            output = self.model(src_kmer, src_signal, src_seg_len)
+
+        else:
+            src_dwell_bq = source["dwell_bq_token"].to(self.gpu_id)
+            output = self.model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
+
         return output, target
 
 
@@ -185,24 +211,23 @@ class Trainer:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
         self.optimizer.step()
         self.current_batch_loss = loss.item()
-
-        time.sleep(0.001*self.gpu_id)
+        dist.barrier()
+        time.sleep(0.0001*self.gpu_id)
         evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
-        evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items()])
+        evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items() if (k in ["auroc","ap"])])
         self.pbar.update(1)
         self.pbar.set_postfix_str(evaltext)
-
         return None
 
 
     def _run_epoch(self):
+        self.train_loader.set_epoch(self.current_epoch)
+        self.val_loader.set_epoch(self.current_epoch)
         self.current_batch = 0
         self.model.train()
         self.current_lr = self.optimizer.param_groups[0]['lr']
-        self.train_loader.set_epoch(self.current_epoch)
-        self.val_loader.set_epoch(self.current_epoch)
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
-
+        dist.barrier()
         time.sleep(0.03*self.gpu_id)
         with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
                        position=self.rank, colour=colour_choice[self.rank%len(colour_choice)], smoothing = 0) as self.pbar:
@@ -215,23 +240,29 @@ class Trainer:
                     current_interval_loss = np.mean(self.current_interval_losses)
                     self.current_interval_losses = []
                     ## ALL REDUCE LOSS
-
+                    dist.barrier()
                     current_interval_loss = torch.tensor(current_interval_loss).to(self.gpu_id)
-
+                    dist.all_reduce(current_interval_loss, op=dist.ReduceOp.SUM)
                     self.current_interval_loss = current_interval_loss / self.num_gpu
                     if self.rank == 0:
                         self.tb_writer.add_scalar("Loss", self.current_interval_loss, self.current_step)
                         self.tb_writer.add_scalar("Learning_Rate", self.current_lr, self.current_step)
-
+                    dist.barrier()
 
                 if self.current_step % self.eval_interval == 0 and self.current_step > 0:
                     self._run_eval()
 
                 if self.current_step % self.save_interval == 0 and self.current_step > 0:
-
+                    dist.barrier()
                     if self.rank == 0:
+                        if self.histogram:
+                            try:
+                                for name, parameter in self.model.named_parameters():
+                                    self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
+                            except:
+                                pass
                         self._save_checkpoint()
-
+                    dist.barrier()
 
                 if self.current_step % self.lr_interval == 0:
                     if self.scheduler.__class__.__name__ == "ReduceLROnPlateau":
@@ -243,12 +274,7 @@ class Trainer:
                 self.current_batch += 1
                 self.current_step += 1
 
-
-            ## Loop Ends
-
-            self._run_eval()
-            if self.rank == 0:
-                self._save_checkpoint()
+        gc.collect()
 
         return None
 
@@ -256,33 +282,31 @@ class Trainer:
     def _run_eval(self):
         self.model.eval()
         val_loss = []
-        p_outputs = []
-        p_targets = []
+        outputs = []
         with torch.no_grad():
             for source, target in zip(self.eval_sources, self.eval_targets):
                 output, target = self._feed_model(source, target)
                 loss = self.loss_func(output, target)
                 val_loss.append(loss.item())
-                p_outputs.append(output)
-                p_targets.append(target)
-
+                outputs.append(output)
 
         val_loss = np.mean(val_loss)
-        outputs = torch.cat(p_outputs, dim=0)
-        targets = torch.cat(p_targets, dim=0)
-        targets = targets.to(self.gpu_id)
+        outputs = torch.cat(outputs, dim=0)
+        targets = torch.cat(self.eval_targets, dim=0)
+        targets = targets.to(torch.long).to(self.gpu_id)
         metric_dict = {}
 
         for metric_name, metric_func in self.metric_func_dict.items():
-            metric = metric_func(outputs, targets)
-            metric_dict[metric_name] = metric
+            metric_dict[metric_name] = metric_func(outputs, targets)
 
         ## ALL REDUCE LOSS and METRICS
-
+        dist.barrier()
         val_loss = torch.tensor(val_loss).to(self.gpu_id)
+        dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
         val_loss = val_loss / self.num_gpu
         for key, value in metric_dict.items():
             metric = value.clone().detach().to(self.gpu_id)
+            dist.all_reduce(metric, op=dist.ReduceOp.SUM)
             metric_dict[key] = metric / self.num_gpu
         self.current_val_loss = val_loss
         self.current_val_metric_dict = metric_dict
@@ -291,7 +315,7 @@ class Trainer:
             self.tb_writer.add_scalar("Val_Loss", val_loss, self.current_step)
             for key, value in metric_dict.items():
                 self.tb_writer.add_scalar(f"Val_{key}", value, self.current_step)
-
+        dist.barrier()
 
         self.model.train()
         return None
@@ -303,7 +327,7 @@ class Trainer:
             ## Save Model if Improved
             self.best_val_loss = self.current_val_loss
             self.best_val_loss_epoch = self.current_epoch
-            torch.save({'model_state_dict': self.model.state_dict(),
+            torch.save({'model_state_dict': self.model.module.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
                         'scheduler_state_dict': self.scheduler.state_dict(),
                         'val_loss': self.current_val_loss,
@@ -323,7 +347,7 @@ class Trainer:
 
     def train(self, max_epochs: int):
         for epoch in range(max_epochs):
-
+            dist.barrier()
             self.current_epoch = epoch
             self._run_epoch()
             if self.continue_training == 0:
@@ -336,35 +360,43 @@ class Trainer:
     ## END of Class NanoporeTrainer
 
 
-def prepare_dataloader(seed, data_path, batch_size, eval_batch_size, rank, world_size, pin_memory, bag_size):
+def setup_ddp(rank,world_size,gpu_id):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(gpu_id)
+    return None
 
-    batch_size = batch_size
-    train_data_path = f"{data_path}/train.pkl"
-    val_data_path = f"{data_path}/val.pkl"
-    num_workers = 1
-    prefetch_factor = None
 
-    train_loader = load_dataset(seed, rank, world_size, train_data_path, batch_size, num_workers, pin_memory,
-                                True, prefetch_factor, bag_size , shuffle=True)
-    val_loader = load_dataset(seed, rank, world_size, val_data_path, eval_batch_size, num_workers, pin_memory,
-                              False, prefetch_factor, bag_size, shuffle=False)
+def prepare_dataloader(data_path, rank, num_gpu, num_workers, **kwargs):
+
+    if rank == 0:
+        printmessage(f"Total number of dataloader workers: {num_workers * num_gpu}")
+
+    train_pos_data_path = f"{data_path}/train/pos"
+    train_neg_data_path = f"{data_path}/train/neg"
+    val_pos_data_path = f"{data_path}/val/pos"
+    val_neg_data_path = f"{data_path}/val/neg"
+
+    train_loader = load_dataset(pos_data_path=train_pos_data_path, neg_data_path=train_neg_data_path,
+                                rank=rank, num_replicas=num_gpu, num_workers=num_workers,
+                                shuffle=True, drop_last=True, **kwargs)
+
+    val_loader = load_dataset(pos_data_path=val_pos_data_path, neg_data_path=val_neg_data_path,
+                              rank=rank, num_replicas=num_gpu, num_workers=num_workers,
+                              shuffle=False, drop_last=False, **kwargs)
+
 
     return train_loader, val_loader
 
 
 def main_worker(rank, args_dict):
     gpu_id = args_dict["gpu_pool"][rank]
-    CNNModel = importlib.import_module(f"postprocess.model.{args_dict['model']}").CNNModel
-    model = CNNModel(input_height = args_dict["input_height"],
-                     input_width = args_dict["input_width"],
-                     hidden_dim = args_dict["hidden_dim"],
-                     output_dim = args_dict["output_dim"],
-                     num_err_layers = args_dict["num_err_layers"],
-                     num_meta_layers = args_dict["num_meta_layers"],
-                     num_pred_layers = args_dict["num_pred_layers"],
-                     num_output_layers = args_dict["num_output_layers"],
-                     dropout_rate = args_dict["dropout_rate"],
-                     kernel_size = args_dict["kernel_size"])
+    setup_ddp(rank, args_dict["num_gpu"],gpu_id)
+    TransformerModel = importlib.import_module(f"model.{args_dict['model_type']}").TransformerModel
+    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
+                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
+                             **args_dict)
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -377,17 +409,24 @@ def main_worker(rank, args_dict):
     if args_dict["load_checkpoint"] is not None:
         save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
+        if args_dict["load_weight_only"]:
+            for param in model.parameters():
+                param.requires_grad = True
     else:
         save_dict = {}
+
+
+    model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
 
     if args_dict["load_checkpoint"] is not None:
-        optimizer.load_state_dict(save_dict["optimizer_state_dict"])
-        ## overwrite lr and weight_decay
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = args_dict["lr"]
-            param_group['weight_decay'] = args_dict["weight_decay"]
+        if not args_dict["load_weight_only"]:
+            optimizer.load_state_dict(save_dict["optimizer_state_dict"])
+            if args_dict["override_lr"]:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = args_dict["lr"]
+
 
 
     if args_dict["rlrop"] is not None:
@@ -398,72 +437,60 @@ def main_worker(rank, args_dict):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
 
     if args_dict["load_checkpoint"] is not None:
-        # scheduler.load_state_dict(save_dict["scheduler_state_dict"])
+        if not (args_dict["load_weight_only"] or args_dict["override_lr"]):
+            scheduler.load_state_dict(save_dict["scheduler_state_dict"])
+
+
+    if args_dict["load_checkpoint"] is not None:
         save_dict.clear()
+        del save_dict
+        gc.collect()
 
     if args_dict["loss"] == "MSE":
         loss_func = torch.nn.MSELoss()
-    elif args_dict["loss"] == "MAE":
-        loss_func = torch.nn.L1Loss()
-    elif args_dict["loss"] == "SmoothL1":
-        loss_func = torch.nn.SmoothL1Loss()
-    elif args_dict["loss"] == "Huber":
-        loss_func = torch.nn.HuberLoss()
-    elif args_dict["loss"] == "Fuchsia":
-        loss_func = clf.CustomLossFuchsia()
-    elif args_dict["loss"] == "Cyclamen":
-        loss_func = clf.CustomLossCyclamen()
-    elif args_dict["loss"] == "Foxglove":
-        loss_func = clf.CustomLossFoxglove()
-    elif args_dict["loss"] == "Hydrangea":
-        loss_func = clf.CustomLossHydrangea()
-    elif args_dict["loss"] == "Iris":
-        loss_func = clf.CustomLossIris()
-    elif args_dict["loss"] == "Sage":
-        loss_func = clf.CustomLossSage()
-    elif args_dict["loss"] == "Asparagus":
-        loss_func = clf.CustomLossAsparagus()
-    elif args_dict["loss"] == "Brassica":
-        loss_func = clf.CustomLossBrassica()
-    elif args_dict["loss"] == "Clover":
-        loss_func = clf.CustomLossClover()
-    elif args_dict["loss"] == "Dracena":
-        loss_func = clf.CustomLossDracena()
-    elif args_dict["loss"] == "Echeveria":
-        loss_func = clf.CustomLossEcheveria()
-    elif args_dict["loss"] == "Freesia":
-        loss_func = clf.CustomLossFreesia()
-
-
+    elif args_dict["loss"] == "BCE":
+        loss_func = torch.nn.BCELoss()
+    elif args_dict["loss"] == "BCEWL":
+        loss_func = torch.nn.BCEWithLogitsLoss()
+    elif args_dict["loss"] == "CE":
+        loss_func = torch.nn.CrossEntropyLoss()
     else:
         raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
 
-    metric_func_dict = {"RMSE": tm.MeanSquaredError(squared=False).to(gpu_id),}
+    metric_func_dict = {"acc": cm.BinaryAccuracy().to(gpu_id),
+                        "auroc": cm.BinaryAUROC().to(gpu_id),
+                        "ap": cm.BinaryAveragePrecision().to(gpu_id),
+                        "f-1": cm.BinaryF1Score().to(gpu_id),}
 
-    train_loader, val_loader = prepare_dataloader(args_dict["seed"], args_dict["data"], args_dict["batch_size"], args_dict["eval_batch_size"],
-                                                  rank, args_dict["gpu"], args_dict["pin_memory"], args_dict["input_height"])
-    trainer = Trainer(rank, gpu_id, model, train_loader, val_loader, optimizer, scheduler, loss_func, args_dict["grad_clip"], metric_func_dict,
-                      args_dict["output"], args_dict["tb"], args_dict["es_start"], args_dict["es_patience"],
-                      args_dict["es_delta"], args_dict["name"], args_dict["gpu"], args_dict["lr_interval"], args_dict["eval_interval"],
-                      args_dict["log_interval"], args_dict["save_interval"], model_config = args_dict)
+    args_dict["checkpoint_path"] = args_dict["output"]
+
+    train_loader, val_loader = prepare_dataloader(rank = rank, gpu_id = gpu_id, **args_dict)
+    trainer = Trainer(rank = rank, gpu_id = gpu_id, model = model, train_loader = train_loader, val_loader = val_loader,
+                      optimizer = optimizer, scheduler = scheduler, loss_func = loss_func, metric_func_dict = metric_func_dict,
+                      model_config = args_dict, **args_dict)
+
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
     printmessage(f"[GPU {gpu_id}] Training Loop Complete.")
+    dist.destroy_process_group()
     return None
 
 
 def main_master():
     args = parse_args()
-    torch.multiprocessing.set_sharing_strategy('file_system')
-    os.makedirs(os.path.join(args.output, args.name), exist_ok=True)
-    os.makedirs(os.path.join(args.tb, args.name), exist_ok=True)
-    args.output = os.path.join(args.output, args.name)
-    args.tb = os.path.join(args.tb, args.name)
-    printmessage("Training Program Started.")
-    printmessage(f"Using {args.gpu} GPUs.")
     args_dict = vars(args)
-    printmessage(f"Seed: {args.seed}")
-    main_worker(0, args_dict)
+
+    torch.multiprocessing.set_sharing_strategy('file_system')
+    os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
+    os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
+    args_dict["output"]= os.path.join(args_dict["output"], args_dict["model_name"])
+    args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
+    if args_dict["seed"] is None:
+        args_dict["seed"] = np.random.randint(0, 10000000)
+    printmessage("Training Program Started.")
+    printmessage(f"Seed: {args_dict['seed']}")
+    printmessage(f"Using {args_dict['num_gpu']} GPUs.")
+    mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
     printmessage(f"Training Program Complete.")
     return None
 
