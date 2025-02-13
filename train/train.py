@@ -24,7 +24,7 @@ def parse_args():
         argparse.Namespace: Parsed command-line arguments.
     """
     parser = argparse.ArgumentParser("Train Transformer Model")
-    parser.add_argument("--gpu", dest="num_gpu", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
     parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
     parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
@@ -81,6 +81,13 @@ def parse_args():
     strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--model_name", type=str, default=None, help="Model name")
     args = parser.parse_args()
+    if args.num_gpu is None:
+        if args.gpu_pool is None:
+            args.num_gpu = torch.cuda.device_count()
+        else:
+            args.num_gpu = len(args.gpu_pool)
+    if args.gpu_pool is None:
+        args.gpu_pool = list(range(args.num_gpu))
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.model_name is None:
@@ -89,8 +96,6 @@ def parse_args():
         args.yield_period = args.disk_shard_size
     if args.save_interval is None:
         args.save_interval = args.eval_interval
-    if args.gpu_pool is None:
-        args.gpu_pool = list(range(args.num_gpu))
     else:
         if len(args.gpu_pool) < args.num_gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")

@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--cpu", "-c", type=int, default=None, help="Number of CPUs to use")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
-    parser.add_argument("--label", "-l", type=str, required=True, help="Label file path")
+    parser.add_argument("--mpileup", "-m", type=str, required=True, help="Filtered mpileup file path")
     parser.add_argument("--pos", "-p", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-e", type=float, default=1e-30, help="Epsilon value")
     parser.add_argument("--postfix", "-x", type=str, default="final", help="Comment")
@@ -180,12 +180,12 @@ def main():
         reindex_flag = True
 
     if reindex_flag:
-        if args.label.endswith(".pkl"):
-            label_df = pd.read_pickle(args.label)
-        elif args.label.endswith(".tsv"):
-            label_df = pd.read_csv(args.label, sep="\t")
+        if args.mpileup.endswith(".pkl"):
+            label_df = pd.read_pickle(args.mpileup)
+        elif args.mpileup.endswith(".tsv"):
+            label_df = pd.read_csv(args.mpileup, sep="\t")
         else:
-            raise ValueError("Depth label file must be either .tsv or .pkl")
+            raise ValueError("Filtered mpileup file must be either .tsv or .pkl")
 
 
         label_df["index"] = label_df.index

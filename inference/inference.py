@@ -38,7 +38,13 @@ def parse_args():
     parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
     parser.add_argument("--no_bq", action="store_true", help="No BQ")
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
+    parser.add_argument("--gpu_pool", "-gp", type=int, nargs="+", help="GPU pool")
     args = parser.parse_args()
+    if args.gpu is None:
+        if args.gpu_pool is None:
+            args.gpu = torch.cuda.device_count()
+        else:
+            args.gpu = len(args.gpu_pool)
     return args
 
 
@@ -61,26 +67,24 @@ def main():
     return None
 
 
-def setup_ddp(rank, world_size):
+def setup_ddp(rank, world_size, gpu_id):
     """
     Sets up Distributed Data Parallel (DDP) for multi-GPU training.
 
     Args:
         rank (int): Rank of the current process.
         world_size (int): Total number of processes.
+        gpu_id (int): GPU ID to use.
 
     Returns:
         None
     """
-    if world_size == 0:
-        ## use CPU.
-        return None
-    else:
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '12355'
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
-        torch.cuda.set_device(rank)
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(gpu_id)
     return None
+
 
 
 def run_inference(args):
@@ -139,9 +143,10 @@ def inference_worker(rank, args_dict):
     Returns:
         None
     """
-    setup_ddp(rank, args_dict["gpu"])
+    gpu_id = args_dict["gpu_pool"][rank]
+    setup_ddp(rank, args_dict["num_gpu"], gpu_id)
     if args_dict["gpu"] > 0:
-        save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'}, weights_only=False)
+        save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
     else:
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
@@ -161,11 +166,11 @@ def inference_worker(rank, args_dict):
             total_params += params
         printmessage(f"Total Params: {total_params:,}")
     if args_dict["gpu"] > 0:
-        model.to(rank)
+        model.to(gpu_id)
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
     if args_dict["gpu"] > 0:
-        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+        model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
     model.eval()
 
     if args_dict["resume"]:
@@ -178,7 +183,7 @@ def inference_worker(rank, args_dict):
     else:
         saved = 0
 
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1, args_dict["gpu"]),
+    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1, args_dict["gpu"]),
                                num_files_read_once=args_dict["nfile"], prefetch_factor=args_dict["prefetch"],
                                worker=args_dict["worker"],
                                cb_len=model_config["block_len"] + model_config["kmer_size"] - 1,
@@ -191,10 +196,10 @@ def inference_worker(rank, args_dict):
     pred_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing=0):
-        src_kmer = data["kmer_token"].to(rank)
-        src_signal = data["signal_token"].to(rank)
-        src_seg_len = data["segment_len"].to(rank)
-        src_bq = data["bq_token"].to(rank)
+        src_kmer = data["kmer_token"].to(gpu_id)
+        src_signal = data["signal_token"].to(gpu_id)
+        src_seg_len = data["segment_len"].to(gpu_id)
+        src_bq = data["bq_token"].to(gpu_id)
 
         with torch.no_grad():
             pred = model(src_kmer, src_signal, src_seg_len, src_bq)

@@ -75,29 +75,6 @@ def restructure_directory(args):
 
     return None
 
-def parse_args():
-    """
-    Parses command-line arguments.
-
-    Returns:
-        argparse.Namespace: Parsed command-line arguments.
-    """
-    parser = argparse.ArgumentParser()
-    num_cpu = os.cpu_count()
-    parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
-    parser.add_argument("--out", "-o", dest = "output", type=str, default = None, help="Output directory")
-    parser.add_argument("--dorado", "-d", type=str, required=True, help="Dorado installation path")
-    parser.add_argument("--cpu", "-t", type=int, default= int(math.floor(num_cpu * 0.95)), help="Number of CPUs")
-    parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
-    parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
-    parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
-    parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
-    parser.add_argument("--dag_cfg", "-c", type=str, required=True, help="DAG config file")
-    parser.add_argument("--base", "-x", type=str, default=None, help="Base of Interest")
-    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
-    parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
-    args = parser.parse_args()
-    return args
 
 def autoconfig(args):
     """
@@ -201,6 +178,44 @@ def get_canonical_base(base):
 
     raise ValueError(f"Invalid base argument: {base}")
 
+
+def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
+    parser = argparse.ArgumentParser()
+    num_cpu = os.cpu_count()
+    parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
+    parser.add_argument("--out", "-o", dest = "output", type=str, required=True, help="Output directory")
+    parser.add_argument("--dorado", "-d", type=str, required=True, help="Dorado installation path")
+    parser.add_argument("--model", "-m", type=str, default=None, help="Dorado basecalling model path")
+    parser.add_argument("--cpu", "-t", type=int, default= int(math.floor(num_cpu * 0.95)), help="Number of CPUs")
+    parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
+    parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
+    parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
+    parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
+    parser.add_argument("--dag_cfg", "-c", type=str, required=True, help="DAG config file")
+    parser.add_argument("--base", "-x", type=str, default=None, help="Base of Interest")
+    parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
+    parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
+    args = parser.parse_args()
+
+    if args.model is None:
+        args.model = f"{args.dorado}/model/rna004_130bps_sup@v5.0.0"
+        if not os.path.exists(args.model):
+            printmessage(f"Dorado model does not exist. Attempting download...", msg_type="warning")
+            cmd = f"{args.dorado}/bin/dorado download --model rna004_130bps_sup@v5.0.0 --directory {args.dorado}/model/"
+            printmessage(cmd)
+            os.system(cmd)
+            if not os.path.exists(args.model):
+                raise FileNotFoundError(f"Model {args.model} does not exist.")
+
+    return args
+
+
 def main():
     """
     Main function to run the preprocessing pipeline.
@@ -220,8 +235,7 @@ def main():
     wdir = f"{args.output}/intermediates/"
     bam_path = f"{wdir}/dorado_output.bam"
     block_df_path = f"{wdir}/block_df.pkl"
-    signal_path = f"{wdir}/segmented_tokenized/"
-    dorado_model_path = f"{args.dorado}/model/rna004_130bps_sup@v5.1.0"
+    signal_path = f"{wdir}/block/"
     qc_path = f"{args.output}/qc/"
 
     os.makedirs(wdir, exist_ok=True)
@@ -233,7 +247,7 @@ def main():
             args.batch = f"-b {args.batch}"
         else:
             args.batch = ""
-        cmd = f"{args.dorado}/bin/dorado basecaller --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves {args.model} {args.pod5} > {bam_path}"
         printmessage(cmd)
         os.system(cmd)
         cmd = f"samtools sort -@ {args.cpu} -o {bam_path} {bam_path}"

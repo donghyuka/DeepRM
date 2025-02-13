@@ -192,7 +192,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     num_cpu = os.cpu_count()
     parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
-    parser.add_argument("--out", "-o", dest = "output", type=str, default = None, help="Output directory")
+    parser.add_argument("--out", "-o", dest = "output", type=str, required=True, help="Output directory")
     parser.add_argument("--dorado", "-d", type=str, default="", required=True, help = "Dorado installation path")
     parser.add_argument("--cpu", "-t", type=int, default=int(math.floor(num_cpu * 0.95)), help="Number of threads")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
@@ -222,7 +222,7 @@ def main():
     Steps:
         1. Run Dorado Basecaller and SAMtools.
         2. Run Pileup and Label.
-        3. Run tokenize_transcript.py.
+        3. Run preproce.py.
 
     Raises:
         FileNotFoundError: If the input directory does not exist.
@@ -235,13 +235,11 @@ def main():
     raw_bam_path = f"{wdir}/dorado_output.raw.bam"
     bam_path = f"{wdir}/dorado_output.bam"
     raw_pileup_path = f"{wdir}/dorado_output.pileup.raw.tsv"
-    pileup_path = f"{wdir}/dorado_output.pileup.filtered.pkl"
-    label_path = f"{args.output}/label/Baeklab.070"
+    pileup_path = f"{args.output}/dorado_output.pileup.filtered.pkl"
     block_path = f"{args.output}/block/"
     qc_path = f"{args.output}/qc/"
 
     os.makedirs(wdir, exist_ok=True)
-    os.makedirs(label_path, exist_ok=True)
     os.makedirs(block_path, exist_ok=True)
 
     if 1 in args.step:
@@ -261,7 +259,7 @@ def main():
             ## To avoid this, we disable trimming for IVT samples.
             ## Manual trimming is unnecessary since minimap2 can simply clip it.
 
-        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} {trimming} --modified-bases m6A pseU --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves --estimate-poly-a {dorado_model_path} {args.pod5} > {raw_bam_path}"
+        cmd = f"{args.dorado}/bin/dorado basecaller --reference {args.ref} {trimming} --chunksize 12000 -x {args.gpu} {args.batch} --min-qscore 0 --emit-moves {dorado_model_path} {args.pod5} > {raw_bam_path}"
         printmessage(cmd)
         os.system(cmd)
 
