@@ -8,7 +8,6 @@ import os
 import glob
 import time
 from collections import defaultdict
-import psutil
 
 import networkx as nx
 import numpy as np
@@ -19,22 +18,24 @@ from tqdm import tqdm
 
 from utils.utils import mean_phred, printmessage, oom_killer
 
-
 ## Step 1: Index all k-mers from the read.
 ## Step 2: Connect the spacers using the k-mer index.
 ## Step 3: Build a DAG of spacers.
 ## Step 4: Find the longest path in the DAG.
 ## Step 5: Extract the sequence from the longest path.
 
-## Tolerances (Scoring parameters):
-## 1. Mismatch tolerance per spacer
-## 2. Indel tolerance per CB
-## 3. Mismatch tolerance per anchor
-
-## This code is not really built for heavy lifting. Well how about several million reads? lol godspeed.
-
-
 def get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size):
+    """
+    Generates a dictionary of minimum ideal displacements for given parameters.
+
+    Args:
+        cb_per_bb (int): Number of context blocks per base block.
+        spacer_size (int): Size of the spacer.
+        cb_size (int): Size of the context block.
+
+    Returns:
+        dict: Dictionary with keys as tuples of (from_idx, to_idx) and values as tuples of (displacement, small_steps, big_steps).
+    """
     min_ideal_displacement_dict = {}
     big_step_size = cb_size + spacer_size
     small_step_size = spacer_size
@@ -56,6 +57,20 @@ def get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size):
 
 def get_ideal_displacement(from_spacer_idx, to_spacer_idx, displacement, min_ideal_displacement_dict, cb_per_bb,
                            bb_size):
+    """
+    Calculates the ideal displacement and steps between spacers.
+
+    Args:
+        from_spacer_idx (int): Index of the starting spacer.
+        to_spacer_idx (int): Index of the ending spacer.
+        displacement (int): Actual displacement between spacers.
+        min_ideal_displacement_dict (dict): Dictionary of minimum ideal displacements.
+        cb_per_bb (int): Number of context blocks per base block.
+        bb_size (int): Size of the base block.
+
+    Returns:
+        tuple: Ideal displacement, small steps, and big steps.
+    """
     min_ideal_displacement, min_small_steps, min_big_steps = min_ideal_displacement_dict[
         (from_spacer_idx, to_spacer_idx)]
     if displacement <= min_ideal_displacement:
@@ -72,6 +87,16 @@ def get_ideal_displacement(from_spacer_idx, to_spacer_idx, displacement, min_ide
 
 
 def get_integer_partition(indel_tolerance, cb_size_tolerance):
+    """
+    Generates a dictionary of integer partitions for indel tolerance.
+
+    Args:
+        indel_tolerance (int): Indel tolerance.
+        cb_size_tolerance (int): Context block size tolerance.
+
+    Returns:
+        dict: Dictionary with keys as spacing errors and values as lists of tuples of (front_error, back_error).
+    """
     indel_dict = {}
     for spacing_error in range(-cb_size_tolerance, cb_size_tolerance + 1):
         indel_list = []
@@ -85,6 +110,18 @@ def get_integer_partition(indel_tolerance, cb_size_tolerance):
 
 
 def get_kmer_dict(read, k, bq_cutoff, phred):
+    """
+    Generates a dictionary of k-mers from a read.
+
+    Args:
+        read (str): The read sequence.
+        k (int): Length of the k-mer.
+        bq_cutoff (float): Base quality cutoff.
+        phred (list): List of Phred quality scores.
+
+    Returns:
+        defaultdict: Dictionary with k-mers as keys and positions as values.
+    """
     kmer_dict = defaultdict(list)
     for i in range(len(read) - k + 1):
         kmer = read[i:i + k]
@@ -97,6 +134,16 @@ def get_kmer_dict(read, k, bq_cutoff, phred):
 
 
 def get_ed_kmers(kmer, spacer_mismatch_tolerance):
+    """
+    Generates a dictionary of k-mers with edit distances.
+
+    Args:
+        kmer (str): The k-mer sequence.
+        spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
+
+    Returns:
+        defaultdict: Dictionary with edit distances as keys and lists of k-mers as values.
+    """
     nucs = "ACGU"
     possible_nucs = ["".join(x) for x in it.product(nucs, repeat=len(kmer))]
     kmer_ed_dict = defaultdict(list)
@@ -109,6 +156,24 @@ def get_ed_kmers(kmer, spacer_mismatch_tolerance):
 
 def validate_anchor(read, from_pos, to_pos, possible_indel_list, spacer_size, cb_pad, single_anchor,
                     indel_penalty, anchor_mismatch_penalty, displacement_error):
+    """
+    Validates the anchor in the read sequence.
+
+    Args:
+        read (str): The read sequence.
+        from_pos (int): Starting position.
+        to_pos (int): Ending position.
+        possible_indel_list (list): List of possible indels.
+        spacer_size (int): Size of the spacer.
+        cb_pad (int): Context block padding.
+        single_anchor (str): Single anchor sequence.
+        indel_penalty (int): Penalty for indels.
+        anchor_mismatch_penalty (int): Penalty for anchor mismatches.
+        displacement_error (int): Displacement error.
+
+    Returns:
+        tuple: Missing anchor, anchor position, and total indel.
+    """
     query = read[from_pos + spacer_size:to_pos]
     anchor_candidate_list = [
         (displacement_error * indel_penalty + anchor_mismatch_penalty, 1, None, displacement_error)]
@@ -124,6 +189,17 @@ def validate_anchor(read, from_pos, to_pos, possible_indel_list, spacer_size, cb
 
 
 def get_kmer_tuple(spacer_mismatch_tolerance, from_spacer_kmer_ed_dict, to_spacer_kmer_ed_dict):
+    """
+    Generates a list of k-mer tuples with mismatches.
+
+    Args:
+        spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
+        from_spacer_kmer_ed_dict (dict): Dictionary of k-mers with edit distances for the starting spacer.
+        to_spacer_kmer_ed_dict (dict): Dictionary of k-mers with edit distances for the ending spacer.
+
+    Returns:
+        list: List of tuples of (from_kmer, to_kmer, total_mismatch).
+    """
     kmer_tuple_list = []
     for total_mismatch in range(spacer_mismatch_tolerance + 1):
         for front_mismatch in range(total_mismatch + 1):
@@ -139,6 +215,34 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
                           spacer_size, spacer_list, indel_dict, min_ideal_displacement_dict, anchor_list,
                           score_converting_func, cb_size_tolerance, spacer_mismatch_tolerance, spacer_size_tolerance,
                           bb_size):
+    """
+    Finds block candidates in the read sequence.
+
+    Args:
+        seq (str): The read sequence.
+        phred (list): List of Phred quality scores.
+        cb_bq_cutoff (float): Base quality cutoff for context blocks.
+        spacer_kmer_ed_dict (dict): Dictionary of k-mers with edit distances for spacers.
+        skip_size_tolerance (int): Tolerance for skip size.
+        cb_pad (int): Context block padding.
+        cb_per_bb (int): Number of context blocks per base block.
+        indel_penalty (int): Penalty for indels.
+        anchor_mismatch_penalty (int): Penalty for anchor mismatches.
+        spacer_mismatch_penalty (int): Penalty for spacer mismatches.
+        spacer_size (int): Size of the spacer.
+        spacer_list (list): List of spacers.
+        indel_dict (dict): Dictionary of integer partitions for indel tolerance.
+        min_ideal_displacement_dict (dict): Dictionary of minimum ideal displacements.
+        anchor_list (list): List of anchors.
+        score_converting_func (function): Function to convert penalty to score.
+        cb_size_tolerance (int): Context block size tolerance.
+        spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
+        spacer_size_tolerance (int): Tolerance for spacer size.
+        bb_size (int): Size of the base block.
+
+    Returns:
+        tuple: Dictionary of context block information, list of DAG edges, and dictionary of DAG edges with scores.
+    """
     kmer_pos_dict = get_kmer_dict(seq, spacer_size, cb_bq_cutoff, phred)
     dag_list = []  ## Format: [from_pos, to_pos, score]
     dag_dict = {}  ## Format: {(from_pos, to_pos): score}
@@ -214,6 +318,15 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
 
 
 def dag_longest_path(edge_list):
+    """
+    Finds the longest path in a directed acyclic graph (DAG).
+
+    Args:
+        edge_list (list): List of edges in the DAG.
+
+    Returns:
+        list: Longest path in the DAG.
+    """
     node_list = list(set([x[0] for x in edge_list] + [x[1] for x in edge_list]))
 
     dag = nx.DiGraph()
@@ -231,6 +344,39 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
                                             anchor_list, spacer_list, spacer_size, bb_size, flush_path, pid,
                                             flush_interval,
                                             score_converting_func, cb_size, min_ideal_displacement_dict, resume):
+    """
+    Worker function to extract blocks from a list of reads using multiprocessing.
+
+    Args:
+        record_list (list): List of read records.
+        indel_penalty (int): Penalty for indels.
+        cb_size_tolerance (int): Context block size tolerance.
+        skip_size_tolerance (int): Tolerance for skip size.
+        anchor_mismatch_penalty (int): Penalty for anchor mismatches.
+        spacer_size_tolerance (int): Tolerance for spacer size.
+        spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
+        spacer_mismatch_penalty (int): Penalty for spacer mismatches.
+        cb_pad (int): Context block padding.
+        cb_per_bb (int): Number of context blocks per base block.
+        cb_bq_cutoff (float): Base quality cutoff for context blocks.
+        indel_dict (dict): Dictionary of integer partitions for indel tolerance.
+        spacer_kmer_ed_dict (dict): Dictionary of k-mers with edit distances for spacers.
+        anchor_list (list): List of anchors.
+        spacer_list (list): List of spacers.
+        spacer_size (int): Size of the spacer.
+        bb_size (int): Size of the base block.
+        flush_path (str): Path to save intermediate flush files.
+        pid (int): Process ID.
+        flush_interval (int): Interval for flushing data to disk.
+        score_converting_func (function): Function to convert penalty to score.
+        cb_size (int): Size of the context block.
+        min_ideal_displacement_dict (dict): Dictionary of minimum ideal displacements.
+        resume (str): Path to resume from previous run.
+
+    Returns:
+        None
+    """
+
     len_record = len(record_list)
     block_df_list = []
     flush_file_list = []
@@ -335,6 +481,38 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
                                   spacer_mismatch_penalty, anchor_list, spacer_list, spacer_size, cb_pad,
                                   cb_per_bb, read_bq_cutoff, cb_bq_cutoff, flush_path, flush_interval, ncpu,
                                   resume, sample, **kwargs):
+    """
+    Extracts context blocks from a list of reads using multiprocessing.
+
+    Args:
+        input (str): Path to the input BAM file.
+        output (str): Path to save the output pickle file.
+        indel_tolerance (int): Indel tolerance.
+        indel_penalty (int): Penalty for indels.
+        cb_size_tolerance (int): Context block size tolerance.
+        skip_size_tolerance (int): Tolerance for skip size.
+        anchor_mismatch_penalty (int): Penalty for anchor mismatches.
+        spacer_size_tolerance (int): Tolerance for spacer size.
+        spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
+        max_read_length (int): Maximum read length.
+        spacer_mismatch_penalty (int): Penalty for spacer mismatches.
+        anchor_list (list): List of anchors.
+        spacer_list (list): List of spacers.
+        spacer_size (int): Size of the spacer.
+        cb_pad (int): Context block padding.
+        cb_per_bb (int): Number of context blocks per base block.
+        read_bq_cutoff (float): Base quality cutoff for reads.
+        cb_bq_cutoff (float): Base quality cutoff for context blocks.
+        flush_path (str): Path to save intermediate flush files.
+        flush_interval (int): Interval for flushing data to disk.
+        ncpu (int): Number of CPU threads to use.
+        resume (str): Path to resume from previous run.
+        sample (int): Number of reads to sample.
+        **kwargs: Additional arguments.
+
+    Returns:
+        None
+    """
     spacer_list = [x.replace("T", "U") for x in spacer_list]
     anchor_list = [x.replace("T", "U") for x in anchor_list]
     indel_dict = get_integer_partition(indel_tolerance, cb_size_tolerance)
@@ -435,6 +613,12 @@ def extract_blocks_from_read_list(input, output, indel_tolerance, indel_penalty,
 
 
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser(description="Extract context blocks from basecalled BAM file using DAG.")
     num_cpu = os.cpu_count()
     parser.add_argument("--input", dest="input", type=str, required=True)
@@ -486,12 +670,18 @@ def parse_args():
 
 
 def main():
+    """
+    Main function to extract context blocks from a basecalled BAM file using a directed acyclic graph (DAG).
+
+    Returns:
+        None
+    """
     args = parse_args()
 
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"ERROR! {args.input} does not exist.")
-    # if os.path.exists(args.output):
-    #     raise FileExistsError(f"ERROR! {args.output} already exists.")
+    if os.path.exists(args.output):
+        raise FileExistsError(f"ERROR! {args.output} already exists.")
 
     base_path = os.path.dirname(args.output)
     if args.resume is not None:

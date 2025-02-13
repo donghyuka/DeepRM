@@ -10,14 +10,17 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 
 
-REF_PATH = "/extdata4/baeklab/Hyeonseo/m6A/res/ref/isoform/hg38_rna_nrnm.fasta"
-
-
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--in", "-i", type=str, dest="input", help="Input BAM file path", required=True)
     parser.add_argument("--out","-o", type=str, dest="output", help="Output Directory", required=True)
-    parser.add_argument("--ref","-r", type=str, dest="ref", help="Reference FASTA file path", default=REF_PATH)
+    parser.add_argument("--ref","-r", type=str, dest="ref", help="Reference FASTA file path", required=True)
     parser.add_argument("--cpu","-c", type=int, dest="cpu", help="Number of CPUs",  default=int(os.cpu_count()*0.9))
     parser.add_argument("--mapq","-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
     parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
@@ -29,9 +32,11 @@ def md_to_mismatch_arr(md):
     """
     Convert MD tag to mismatch array.
 
-    :param md: An array. MD tag from BAM file.
+    Args:
+        md (str): MD tag from BAM file.
 
-    :return A numpy array with shape (len(read),) with 1 for mismatch and 0 for match.
+    Returns:
+        np.ndarray: A numpy array with shape (len(read),) with 1 for mismatch and 0 for match.
     """
     mis_arr = []
     digit_buffer = ""
@@ -72,6 +77,15 @@ def md_to_mismatch_arr(md):
 
 
 def align_bam(args):
+    """
+    Aligns BAM file using minimap2 and processes the alignment.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        str: Path to the aligned BAM file.
+    """
     basename = os.path.basename(args.input)
     aln_sam_path = os.path.join(args.output, basename)
     aln_sam_path = aln_sam_path.replace(".bam", ".aligned.sam")
@@ -81,11 +95,11 @@ def align_bam(args):
         print(f"Aligned BAM file {aln_bam_path} already exists. Skipping alignment")
 
     else:
-        ## 1. Run minimap2
+        # 1. Run minimap2
         cmd = f"samtools fastq -TXX,YY {args.input} | minimap2 --eqx -y -N 1 -ax map-ont -t {args.cpu} {args.ref} - > {aln_sam_path}"
         os.system(cmd)
 
-        ## 2. Convert to BAM, filter, sort, and index.
+        # 2. Convert to BAM, filter, sort, and index.
         cmd = f"samtools view -bhS -F 4095 -q {args.mapq} {aln_sam_path} | samtools sort -@ {args.cpu} -o {aln_bam_path}"
         os.system(cmd)
         cmd = f"samtools index -@ {args.cpu} {aln_bam_path}"
@@ -95,6 +109,15 @@ def align_bam(args):
 
 
 def extract_cigar(args):
+    """
+    Extracts CIGAR strings and MD tags from the BAM file.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        tuple: A tuple containing a list of CIGAR strings and a list of MD tags.
+    """
     bamfile = pysam.AlignmentFile(args.input, "rb", check_sq=False, threads=args.cpu)
     cigar_list = []
     md_list = []
@@ -115,9 +138,18 @@ def extract_cigar(args):
     return cigar_list, md_list
 
 
+def get_error_rate_func(cigar, md, use_md=True):
+    """
+    Calculates error rates from CIGAR string and MD tag.
 
-def get_error_rate_func(cigar, md, use_md = True):
+    Args:
+        cigar (str): CIGAR string.
+        md (str): MD tag.
+        use_md (bool, optional): Whether to use MD tag for mismatch calculation. Defaults to True.
 
+    Returns:
+        tuple: A tuple containing mismatch rate, insertion rate, and deletion rate.
+    """
     cigar_list = re.findall(r'(\d+)([A-Z,=])', cigar)
     mismatch = 0
     insertion = 0
@@ -125,7 +157,7 @@ def get_error_rate_func(cigar, md, use_md = True):
     ref_length = 0
 
     for length, match in cigar_list:
-        if match in ["=","M"]:
+        if match in ["=", "M"]:
             ref_length += int(length)
         elif match == "X":
             mismatch += int(length)
@@ -136,9 +168,9 @@ def get_error_rate_func(cigar, md, use_md = True):
             deletion += int(length)
             ref_length += int(length)
 
-    mis_rate = mismatch/ref_length
-    ins_rate = insertion/ref_length
-    del_rate = deletion/ref_length
+    mis_rate = mismatch / ref_length
+    ins_rate = insertion / ref_length
+    del_rate = deletion / ref_length
 
     if use_md:
         mis_arr = md_to_mismatch_arr(md)
@@ -147,7 +179,19 @@ def get_error_rate_func(cigar, md, use_md = True):
     return mis_rate, ins_rate, del_rate
 
 
-def get_error_rate_worker(cigar_list, md_list, man_df_list, use_md = True):
+def get_error_rate_worker(cigar_list, md_list, man_df_list, use_md=True):
+    """
+    Worker function to calculate error rates for a list of CIGAR strings and MD tags.
+
+    Args:
+        cigar_list (list): List of CIGAR strings.
+        md_list (list): List of MD tags.
+        man_df_list (list): Manager list to store results.
+        use_md (bool, optional): Whether to use MD tag for mismatch calculation. Defaults to True.
+
+    Returns:
+        None
+    """
     mis_rate_list = []
     ins_rate_list = []
     del_rate_list = []
@@ -156,13 +200,23 @@ def get_error_rate_worker(cigar_list, md_list, man_df_list, use_md = True):
         ins_rate_list.append(ins_rate)
         del_rate_list.append(del_rate)
         mis_rate_list.append(mis_rate)
-    df = pd.DataFrame({"MIS_RATE":mis_rate_list, "INS_RATE":ins_rate_list, "DEL_RATE":del_rate_list})
+    df = pd.DataFrame({"MIS_RATE": mis_rate_list, "INS_RATE": ins_rate_list, "DEL_RATE": del_rate_list})
     man_df_list.append(df)
     return None
 
 
 def get_error_rate_master(cigar_list, md_list, args):
+    """
+    Master function to calculate error rates using multiprocessing.
 
+    Args:
+        cigar_list (list): List of CIGAR strings.
+        md_list (list): List of MD tags.
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        pd.DataFrame: DataFrame containing error rates.
+    """
     cigar_list_split = np.array_split(cigar_list, args.cpu)
     md_list_split = np.array_split(md_list, args.cpu)
     proc_list = []
@@ -182,17 +236,25 @@ def get_error_rate_master(cigar_list, md_list, args):
     return df_error
 
 
-
 def plot_kde(df_error, args):
+    """
+    Plots a KDE plot of read alignment accuracy.
 
+    Args:
+        df_error (pd.DataFrame): DataFrame containing error rates.
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
     plt.rcParams.update({'font.size': 26})
-    fig, ax = plt.subplots(figsize=(20,20))
+    fig, ax = plt.subplots(figsize=(20, 20))
     ax.set_xlabel("Read Alignment accuracy")
     ax.set_ylabel("Density")
     ax.set_xlim(0.7, 1.0)
-    sns.histplot(1-df_error["ERROR_RATE"], ax=ax, color="royalblue",
+    sns.histplot(1 - df_error["ERROR_RATE"], ax=ax, color="royalblue",
                  label=f"Pass (n={len(df_error):,})", binwidth=0.001, binrange=(0.7, 1.0), kde=True, stat="density")
-    ## vline at median
+    # vline at median
     median = np.median(1 - df_error["ERROR_RATE"])
     ax.axvline(median, color="royalblue", linestyle='--', linewidth=3)
     ax.text(median, 0.9 * ax.get_ylim()[1], f"{median:.3f}", color="royalblue")
@@ -201,11 +263,21 @@ def plot_kde(df_error, args):
     plt.close()
     return None
 
+
 def plot_boxplot(df_error, args):
-    ## Plot mis, ins, del rate
+    """
+    Plots a boxplot of mismatch, insertion, and deletion rates.
+
+    Args:
+        df_error (pd.DataFrame): DataFrame containing error rates.
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
     plt.rcParams.update({'font.size': 26})
-    fig, ax = plt.subplots(figsize=(20,20))
-    ## Use whiskers, no fliers
+    fig, ax = plt.subplots(figsize=(20, 20))
+    # Use whiskers, no fliers
     sns.boxplot(data=df_error[["MIS_RATE", "INS_RATE", "DEL_RATE"]], ax=ax, palette="Set2", linewidth=3, fliersize=0)
     ax.set_xlabel("Error type")
     ax.set_ylabel("Error rate")
@@ -216,8 +288,13 @@ def plot_boxplot(df_error, args):
     return None
 
 
-
 def main():
+    """
+    Main function to parse arguments, calculate error rates, and plot results.
+
+    Returns:
+        None
+    """
     args = parse_args()
     df_error = []
     run_flag = True
@@ -251,43 +328,6 @@ def main():
 
     return None
 
-def plot_error_rate(error_dict, label_dict):
-    plt.rcParams.update({'font.size': 26})
-    fig, ax = plt.subplots(figsize=(20,20))
-    ax.set_xlabel("Read Alignment accuracy")
-    ax.set_ylabel("Density")
-    ax.set_xlim(0.7, 1.0)
-    clist = ["royalblue", "tomato", "mediumseagreen", "gold"]
-    for i, exp in enumerate(error_dict):
-        color = clist.pop()
-        error_arr = error_dict[exp]
-        sns.kdeplot(1-error_arr, ax=ax, label=label_dict[exp]+f" (n={len(error_arr):,})", linewidth=6, color=color, shade=False, )
-        median = np.median(1 - error_dict[exp])
-        ax.axvline(median, color=color, linestyle='--', linewidth=3)
-        ax.text(median, 20-3*i, f"{median:.3f}", color=color)
-    ax.legend()
-    plt.savefig(f"/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/error_rate.png", dpi=300)
-    plt.close()
-    return None
-
-
-
-def main2():
-    label_dict = {"ON0074":"ON0074 (RNA002/minION/HEK)", "ON0086":"ON0086 (RNA004/minION/HEK)",
-                  "ON0090":"ON0090 (RNA004/P2solo/HEK)", "ON0091":"ON0091 (RNA004/P2Solo/HeLa)"}
-    df_1 = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0074/ON0074/save_path/align/per_read_phred_error.tsv", sep='\t')
-    df_2 = pd.read_csv("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0086/ON0086/save_path/align/per_read_phred_error.tsv", sep='\t')
-    error_1 = df_1["ERROR_RATE"]
-    error_2 = df_2["ERROR_RATE"]
-    df_3 = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/alignstats/error_rate.pkl")
-    df_4 = pd.read_pickle("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0091/ON0091/result/alignstats/error_rate.pkl")
-    error_3 = df_3["ERROR_RATE"]
-    error_4 = df_4["ERROR_RATE"]
-    error_dict = {"ON0074":error_1, "ON0086":error_2, "ON0090":error_3, "ON0091":error_4}
-    with open("/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/error_rate.pkl", "wb") as f:
-        pickle.dump(error_dict, f)
-    plot_error_rate(error_dict, label_dict)
-    return None
 
 if __name__ == "__main__":
     main()

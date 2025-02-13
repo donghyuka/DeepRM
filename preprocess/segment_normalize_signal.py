@@ -12,15 +12,23 @@ import pysam
 import atexit
 import tqdm
 from utils.utils import oom_killer, printmessage
-import toml
 
-## Warning: This script has heavy parallel I/O operations and large memory usage.
-## > 1TB Read / Write operations and > 100 GB RAM usage is expected (> 4GB/s disk write was observed).
-## Running this on NFS may cause significant performance degradation.
-
+## Warning: This script may cause heavy I/O and large memory footprint of > 100 GB.
 
 def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):
-    ## Extract mv tag from bam and save to separate file
+    """
+    Extracts the 'mv' tag from a BAM file and saves it to separate files.
+
+    Args:
+        bam_path (str): Path to the BAM file.
+        ncpu (int): Number of CPU threads to use.
+        signal_path_dict (dict): Dictionary mapping read IDs to signal paths.
+        signal_path_arr (list): List of signal paths.
+        intermediate_path (str): Path to save intermediate files.
+
+    Returns:
+        None
+    """
     data_dict = {x: {"mv": [], "read_id": [], "ts": [], "ns": [], "sp": []} for x in signal_path_arr}
     count = 0
 
@@ -84,7 +92,20 @@ def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate
 
 
 def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
-    # Export pod5 to csv
+    """
+    Exports POD5 files to DataFrame format.
+
+    Args:
+        pod5_path (str): Path to the POD5 files.
+        save_path (str): Path to save the DataFrame files.
+        ncpu (int): Number of CPU threads to use.
+        chunk (int): Chunk size for processing.
+        max_mb (int): Maximum size of the DataFrame in MB.
+        min_mb (int): Minimum size of the DataFrame in MB.
+
+    Returns:
+        dict: Dictionary mapping file paths to read IDs.
+    """
     pod5_path_list = glob.glob(pod5_path + "/*.pod5")
     proc_list = []
     np.random.shuffle(pod5_path_list)
@@ -112,9 +133,22 @@ def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
     return index_dict
 
 
-
-
 def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, max_mb, min_mb):
+    """
+    Extracts signal data from POD5 files and processes it.
+
+    Args:
+        pod5_path_list (list): List of POD5 file paths.
+        signal_df_path (str): Path to save the signal data.
+        pid (int): Process ID.
+        index_list (list): List to store the index data.
+        chunk (int): Chunk size for processing.
+        max_mb (int): Maximum size of the dataframe in MB.
+        min_mb (int): Minimum size of the dataframe in MB.
+
+    Returns:
+        None
+    """
     index_dict_local = {}
     chunk_buffer = []
     pod5_idx = 0
@@ -189,6 +223,21 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
 
 
 def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max_mb):
+    """
+    Writes the signal dataframe to a file.
+
+    Args:
+        signal_df (pd.DataFrame): Dataframe containing the signal data.
+        signal_df_path (str): Path to save the signal data.
+        pid (int): Process ID.
+        pod5_idx (int): POD5 file index.
+        save_idx (int): Save index.
+        index_dict (dict): Dictionary to store the index data.
+        max_mb (int): Maximum size of the dataframe in MB.
+
+    Returns:
+        int: Updated save index.
+    """
     save_idx += 1
     df_size = sys.getsizeof(signal_df) / (1024 ** 2)
     if df_size > max_mb and len(signal_df) > 1:
@@ -209,6 +258,16 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
 
 
 def sequence_to_kmer_token(seq, kmer):
+    """
+    Converts a DNA sequence to k-mer tokens.
+
+    Args:
+        seq (str): DNA sequence.
+        kmer (int): Length of the k-mer.
+
+    Returns:
+        np.ndarray: Array of k-mer tokens.
+    """
     ## 1. change string to array of int - 0, 1, 2, 3
     seq = seq.upper()
     seq = seq.replace('A', '0')
@@ -228,22 +287,61 @@ def sequence_to_kmer_token(seq, kmer):
 
 
 def create_segment_len_arr(segment_arr, sampling):
+    """
+    Creates an array of segment lengths.
+
+    Args:
+        segment_arr (list): List of segments.
+        sampling (int): Sampling rate.
+
+    Returns:
+        np.ndarray: Array of segment lengths.
+    """
     segment_len_arr = np.array([len(x) for x in segment_arr], dtype=int) // sampling
     return segment_len_arr
 
 
 def expand_token_to_segment(token_arr, segment_len_arr):
+    """
+    Expands tokens to segments.
+
+    Args:
+        token_arr (np.ndarray): Array of tokens.
+        segment_len_arr (np.ndarray): Array of segment lengths.
+
+    Returns:
+        np.ndarray: Expanded array of tokens.
+    """
     token = np.repeat(token_arr, segment_len_arr)
     return token
 
 
 def create_move_token(segment_len_arr):
+    """
+    Creates move tokens.
+
+    Args:
+        segment_len_arr (np.ndarray): Array of segment lengths.
+
+    Returns:
+        np.ndarray: Array of move tokens.
+    """
     token = np.arange(1, len(segment_len_arr)+1, dtype=np.uint8)
     token = np.repeat(token, segment_len_arr)
     return token
 
 
 def create_target_mask(segment_len_arr, lr_pad):
+    """
+    Creates a target mask.
+
+    Args:
+        segment_len_arr (np.ndarray): Array of segment lengths.
+        lr_pad (int): Left-right padding.
+
+    Returns:
+        np.ndarray: Target mask.
+    """
     binary_mask = np.zeros(2*lr_pad+1, dtype=np.uint8)
     binary_mask[lr_pad] = 1
     binary_mask = np.repeat(binary_mask, segment_len_arr)
@@ -251,6 +349,20 @@ def create_target_mask(segment_len_arr, lr_pad):
 
 
 def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling, sig_window, pad_to):
+    """
+    Segments and pads the signal.
+
+    Args:
+        signal_segmented (np.ndarray): Segmented signal.
+        segment_len_arr (np.ndarray): Array of segment lengths.
+        kmer (int): Length of the k-mer.
+        sampling (int): Sampling rate.
+        sig_window (int): Signal window size.
+        pad_to (int): Padding size.
+
+    Returns:
+        np.ndarray: Padded signal.
+    """
     try:
         kmer_pad = (kmer-1)//2
         lr_pad = (sig_window-1)//2
@@ -277,6 +389,19 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
 
 
 def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult):
+    """
+    Converts move data to dwell time.
+
+    Args:
+        move (np.ndarray): Move data.
+        quantile_a (float): Quantile A for normalization.
+        quantile_b (float): Quantile B for normalization.
+        shift_mult (float): Shift multiplier for normalization.
+        scale_mult (float): Scale multiplier for normalization.
+
+    Returns:
+        np.ndarray: Dwell time data.
+    """
     sampling = move[0]
     move = np.flip(move[1:]) * np.arange(1, len(move))
     move = move[move > 0]
@@ -293,6 +418,23 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult):
 
 
 def trim_scale_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shift_mult, scale_mult):
+    """
+    Trims and scales the signal.
+
+    Args:
+        signal (np.ndarray): Signal data.
+        move (np.ndarray): Move data.
+        sp (int): Start position.
+        ts (int): Timestamp.
+        ns (int): Number of samples.
+        quantile_a (float): Quantile A for normalization.
+        quantile_b (float): Quantile B for normalization.
+        shift_mult (float): Shift multiplier for normalization.
+        scale_mult (float): Scale multiplier for normalization.
+
+    Returns:
+        np.ndarray: Trimmed and scaled signal.
+    """
     signal = signal[sp:]
     signal_len = len(signal)
     if ns == 0:
@@ -322,6 +464,26 @@ def trim_scale_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shif
 
 def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor, kmer = 5, cb_len = 21, sampling = 6,
                              sig_window = 5, max_penalty = 10, chunk_size = 1000, max_token_len = 200, dwell_shift = 10):
+    """
+    Segments and normalizes the signal data.
+
+    Args:
+        seg_df_path (str): Path to the segmented dataframe.
+        postfix (str): Postfix for the output files.
+        signal_path_arr (list): List of signal paths.
+        norm_factor (dict): Normalization factors.
+        kmer (int, optional): Length of the k-mer. Defaults to 5.
+        cb_len (int, optional): Length of the codebook. Defaults to 21.
+        sampling (int, optional): Sampling rate. Defaults to 6.
+        sig_window (int, optional): Signal window size. Defaults to 5.
+        max_penalty (int, optional): Maximum penalty. Defaults to 10.
+        chunk_size (int, optional): Chunk size for processing. Defaults to 1000.
+        max_token_len (int, optional): Maximum token length. Defaults to 200.
+        dwell_shift (int, optional): Dwell shift. Defaults to 10.
+
+    Returns:
+        None
+    """
 
     trim = kmer//2
 
@@ -413,11 +575,17 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
         gc.collect()
 
     return None
-
-
-
 def save_npz(save_path, df):
+    """
+    Saves the dataframe to a compressed NPZ file.
 
+    Args:
+        save_path (str): Path to save the NPZ file.
+        df (pd.DataFrame): Dataframe containing the data to be saved.
+
+    Returns:
+        None
+    """
     if len(df) > 0:
         segment_len_arr = np.stack(df["segment_len_arr"].values)
         signal_token = np.stack(df["signal_token"].values)
@@ -439,18 +607,23 @@ def save_npz(save_path, df):
 
 
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     ## Usage: "python segment_normalize_signal.py --cpu {args.thread} --pod5 {pod5_path} --bam {bam_path} --block {block_path} --output {signal_path}"
     parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
     num_cpu = os.cpu_count()
     parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
     parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
-    parser.add_argument("--toml", "-t", type=str, default=None, help="Dorado Model TOML file")
     parser.add_argument("--block", "-k", type=str, default=None, help="Block dataframe path")
     parser.add_argument("--output", "-o", type=str, default=None, help="Output directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
-    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5  dataframe size in MB")
+    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
     parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files", default=True)
     parser.add_argument("--skip_intermediate", "-si", action="store_true", help="Skip intermediate files")
     parser.add_argument("--postfix", "-x", type=str, default="token_dwell_bq", help="Output file postfix")
@@ -463,6 +636,15 @@ def parse_args():
 
 
 def assign_block_id(block_df):
+    """
+    Assigns block IDs to the dataframe.
+
+    Args:
+        block_df (pd.DataFrame): Dataframe containing block data.
+
+    Returns:
+        pd.DataFrame: Dataframe with assigned block IDs.
+    """
     index = 0
     read_id_prev = ""
     block_id = []
@@ -477,9 +659,19 @@ def assign_block_id(block_df):
     return block_df
 
 
-
 def split_block_df(args, signal_path_dict, signal_path_arr, intermediate_path):
+    """
+    Splits the block dataframe into smaller dataframes based on signal paths.
 
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+        signal_path_dict (dict): Dictionary mapping read IDs to signal paths.
+        signal_path_arr (list): List of signal paths.
+        intermediate_path (str): Path to save intermediate files.
+
+    Returns:
+        None
+    """
     printmessage("Reading Block Dataframe. It may take a while.", msg_type="info")
     block_df = pd.read_pickle(args.block)
     block_df = assign_block_id(block_df)
@@ -491,7 +683,7 @@ def split_block_df(args, signal_path_dict, signal_path_arr, intermediate_path):
     del block_df
     gc.collect()
 
-    for signal_path, group_df in tqdm.tqdm(block_df_groupby, total = len(signal_path_arr), desc="Splitting Block Dataframe"):
+    for signal_path, group_df in tqdm.tqdm(block_df_groupby, total=len(signal_path_arr), desc="Splitting Block Dataframe"):
         group_df.to_pickle(f"{intermediate_path}/block_df_split/{signal_path}")
 
     del block_df_groupby
@@ -500,52 +692,32 @@ def split_block_df(args, signal_path_dict, signal_path_arr, intermediate_path):
     return None
 
 
-def parse_toml(toml_path):
+def get_norm_factor():
+    """
+    Returns the default normalization factors.
+
+    Returns:
+        dict: Dictionary containing default normalization factors.
+    """
     norm_factor_default = {}
     norm_factor_default["quantile_a"] = 0.2
     norm_factor_default["quantile_b"] = 0.8
     norm_factor_default["shift_mult"] = 0.48
     norm_factor_default["scale_mult"] = 0.59
 
-    if toml_path is None:
-        printmessage("TOML file not provided. Using default values for standardisation.", msg_type="warning")
-        return norm_factor_default
-
-
-    if not os.path.exists(toml_path):
-        printmessage(f"TOML file {toml_path} does not exist", msg_type="warning")
-        printmessage("Using default values for standardisation.", msg_type="warning")
-        return norm_factor_default
-
-    toml_dict = toml.load(toml_path)
-    if "normalisation" not in toml_dict:
-        printmessage("normalisation section not found in the TOML file. Check Dorado model version.", msg_type="error", error=ValueError)
-        printmessage("Using default values for standardisation.", msg_type="warning")
-        return norm_factor_default
-
-    printmessage("Normalisation parameters found in TOML file.", msg_type="info")
-
-    std_dict = toml_dict["normalisation"]
-    norm_factor = {}
-    norm_factor["quantile_a"] = std_dict.get("quantile_a")
-    norm_factor["quantile_b"] = std_dict.get("quantile_b")
-    norm_factor["shift_mult"] = std_dict.get("shift_multiplier")
-    norm_factor["scale_mult"] = std_dict.get("scale_multiplier")
-
-    ## sanitize
-    for key in norm_factor.keys():
-        if norm_factor[key] is None:
-            printmessage(f"Key {key} not found in TOML file. Falling back to default value.", msg_type="warning")
-            norm_factor[key] = norm_factor_default[key]
-
-    return norm_factor
+    return norm_factor_default
 
 
 def main():
+    """
+    Main function to segment and normalize signal data.
 
+    Returns:
+        None
+    """
     args = parse_args()
 
-    norm_factor = parse_toml(args.toml)
+    norm_factor = get_norm_factor()
 
     token_output_path = f"{args.output}/{args.postfix}/"
     intermediate_path = f"{args.output}/intermediates/"
@@ -589,7 +761,6 @@ def main():
         del signal_path_dict, signal_name_arr
         gc.collect()
 
-
     else:
         ## load
         with open(signal_index_path, "rb") as infile:
@@ -617,7 +788,6 @@ def main():
     printmessage("Signal Segmentation and Tokenization Complete", msg_type="success")
     printmessage("Saved to: " + args.output, msg_type="success")
     return None
-
 
 
 if __name__ == "__main__":

@@ -1,8 +1,18 @@
 import os, argparse, glob, math
 from utils.utils import printmessage
 
-
 def restructure_directory(args):
+    """
+    Restructures the input directory to match the expected format.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Raises:
+        ValueError: If the input directory contains more than one directory.
+        FileNotFoundError: If the input directory does not contain any pod5 directories.
+        FileExistsError: If a file already exists in the pod5 directory.
+    """
     basename = os.path.basename(args.input)
     if not basename == args.name:
         printmessage(f"Renaming {basename} to {args.name}")
@@ -65,28 +75,41 @@ def restructure_directory(args):
 
     return None
 
-
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser()
     num_cpu = os.cpu_count()
     parser.add_argument("--in", "-i", dest = "input", type=str, required=True, help="Input directory")
     parser.add_argument("--out", "-o", dest = "output", type=str, default = None, help="Output directory")
-    parser.add_argument("--dorado", "-d", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.8.0", help="Dorado path")
+    parser.add_argument("--dorado", "-d", type=str, required=True, help="Dorado installation path")
     parser.add_argument("--cpu", "-t", type=int, default= int(math.floor(num_cpu * 0.95)), help="Number of CPUs")
     parser.add_argument("--gpu", "-g", type=str, default="cuda:all", help="GPU device")
     parser.add_argument("--batch", "-b", type=int, default=None, help="Dorado Batch size")
     parser.add_argument("--qcut", "-q", type=int, default=7, help="Dorado BQ cutoff")
     parser.add_argument("--name", "-r", type=str, default=None, help="Run Name")
-    parser.add_argument("--dag_cfg", "-c", type=str, default=None, help="DAG config file")
+    parser.add_argument("--dag_cfg", "-c", type=str, required=True, help="DAG config file")
     parser.add_argument("--base", "-x", type=str, default=None, help="Base of Interest")
     parser.add_argument("--step", "-s", type=int, nargs="+", default=[1,2,3], help="Step to run")
     parser.add_argument("--run_prefix", "-p", type=str, default="ON", help="Run Prefix")
-    parser.add_argument("--toml", "-m", type=str, default="/extdata3/baeklab/Hyeonseo/bin/dorado-0.4.3/model/rna004_130bps_sup@v3.0.1/config.toml", help="Dorado TOML file")
     args = parser.parse_args()
     return args
 
-
 def autoconfig(args):
+    """
+    Automatically configures the arguments based on the input directory and other parameters.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Raises:
+        FileNotFoundError: If the input directory does not exist.
+        ValueError: If the step argument is invalid or if the run name or base of interest cannot be detected.
+    """
     if args.input.endswith("/"):
         args.input = args.input[:-1]
     if not os.path.exists(args.input):
@@ -140,11 +163,7 @@ def autoconfig(args):
 
     canonical_base = get_canonical_base(args.base)
     args.canonical_base = canonical_base
-
-    if args.dag_cfg is None:
-        args.dag_cfg = f"/extdata4/baeklab/Hyeonseo/m6A/res/config/dag/240202_87BB_{args.canonical_base}.json"
-    else:
-        args.dag_cfg = f"{args.dag_cfg}/240202_87BB_{args.canonical_base}.json"
+    args.dag_cfg = f"{args.dag_cfg}/240202_87BB_{args.canonical_base}.json"
 
     if not os.path.exists(args.dag_cfg):
         raise FileNotFoundError(f"DAG config file {args.dag_cfg} does not exist")
@@ -159,6 +178,18 @@ def autoconfig(args):
     return args
 
 def get_canonical_base(base):
+    """
+    Gets the canonical base for a given base modification.
+
+    Args:
+        base (str): The base modification.
+
+    Returns:
+        str: The canonical base.
+
+    Raises:
+        ValueError: If the base argument is invalid.
+    """
     modification_dict = {"A": ["A", "cA", "m6A", "m1A", "Am", "I"],
                          "C": ["C", "cC", "m5C", "hm5C", "Cm"],
                          "G": ["G", "cG", "m7G", "m1G", "Gm"],
@@ -170,9 +201,19 @@ def get_canonical_base(base):
 
     raise ValueError(f"Invalid base argument: {base}")
 
-
-
 def main():
+    """
+    Main function to run the preprocessing pipeline.
+
+    Steps:
+        1. Run Dorado Basecaller and SAMtools.
+        2. Run DAG-based CB Extraction.
+        3. Run Signal Segmentation, Normalization, and FFT.
+
+    Raises:
+        FileNotFoundError: If the input directory does not exist.
+        ValueError: If the step argument is invalid or if the run name or base of interest cannot be detected.
+    """
     args = parse_args()
     args = autoconfig(args)
 
@@ -218,7 +259,7 @@ def main():
     if 3 in args.step:
         ## Step 3. Run segment_normalize_signal.py
         printmessage(f"[Step 3/3] Running Signal Segmentation, Normalization, and FFT")
-        cmd = f"python -m preprocess.segment_normalize_signal --keep_intermediate --cpu {args.cpu} --pod5 {args.pod5} --bam {bam_path} --block {block_df_path} --output {signal_path} --toml {args.toml}"
+        cmd = f"python -m preprocess.segment_normalize_signal --keep_intermediate --cpu {args.cpu} --pod5 {args.pod5} --bam {bam_path} --block {block_df_path} --output {signal_path}"
         printmessage(cmd)
         os.system(cmd)
 

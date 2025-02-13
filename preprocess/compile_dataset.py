@@ -1,15 +1,15 @@
 ##
 ## Output structure:
 ##  |
-##  |---/score-all
+##  |---/score-1.0
 ##  |   |---/train
 ##  |   |   |---/pos
 ##  |   |   |---/neg
 ##  |   |---/val
 ##  |   |   |---/pos
 ##  |   |   |---/neg
-##  |
-##  |---/score-perfect
+##  ...
+##  |---/score-0.0
 ##      |---/train
 ##      |   |---/pos
 ##      |   |---/neg
@@ -18,14 +18,18 @@
 ##      |   |---/neg
 ##
 
-
 import numpy as np
 import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
 from utils.utils import printmessage, oom_killer
 
-
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     args = argparse.ArgumentParser()
     args.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
     args.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
@@ -57,8 +61,6 @@ def parse_args():
 
     return args
 
-
-
 def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
                     label_dict = {0:"neg", 1:"pos"},
                     set_split_dict = {"train":0.95, "val":0.05},
@@ -66,10 +68,27 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
                     id_digit=9,
                     shuffle = True,
                     read_once = 100):
+    """
+    Samples data from input files and saves it to the output directory.
 
+    Args:
+        in_path_list (list): List of input file paths.
+        out_path (str): Output directory path.
+        ncpu (int): Number of CPUs to use.
+        label (int): Label for the data (0 for negative, 1 for positive).
+        chunk (int): Chunk size for saving data.
+        label_dict (dict): Dictionary mapping labels to strings.
+        set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
+        score_name_list (list): List of score thresholds.
+        id_digit (int): Number of digits for file IDs.
+        shuffle (bool): Whether to shuffle the data.
+        read_once (int): Number of files to read at once.
+
+    Returns:
+        None
+    """
     in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.npz")]
     column_keys = ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token", "block_score"]
-
 
     if shuffle:
         in_file_list = np.random.permutation(in_file_list)
@@ -113,12 +132,43 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 
     return None
 
-
 def pad_signal(signal, max_len):
+    """
+    Pads the signal to the maximum length with zeros.
+
+    Args:
+        signal (np.ndarray): Input signal array.
+        max_len (int): Maximum length to pad to.
+
+    Returns:
+        np.ndarray: Padded signal array.
+    """
     return np.concatenate([signal, np.zeros(max_len - len(signal), dtype=np.float32)])
 
 def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict, score_name_list,
                            chunk, label, remainder_dict, id_digit, shuffle, read_once, column_keys):
+    """
+    Worker function to sample and save data.
+
+    Args:
+        ncpu (int): Number of CPUs to use.
+        pid (int): Process ID.
+        in_file_list (list): List of input file paths.
+        out_path (str): Output directory path.
+        label_str (str): Label string for the data.
+        set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
+        score_name_list (list): List of score thresholds.
+        chunk (int): Chunk size for saving data.
+        label (int): Label for the data (0 for negative, 1 for positive).
+        remainder_dict (dict): Dictionary to store remainder data.
+        id_digit (int): Number of digits for file IDs.
+        shuffle (bool): Whether to shuffle the data.
+        read_once (int): Number of files to read at once.
+        column_keys (list): List of column keys for the data.
+
+    Returns:
+        None
+    """
     file_id = [-1]
     data_buffer = {x:[] for x in column_keys}
     buffer_dict = {key:None for key in remainder_dict.keys()}
@@ -160,10 +210,27 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
 
     return None
 
-
 def save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name, id_digit, buffer_dict):
+    """
+    Saves split data to the output directory.
 
-    ## slice for set by index - use cumsum to get the index
+    Args:
+        ncpu (int): Number of CPUs to use.
+        pid (int): Process ID.
+        file_id (list): List containing the file ID.
+        data (dict): Dictionary containing the data to save.
+        column_keys (list): List of column keys for the data.
+        out_path (str): Output directory path.
+        label_str (str): Label string for the data.
+        set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
+        chunk (int): Chunk size for saving data.
+        score_name (float): Score threshold.
+        id_digit (int): Number of digits for file IDs.
+        buffer_dict (dict): Dictionary to store buffer data.
+
+    Returns:
+        None
+    """
     set_idx = np.cumsum([0] + [int(np.floor(len(data[column_keys[0]]) * split_ratio)) for split_ratio in set_split_dict.values()])
 
     for idx, set_name in enumerate(set_split_dict):
@@ -184,9 +251,27 @@ def save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, 
 
     return None
 
-
 def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_str, set_name, buffer_dict, chunk, score_name, id_digit):
+    """
+    Saves data in chunks to the output directory.
 
+    Args:
+        ncpu (int): Number of CPUs to use.
+        pid (int): Process ID.
+        file_id (list): List containing the file ID.
+        set_data (dict): Dictionary containing the data to save.
+        column_keys (list): List of column keys for the data.
+        out_path (str): Output directory path.
+        label_str (str): Label string for the data.
+        set_name (str): Set name (train or val).
+        buffer_dict (dict): Dictionary to store buffer data.
+        chunk (int): Chunk size for saving data.
+        score_name (float): Score threshold.
+        id_digit (int): Number of digits for file IDs.
+
+    Returns:
+        None
+    """
     len_set_data = len(set_data[column_keys[0]])
     for chunk_idx in range(0, len_set_data // chunk + 1):
         file_id[0] += 1
@@ -203,7 +288,6 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
             gc.collect()
 
         elif buffer_dict is not None:
-            ## should happen only once per iteration
             buffer = buffer_dict[(set_name,score_name)]
             if buffer is not None:
                 buffer_dict[(set_name,score_name)] = {key:np.concatenate([buffer[key], chunk_data[key]]) for key in column_keys}
@@ -212,9 +296,13 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
 
     return None
 
-
-
 def main():
+    """
+    Main function to run the data compilation process.
+
+    Returns:
+        None
+    """
     args = parse_args()
     if args.seed is None:
         args.seed = np.random.randint(0, 1000000)
@@ -234,7 +322,5 @@ def main():
 
     return None
 
-
 if __name__ == "__main__":
     main()
-

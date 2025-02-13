@@ -17,63 +17,69 @@ import importlib
 
 
 def parse_args():
+    """
+    Parses command-line arguments for training the Transformer model.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser("Train Transformer Model")
-    parser.add_argument("--gpu", dest = "num_gpu",type=int, default = 4)
-    parser.add_argument("--batch", dest="batch_size", type=int, default=1024)
-    parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--data", dest="data_path", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/dataset/ver021324/main/")
-    parser.add_argument("--output", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/model")
-    parser.add_argument("--tb", dest = "tb_path", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/tensorboard")
-    parser.add_argument("--model", dest = "model_type", type=str, default="transformer_prototype_v11")
-    parser.add_argument("--es_delta", type=float, default=1e-5)
-    parser.add_argument("--es_patience", type=int, default=50)
-    parser.add_argument("--es_start", type=int, default=1000)
-    parser.add_argument("--disk_shard_size", type=int, default=4000)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--enc_dim", type=int, default=512)
-    parser.add_argument("--lin_dim", type=int, default=1024)
-    parser.add_argument("--head", type=int, default=8)
-    parser.add_argument("--enc_layer", type=int, default=6)
-    parser.add_argument("--lin_layer", type=int, default=4)
-    parser.add_argument("--enc_dropout", type=float, default=0.1)
-    parser.add_argument("--lin_dropout", type=float, default=0.2)
-    parser.add_argument("--period", type=int, default=30)
-    parser.add_argument("--buffer_size", dest = "shuffle_buffer_size", type=int, default=10000)
-    parser.add_argument("--kmer_size", type=int, default=5)
-    parser.add_argument("--signal_size", type=int, default=30)
-    parser.add_argument("--block_len", type=int, default=17)
-    parser.add_argument("--seq_len", type=int, default=200)
-    parser.add_argument("--t_act", type=str, default="gelu")
-    parser.add_argument("--lin_act", type=str, default="gelu")
-    parser.add_argument("--lr_step", type=int, default=1000)
-    parser.add_argument("--lr_interval", type=int, default=100)
-    parser.add_argument("--weight_decay", type=float, default=0.1)
-    parser.add_argument("--class_ratio", type=int, default=None)
-    parser.add_argument("--log_interval", type=int, default=10)
-    parser.add_argument("--eval_interval", type=int, default=100)
-    parser.add_argument("--save_interval", type=int, default=None)
-    parser.add_argument("--grad_clip", type=float, default=1.0)
-    parser.add_argument("--profiler", type=int, default=0)
-    parser.add_argument("--pin_memory", type=int, default=1)
-    parser.add_argument("--yield_period", type=int, default=None)
-    parser.add_argument("--rlrop", type=float, default=None)
-    parser.add_argument("--loss", type=str, default="BCE")
-    parser.add_argument("--score_feature", type=bool, default=False)
-    parser.add_argument("--gpu_pool", type=int, nargs="+", default=None)
-    parser.add_argument("--cut_overlap", type=bool, default=False)
-    parser.add_argument("--load_checkpoint", type=str, default=None)
-    parser.add_argument("--workers", dest="num_workers", type=int, default=8)
-    parser.add_argument("--prefetch", type=int, default=512)
-    parser.add_argument("--stride", dest="signal_stride", type=int, default=6)
-    parser.add_argument("--no_bq", action="store_true", default=False)
-    parser.add_argument("--load_weight_only", action="store_true", default=False)
-    parser.add_argument("--override_lr", action="store_true", default=False)
-    parser.add_argument("--comment", type=str, default="None")
+    parser.add_argument("--gpu", dest="num_gpu", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
+    parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=1000, help="Number of epochs to train")
+    parser.add_argument("--data", dest="data_path", type=str, required=True, help="Path to the dataset")
+    parser.add_argument("--output", type=str, required=True, help="Output directory for saving models and logs")
+    parser.add_argument("--tb", dest="tb_path", type=str, default=None, help="TensorBoard log directory")
+    parser.add_argument("--model", dest="model_type", type=str, default="transformer_prototype_v11", help="Model type")
+    parser.add_argument("--es_delta", type=float, default=1e-5, help="Early stopping delta")
+    parser.add_argument("--es_patience", type=int, default=50, help="Early stopping patience")
+    parser.add_argument("--es_start", type=int, default=1000, help="Epoch to start early stopping")
+    parser.add_argument("--disk_shard_size", type=int, default=4000, help="Disk shard size")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--enc_dim", type=int, default=512, help="Encoder dimension")
+    parser.add_argument("--lin_dim", type=int, default=1024, help="Linear layer dimension")
+    parser.add_argument("--head", type=int, default=8, help="Number of attention heads")
+    parser.add_argument("--enc_layer", type=int, default=6, help="Number of encoder layers")
+    parser.add_argument("--lin_layer", type=int, default=4, help="Number of linear layers")
+    parser.add_argument("--enc_dropout", type=float, default=0.1, help="Dropout rate for encoder")
+    parser.add_argument("--lin_dropout", type=float, default=0.2, help="Dropout rate for linear layers")
+    parser.add_argument("--period", type=int, default=30, help="Period for logging")
+    parser.add_argument("--buffer_size", dest="shuffle_buffer_size", type=int, default=10000, help="Shuffle buffer size")
+    parser.add_argument("--kmer_size", type=int, default=5, help="K-mer size")
+    parser.add_argument("--signal_size", type=int, default=30, help="Signal size")
+    parser.add_argument("--block_len", type=int, default=17, help="Block length")
+    parser.add_argument("--seq_len", type=int, default=200, help="Sequence length")
+    parser.add_argument("--t_act", type=str, default="gelu", help="Activation function for transformer")
+    parser.add_argument("--lin_act", type=str, default="gelu", help="Activation function for linear layers")
+    parser.add_argument("--lr_step", type=int, default=1000, help="Learning rate step size")
+    parser.add_argument("--lr_interval", type=int, default=100, help="Learning rate interval")
+    parser.add_argument("--weight_decay", type=float, default=0.1, help="Weight decay for optimizer")
+    parser.add_argument("--class_ratio", type=int, default=None, help="Class ratio for balancing")
+    parser.add_argument("--log_interval", type=int, default=10, help="Interval for logging")
+    parser.add_argument("--eval_interval", type=int, default=100, help="Interval for evaluation")
+    parser.add_argument("--save_interval", type=int, default=None, help="Interval for saving checkpoints")
+    parser.add_argument("--grad_clip", type=float, default=1.0, help="Gradient clipping value")
+    parser.add_argument("--profiler", type=int, default=0, help="Profiler flag")
+    parser.add_argument("--pin_memory", type=int, default=1, help="Pin memory flag")
+    parser.add_argument("--yield_period", type=int, default=None, help="Yield period for data loading")
+    parser.add_argument("--rlrop", type=float, default=None, help="ReduceLROnPlateau threshold")
+    parser.add_argument("--loss", type=str, default="BCE", help="Loss function")
+    parser.add_argument("--score_feature", type=bool, default=False, help="Score feature flag")
+    parser.add_argument("--gpu_pool", type=int, nargs="+", default=None, help="GPU pool")
+    parser.add_argument("--cut_overlap", type=bool, default=False, help="Cut overlap flag")
+    parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to load checkpoint")
+    parser.add_argument("--workers", dest="num_workers", type=int, default=8, help="Number of workers")
+    parser.add_argument("--prefetch", type=int, default=512, help="Prefetch factor")
+    parser.add_argument("--stride", dest="signal_stride", type=int, default=6, help="Signal stride")
+    parser.add_argument("--no_bq", action="store_true", default=False, help="No base quality flag")
+    parser.add_argument("--load_weight_only", action="store_true", default=False, help="Load weights only flag")
+    parser.add_argument("--override_lr", action="store_true", default=False, help="Override learning rate flag")
+    parser.add_argument("--comment", type=str, default="None", help="Comment for the run")
 
     strfttime = time.strftime("%Y%m%d-%H%M%S")
-    parser.add_argument("--model_name", type=str, default=None)
+    parser.add_argument("--model_name", type=str, default=None, help="Model name")
     args = parser.parse_args()
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
@@ -89,7 +95,6 @@ def parse_args():
         if len(args.gpu_pool) < args.num_gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
     return args
-
 
 
 class Trainer:
@@ -124,7 +129,39 @@ class Trainer:
             no_bq: bool = False,
             **kwargs
     ) -> None:
+        """
+        Initializes the Trainer class.
 
+        Args:
+            rank (int): Rank of the current process.
+            gpu_id (int): GPU ID to use.
+            model (torch.nn.Module): Model to train.
+            train_loader (NanoporeDataLoader): DataLoader for training data.
+            val_loader (NanoporeDataLoader): DataLoader for validation data.
+            optimizer (torch.optim.Optimizer): Optimizer for training.
+            scheduler (torch.optim.lr_scheduler): Learning rate scheduler.
+            loss_func (torch.nn.Module): Loss function.
+            grad_clip (float): Gradient clipping value.
+            metric_func_dict (dict): Dictionary of metric functions.
+            checkpoint_path (str): Path to save checkpoints.
+            tb_path (str): Path for TensorBoard logs.
+            es_start (int): Epoch to start early stopping.
+            es_patience (int): Patience for early stopping.
+            es_delta (float): Delta for early stopping.
+            model_name (str): Name of the model.
+            num_gpu (int): Number of GPUs to use.
+            lr_interval (int): Interval for learning rate updates.
+            eval_interval (int): Interval for evaluation.
+            log_interval (int): Interval for logging.
+            save_interval (int): Interval for saving checkpoints.
+            model_config (dict, optional): Model configuration dictionary. Defaults to None.
+            soft_label (float, optional): Soft label value. Defaults to None.
+            score_feature (bool, optional): Score feature flag. Defaults to False.
+            cut_overlap (bool, optional): Cut overlap flag. Defaults to False.
+            signal_stride (int, optional): Signal stride. Defaults to 6.
+            no_bq (bool, optional): No base quality flag. Defaults to False.
+            **kwargs: Additional keyword arguments.
+        """
         self.rank = rank
         self.gpu_id = gpu_id
         self.model = model
@@ -167,16 +204,20 @@ class Trainer:
         self.signal_stride = signal_stride
         self.histogram = False
         self.no_bq = no_bq
-        if self.rank == 0:
+        if self.rank == 0 and self.tb_path is not None:
             self.tb_writer = SummaryWriter(tb_path)
         else:
             self.tb_writer = None
 
         self.eval_sources, self.eval_targets = self._cache_eval_data()
 
-        ## END of __init__
-
     def _cache_eval_data(self):
+        """
+        Caches evaluation data for faster evaluation.
+
+        Returns:
+            tuple: Cached sources and targets for evaluation.
+        """
         sources = []
         targets = []
         with torch.no_grad():
@@ -185,8 +226,17 @@ class Trainer:
                 targets.append(target)
         return sources, targets
 
-
     def _feed_model(self, source, target):
+        """
+        Feeds data to the model and returns the output and target.
+
+        Args:
+            source (dict): Source data.
+            target (torch.Tensor): Target data.
+
+        Returns:
+            tuple: Model output and target.
+        """
         target = target.to(torch.float32).to(self.gpu_id)
         src_kmer = source["kmer_token"].to(self.gpu_id)
         src_signal = source["signal_token"].to(self.gpu_id)
@@ -194,15 +244,23 @@ class Trainer:
 
         if self.no_bq:
             output = self.model(src_kmer, src_signal, src_seg_len)
-
         else:
             src_dwell_bq = source["dwell_bq_token"].to(self.gpu_id)
             output = self.model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
 
         return output, target
 
-
     def _run_batch(self, source, target):
+        """
+        Runs a single batch of training.
+
+        Args:
+            source (dict): Source data.
+            target (torch.Tensor): Target data.
+
+        Returns:
+            None
+        """
         self.optimizer.zero_grad()
         output, target = self._feed_model(source, target)
         loss = self.loss_func(output, target)
@@ -212,15 +270,20 @@ class Trainer:
         self.optimizer.step()
         self.current_batch_loss = loss.item()
         dist.barrier()
-        time.sleep(0.0001*self.gpu_id)
+        time.sleep(0.0001 * self.gpu_id)
         evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
-        evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k,v in self.current_val_metric_dict.items() if (k in ["auroc","ap"])])
+        evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k, v in self.current_val_metric_dict.items() if (k in ["auroc", "ap"])])
         self.pbar.update(1)
         self.pbar.set_postfix_str(evaltext)
         return None
 
-
     def _run_epoch(self):
+        """
+        Runs a single epoch of training.
+
+        Returns:
+            None
+        """
         self.train_loader.set_epoch(self.current_epoch)
         self.val_loader.set_epoch(self.current_epoch)
         self.current_batch = 0
@@ -228,9 +291,9 @@ class Trainer:
         self.current_lr = self.optimizer.param_groups[0]['lr']
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
         dist.barrier()
-        time.sleep(0.03*self.gpu_id)
+        time.sleep(0.03 * self.gpu_id)
         with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
-                       position=self.rank, colour=colour_choice[self.rank%len(colour_choice)], smoothing = 0) as self.pbar:
+                       position=self.rank, colour=colour_choice[self.rank % len(colour_choice)], smoothing=0) as self.pbar:
 
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
@@ -239,7 +302,6 @@ class Trainer:
                 if self.current_step % self.log_interval == 0:
                     current_interval_loss = np.mean(self.current_interval_losses)
                     self.current_interval_losses = []
-                    ## ALL REDUCE LOSS
                     dist.barrier()
                     current_interval_loss = torch.tensor(current_interval_loss).to(self.gpu_id)
                     dist.all_reduce(current_interval_loss, op=dist.ReduceOp.SUM)
@@ -275,11 +337,15 @@ class Trainer:
                 self.current_step += 1
 
         gc.collect()
-
         return None
 
-
     def _run_eval(self):
+        """
+        Runs evaluation on the validation dataset.
+
+        Returns:
+            None
+        """
         self.model.eval()
         val_loss = []
         outputs = []
@@ -299,7 +365,6 @@ class Trainer:
         for metric_name, metric_func in self.metric_func_dict.items():
             metric_dict[metric_name] = metric_func(outputs, targets)
 
-        ## ALL REDUCE LOSS and METRICS
         dist.barrier()
         val_loss = torch.tensor(val_loss).to(self.gpu_id)
         dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
@@ -320,8 +385,13 @@ class Trainer:
         self.model.train()
         return None
 
-
     def _save_checkpoint(self):
+        """
+        Saves the model checkpoint if validation loss improves.
+
+        Returns:
+            None
+        """
 
         if self.best_val_loss - self.current_val_loss > self.es_delta:
             ## Save Model if Improved
@@ -344,8 +414,16 @@ class Trainer:
 
         return None
 
-
     def train(self, max_epochs: int):
+        """
+        Trains the model for a specified number of epochs.
+
+        Args:
+            max_epochs (int): The maximum number of epochs to train the model.
+
+        Returns:
+            None
+        """
         for epoch in range(max_epochs):
             dist.barrier()
             self.current_epoch = epoch
@@ -360,7 +438,18 @@ class Trainer:
     ## END of Class NanoporeTrainer
 
 
-def setup_ddp(rank,world_size,gpu_id):
+def setup_ddp(rank, world_size, gpu_id):
+    """
+    Sets up Distributed Data Parallel (DDP) for multi-GPU training.
+
+    Args:
+        rank (int): Rank of the current process.
+        world_size (int): Total number of processes.
+        gpu_id (int): GPU ID to use.
+
+    Returns:
+        None
+    """
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -369,7 +458,19 @@ def setup_ddp(rank,world_size,gpu_id):
 
 
 def prepare_dataloader(data_path, rank, num_gpu, num_workers, **kwargs):
+    """
+    Prepares the DataLoader for training and validation datasets.
 
+    Args:
+        data_path (str): Path to the dataset directory.
+        rank (int): Rank of the current process.
+        num_gpu (int): Number of GPUs to use.
+        num_workers (int): Number of worker processes.
+        **kwargs: Additional keyword arguments.
+
+    Returns:
+        tuple: A tuple containing the training and validation DataLoaders.
+    """
     if rank == 0:
         printmessage(f"Total number of dataloader workers: {num_workers * num_gpu}")
 
@@ -386,16 +487,25 @@ def prepare_dataloader(data_path, rank, num_gpu, num_workers, **kwargs):
                               rank=rank, num_replicas=num_gpu, num_workers=num_workers,
                               shuffle=False, drop_last=False, **kwargs)
 
-
     return train_loader, val_loader
 
 
 def main_worker(rank, args_dict):
+    """
+    Main worker function for training the model.
+
+    Args:
+        rank (int): Rank of the current process.
+        args_dict (dict): Dictionary of command-line arguments.
+
+    Returns:
+        None
+    """
     gpu_id = args_dict["gpu_pool"][rank]
-    setup_ddp(rank, args_dict["num_gpu"],gpu_id)
+    setup_ddp(rank, args_dict["num_gpu"], gpu_id)
     TransformerModel = importlib.import_module(f"model.{args_dict['model_type']}").TransformerModel
-    model = TransformerModel(d_model = args_dict["enc_dim"], n_heads = args_dict["head"], d_ff = args_dict["lin_dim"],
-                             n_layers = args_dict["enc_layer"], lin_depth = args_dict["lin_layer"],
+    model = TransformerModel(d_model=args_dict["enc_dim"], n_heads=args_dict["head"], d_ff=args_dict["lin_dim"],
+                             n_layers=args_dict["enc_layer"], lin_depth=args_dict["lin_layer"],
                              **args_dict)
     if rank == 0:
         total_params = 0
@@ -415,10 +525,9 @@ def main_worker(rank, args_dict):
     else:
         save_dict = {}
 
-
     model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr = args_dict["lr"], weight_decay = args_dict["weight_decay"])
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args_dict["lr"], weight_decay=args_dict["weight_decay"])
 
     if args_dict["load_checkpoint"] is not None:
         if not args_dict["load_weight_only"]:
@@ -427,19 +536,16 @@ def main_worker(rank, args_dict):
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = args_dict["lr"]
 
-
-
     if args_dict["rlrop"] is not None:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode = "min", factor = 0.5, patience = args_dict["lr_step"],
-                                                               threshold = args_dict["rlrop"], threshold_mode = "rel", cooldown = 0,
-                                                               min_lr = 1e-6, eps = 1e-8)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=args_dict["lr_step"],
+                                                               threshold=args_dict["rlrop"], threshold_mode="rel", cooldown=0,
+                                                               min_lr=1e-6, eps=1e-8)
     else:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max = args_dict["lr_step"], eta_min = 1e-6)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args_dict["lr_step"], eta_min=1e-6)
 
     if args_dict["load_checkpoint"] is not None:
         if not (args_dict["load_weight_only"] or args_dict["override_lr"]):
             scheduler.load_state_dict(save_dict["scheduler_state_dict"])
-
 
     if args_dict["load_checkpoint"] is not None:
         save_dict.clear()
@@ -464,10 +570,10 @@ def main_worker(rank, args_dict):
 
     args_dict["checkpoint_path"] = args_dict["output"]
 
-    train_loader, val_loader = prepare_dataloader(rank = rank, gpu_id = gpu_id, **args_dict)
-    trainer = Trainer(rank = rank, gpu_id = gpu_id, model = model, train_loader = train_loader, val_loader = val_loader,
-                      optimizer = optimizer, scheduler = scheduler, loss_func = loss_func, metric_func_dict = metric_func_dict,
-                      model_config = args_dict, **args_dict)
+    train_loader, val_loader = prepare_dataloader(rank=rank, gpu_id=gpu_id, **args_dict)
+    trainer = Trainer(rank=rank, gpu_id=gpu_id, model=model, train_loader=train_loader, val_loader=val_loader,
+                      optimizer=optimizer, scheduler=scheduler, loss_func=loss_func, metric_func_dict=metric_func_dict,
+                      model_config=args_dict, **args_dict)
 
     printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
@@ -477,13 +583,19 @@ def main_worker(rank, args_dict):
 
 
 def main_master():
+    """
+    Main function to start the training process.
+
+    Returns:
+        None
+    """
     args = parse_args()
     args_dict = vars(args)
 
     torch.multiprocessing.set_sharing_strategy('file_system')
     os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
     os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
-    args_dict["output"]= os.path.join(args_dict["output"], args_dict["model_name"])
+    args_dict["output"] = os.path.join(args_dict["output"], args_dict["model_name"])
     args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
     if args_dict["seed"] is None:
         args_dict["seed"] = np.random.randint(0, 10000000)
@@ -491,10 +603,14 @@ def main_master():
     printmessage(f"Seed: {args_dict['seed']}")
     printmessage(f"Using {args_dict['num_gpu']} GPUs.")
     mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
-    printmessage(f"Training Program Complete.")
+    try:
+        mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
+    except Exception as e:
+        printmessage("Training Program Failed.", msg_type="error", error=e)
+    finally:
+        printmessage("Training Program Complete.")
     return None
 
 
 if __name__ == "__main__":
     main_master()
-

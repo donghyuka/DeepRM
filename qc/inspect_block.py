@@ -39,7 +39,7 @@ def motif_cdf(block_df_dict, color_dict, output):
     return None
 
 
-def motif_composition(block_df_dict, color_dict,  output):
+def motif_composition(block_df_dict,  output):
     ## Plot ratio of nucleotides in each position
     ## Each nucleotide is represented as a box, and the height of the box is the ratio of the nucleotide
 
@@ -145,6 +145,7 @@ def parse_args():
         printmessage("Names detected:",args.name)
     return args
 
+
 def plot_violin(block_df_dict, color_dict, output):
     cb_len = 21
     ## merge df
@@ -179,7 +180,6 @@ def plot_violin(block_df_dict, color_dict, output):
     plt.savefig(f"{output}/bq_violin.png", dpi=300)
 
     return None
-
 
 
 def main():
@@ -262,29 +262,10 @@ def main():
     bq_plot(perfect_block_df_dict, color_dict, args.output)
     plot_violin(perfect_block_df_dict, color_dict, args.output)
     motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    motif_composition(perfect_block_df_dict, color_dict, args.output)
+    motif_composition(perfect_block_df_dict, args.output)
     block_score_distribution(block_df_dict, color_dict, args.output)
 
     return None
-
-
-def plot_motif(perfect_block_df_dict, color_dict, args, motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]):
-
-    for block_name, block_df in perfect_block_df_dict.items():
-        block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
-        perfect_block_df_dict[block_name] = block_df
-
-    for motif in motif_list:
-        motif_block_df_dict= {}
-        for block_name, block_df in perfect_block_df_dict.items():
-            motif_block_df = block_df[block_df["motif"] == motif].copy()
-            motif_block_df_dict[block_name] = motif_block_df
-        print(motif_block_df_dict)
-        bq_plot(motif_block_df_dict, color_dict, args.output, sample=None, comment=f"-{motif}")
-        plot_violin(perfect_block_df_dict, color_dict, args.output)
-
-    return None
-
 
 
 if __name__ == "__main__":

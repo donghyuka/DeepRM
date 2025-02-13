@@ -1,24 +1,23 @@
 import os
-import re
 import sys
-import time
 from datetime import datetime
 import numpy as np
 import pandas as pd
 import psutil
 from colorama import Fore, Style
-from scipy import stats
-import multiprocessing as mp
-
 
 ## This file is a collection of small utility functions that are used in multiple scripts.
-## The functions are not organized or documented.
-## Maybe I will organize them later.
-## Which almost certainly means never.
-## But who knows? Maybe after the release of Half-Life 3 and Python 4.0.
 
+def seq_to_onehot(seq: str):
+    """
+    Converts a nucleotide sequence to a one-hot encoded matrix.
 
-def seq_to_onehot(seq:str):
+    Args:
+        seq (str): Nucleotide sequence (A, C, G, T/U).
+
+    Returns:
+        np.ndarray: One-hot encoded matrix of the sequence.
+    """
     seq = seq.upper()
     seq = seq.replace('T', 'U')
     mapping = dict(zip("ACGU", range(4)))
@@ -28,6 +27,15 @@ def seq_to_onehot(seq:str):
 
 
 def ncid_to_chr(ncid):
+    """
+    Converts an NCBI ID to a chromosome identifier.
+
+    Args:
+        ncid (str): NCBI ID.
+
+    Returns:
+        str: Chromosome identifier.
+    """
     ncid_int = int(ncid.split(".")[0][3:])
     if ncid_int <= 22:
         chr = f"chr{ncid_int}"
@@ -39,24 +47,56 @@ def ncid_to_chr(ncid):
         chr = "chrUnk"
     return chr
 
-REFFLAT_PATH = "/extdata4/baeklab/Hyeonseo/m6A/anno/agat_refflat.base0.pkl"
-def parse_refflat_v2(refflat_path=REFFLAT_PATH, drop_y = False, drop_m = False, drop_unk = True, drop_ver = True, reindex = True):
+
+def parse_refflat_v2(refflat_path):
+    """
+    Parses a RefFlat file and returns a DataFrame with relevant columns.
+
+    Args:
+        refflat_path (str): Path to the RefFlat file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing parsed RefFlat data.
+    """
     refflat_df = pd.read_pickle(refflat_path)
-    refflat_df=refflat_df[refflat_df["cdsEnd"]>=refflat_df["cdsStart"]]
-    refflat_df["chrstrand"]=refflat_df["chr"].astype(str)+refflat_df["strand"]
-    refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]]=refflat_df[["txStart","txEnd","cdsStart","cdsEnd"]].astype(int)
-    refflat_df["exonStarts"]=refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
-    refflat_df["exonEnds"]=refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df = refflat_df[refflat_df["cdsEnd"] >= refflat_df["cdsStart"]]
+    refflat_df["chrstrand"] = refflat_df["chr"].astype(str) + refflat_df["strand"]
+    refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]] = refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]].astype(int)
+    refflat_df["exonStarts"] = refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df["exonEnds"] = refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
     return refflat_df
 
 
 def reformat_transcript_id(transcript_id):
+    """
+    Reformats a transcript ID by removing the version number if it starts with 'EN'.
+
+    Args:
+        transcript_id (str): Transcript ID.
+
+    Returns:
+        str: Reformatted transcript ID.
+    """
     if transcript_id.startswith("EN"):
         transcript_id = transcript_id.split(".")[0]
     return transcript_id
 
 
 def printmessage(*string, color=None, color_time="green", end='\n', msg_type=None, error=None):
+    """
+    Prints a formatted message with optional color and message type.
+
+    Args:
+        *string: Message to print.
+        color (str, optional): Color of the message text.
+        color_time (str, optional): Color of the timestamp.
+        end (str, optional): End character for the print function.
+        msg_type (str, optional): Type of message (error, warning, info, success).
+        error (Exception, optional): Exception to raise after printing the message.
+
+    Returns:
+        None
+    """
     COLOR_FORE_DICT = {'red': Fore.RED, 'green': Fore.GREEN, 'yellow': Fore.YELLOW,
                        'blue': Fore.BLUE, 'magenta': Fore.MAGENTA, 'cyan': Fore.CYAN, 'white': Fore.WHITE}
 
@@ -106,22 +146,39 @@ def printmessage(*string, color=None, color_time="green", end='\n', msg_type=Non
 
 
 def mean_phred(phred):
+    """
+    Calculates the mean Phred quality score.
+
+    Args:
+        phred (np.ndarray or list): Array or list of Phred quality scores.
+
+    Returns:
+        float: Mean Phred quality score.
+    """
     if not isinstance(phred, np.ndarray):
         phred = np.array(phred, dtype=int)
     else:
         phred = phred.astype(int)
-    ## When averaging PHRED scores, note that the PHRED score is logarithmically scaled.
     return -10 * np.log10(np.mean(10 ** (-phred / 10)))
 
 
 def oom_killer(program_name=None, margin=0.01):
+    """
+    Kills the program if memory usage exceeds a certain threshold.
+
+    Args:
+        program_name (str, optional): Name of the program.
+        margin (float, optional): Memory usage threshold as a fraction of total memory.
+
+    Returns:
+        None
+    """
     if program_name is None:
         program_name = os.path.basename(sys.argv[0])
     mem_total = psutil.virtual_memory().total
     mem_threshold = mem_total * margin
     if psutil.virtual_memory().available < mem_threshold:
         printmessage(f"[{program_name}] Memory usage is too high. Killing the program.")
-        ## check if in subprocess
         if os.getppid() == 1:
             printmessage(f"[{program_name}] Parent process is init. Killing the program.")
             sys.exit(1)

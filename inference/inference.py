@@ -2,10 +2,9 @@ import torch
 import os, glob
 import argparse
 import numpy as np
-import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate.inference_dataloader_npz import load_dataset
+from inference.inference_dataloader_npz import load_dataset
 from utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
@@ -19,10 +18,16 @@ import importlib
 
 
 def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
-    parser.add_argument("--data", "-d", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/runs/exp_MRNA/ON0090/ON0090/result/block/block", help="Data path")
-    parser.add_argument("--output", "-o", type=str, default="/extdata4/baeklab/Hyeonseo/m6A/inference/", help="Output path")
+    parser.add_argument("--data", "-d", type=str, required=True, help="Data path")
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
@@ -38,6 +43,14 @@ def parse_args():
 
 
 def main():
+    """
+    Main function to run the evaluation pipeline.
+
+    Steps:
+        1. Parse command-line arguments.
+        2. Create necessary directories.
+        3. Run inference.
+    """
     args = parse_args()
     ## Subdirectories for results: inference, pileup, evaluation, plot
     inference_path = f"{args.output}/inference"
@@ -48,20 +61,38 @@ def main():
     return None
 
 
-def setup_ddp(rank,world_size):
+def setup_ddp(rank, world_size):
+    """
+    Sets up Distributed Data Parallel (DDP) for multi-GPU training.
+
+    Args:
+        rank (int): Rank of the current process.
+        world_size (int): Total number of processes.
+
+    Returns:
+        None
+    """
     if world_size == 0:
         ## use CPU.
         return None
-
     else:
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '12355'
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
         torch.cuda.set_device(rank)
-
     return None
 
+
 def run_inference(args):
+    """
+    Runs the inference process.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
     torch.multiprocessing.set_sharing_strategy('file_system')
     args_dict = vars(args)
     printmessage("Inference Program Started.")
@@ -93,12 +124,21 @@ def run_inference(args):
         print(out_dir)
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
-        mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
+        mp.spawn(inference_worker, nprocs=max(1, args.gpu), args=(args_dict_model,))
     return None
 
 
 def inference_worker(rank, args_dict):
+    """
+    Worker function for running inference on a single GPU.
 
+    Args:
+        rank (int): Rank of the current process.
+        args_dict (dict): Dictionary of command-line arguments.
+
+    Returns:
+        None
+    """
     setup_ddp(rank, args_dict["gpu"])
     if args_dict["gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{rank}'}, weights_only=False)
@@ -106,15 +146,14 @@ def inference_worker(rank, args_dict):
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
 
-
     TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
-    model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
-                             n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
-                             t_act = model_config["t_act"], lin_act = model_config["lin_act"],
-                             encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
-                             kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
-                             spectrogram_size = model_config["spectrogram_size"], block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"])
+    model = TransformerModel(d_model=model_config["enc_dim"], n_heads=model_config["head"], d_ff=model_config["lin_dim"],
+                             n_layers=model_config["enc_layer"], lin_depth=model_config["lin_layer"],
+                             t_act=model_config["t_act"], lin_act=model_config["lin_act"],
+                             encoder_dropout=model_config["enc_dropout"], lin_dropout=model_config["lin_dropout"],
+                             kmer_size=model_config["kmer_size"], signal_size=model_config["signal_size"],
+                             spectrogram_size=model_config["spectrogram_size"], block_len=model_config["block_len"],
+                             seq_len=model_config["seq_len"], signal_stride=model_config["signal_stride"])
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -139,20 +178,19 @@ def inference_worker(rank, args_dict):
     else:
         saved = 0
 
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1,args_dict["gpu"]),
-                               num_files_read_once = args_dict["nfile"], prefetch_factor = args_dict["prefetch"],
-                               worker = args_dict["worker"],
-                               cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
-                               kmer_len = model_config["kmer_size"],
-                               sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
-                               sig_window = model_config["kmer_size"],
-                               resume_from = saved)
+    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], rank, max(1, args_dict["gpu"]),
+                               num_files_read_once=args_dict["nfile"], prefetch_factor=args_dict["prefetch"],
+                               worker=args_dict["worker"],
+                               cb_len=model_config["block_len"] + model_config["kmer_size"] - 1,
+                               kmer_len=model_config["kmer_size"],
+                               sampling=int(model_config["signal_size"] / model_config["kmer_size"]),
+                               sig_window=model_config["kmer_size"],
+                               resume_from=saved)
 
     id_list = []
     pred_list = []
 
-    for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing = 0):
-
+    for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing=0):
         src_kmer = data["kmer_token"].to(rank)
         src_signal = data["signal_token"].to(rank)
         src_seg_len = data["segment_len"].to(rank)
@@ -168,14 +206,14 @@ def inference_worker(rank, args_dict):
             id_list = np.concatenate(id_list)
             pred_list = np.concatenate(pred_list)
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx+saved}.npz"
-            np.savez_compressed(out_path, label_id = id_list, pred = pred_list)
+            np.savez_compressed(out_path, label_id=id_list, pred=pred_list)
             id_list = []
             pred_list = []
 
     id_list = np.concatenate(id_list)
     pred_list = np.concatenate(pred_list)
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.npz"
-    np.savez_compressed(out_path, label_id = id_list, pred = pred_list)
+    np.savez_compressed(out_path, label_id=id_list, pred=pred_list)
 
     if args_dict["gpu"] > 0:
         dist.destroy_process_group()
@@ -183,9 +221,5 @@ def inference_worker(rank, args_dict):
     return None
 
 
-
 if __name__ == "__main__":
     main()
-
-
-

@@ -7,10 +7,23 @@ import numpy as np
 from torch.utils.data import DataLoader, IterableDataset
 from utils.utils import printmessage
 
-## Load Nanopore Dataset from NumPy .npz files
-
+## Partially based on https://discuss.pytorch.org/t/an-iterabledataset-implementation-for-chunked-data/124437
 
 class BinaryClassDatasetIterator:
+    """
+    Iterator for loading binary classification dataset from NPZ files.
+
+    Args:
+        pos_file_paths (list): List of file paths to positive samples.
+        neg_file_paths (list): List of file paths to negative samples.
+        disk_shard_size (int): Size of the disk shard.
+        shuffle_buffer_size (int): Size of the shuffle buffer.
+        shuffle (bool): Whether to shuffle the data.
+        class_ratio (float): Ratio of positive to negative samples.
+        soft_label (bool): Whether to use soft labels.
+        yield_period (int): Period for yielding data.
+        batch_size (int): Batch size for loading data.
+    """
     def __init__(self, pos_file_paths, neg_file_paths, disk_shard_size, shuffle_buffer_size,
                  shuffle = True, class_ratio = 0.5, soft_label = False, yield_period = 1, batch_size = 1):
 
@@ -35,14 +48,36 @@ class BinaryClassDatasetIterator:
         assert self.yield_period <= self.shuffle_buffer_size, "Shuffle period should be less than or equal to shuffle buffer size"
 
     def __iter__(self):
+        """
+        Returns the iterator object itself.
+
+        Returns:
+            BinaryClassDatasetIterator: The iterator object.
+        """
         return self
 
-
     def __next__(self):
+        """
+        Returns the next data from the iterator.
+
+        Returns:
+            tuple: A tuple containing the next data and the current class.
+
+        Raises:
+            StopIteration: If there are no more files to read.
+        """
         return self._next() , self.current_class
 
     def _read_shuffle_data(self, first_read = False):
+        """
+        Reads and shuffles data from NPZ files.
 
+        Args:
+            first_read (bool): Whether it is the first read.
+
+        Returns:
+            None
+        """
         current_buffer = self.buffer[self.current_class]
         len_buffer = len(current_buffer[0])
 
@@ -86,8 +121,13 @@ class BinaryClassDatasetIterator:
         gc.collect()
         return None
 
-
     def _exhaust_buffer(self):
+        """
+        Exhausts the buffer and sets the iterator.
+
+        Returns:
+            None
+        """
         current_buffer = self.buffer[self.current_class]
         assert len(current_buffer[0]) == 1, f"Buffer to be exhausted should have exactly one item, but has {len(current_buffer[0])}"
         data_to_yield = [current_buffer[key_idx][0] for key_idx in range(len(current_buffer))]
@@ -97,8 +137,16 @@ class BinaryClassDatasetIterator:
         gc.collect()
         return None
 
-
     def _set_iterator(self, data_to_yield):
+        """
+        Sets the iterator with the given data.
+
+        Args:
+            data_to_yield (list): List of data to yield.
+
+        Returns:
+            None
+        """
         lengths = [len(data) for data in data_to_yield]
         assert len(set(lengths)) == 1, f"Data lengths are not equal: {lengths}"
         iterator = zip(*data_to_yield)
@@ -107,8 +155,13 @@ class BinaryClassDatasetIterator:
         gc.collect()
         return None
 
-
     def _get_rand_class(self):
+        """
+        Randomly selects a class based on the class ratio.
+
+        Returns:
+            int: The selected class.
+        """
         rand = torch.rand(1).item()
         if rand < self.class_ratio:
             return 0
@@ -116,6 +169,15 @@ class BinaryClassDatasetIterator:
             return 1
 
     def _next(self):
+        """
+        Returns the next data from the iterator.
+
+        Returns:
+            tuple: A tuple containing the next data and the current class.
+
+        Raises:
+            StopIteration: If there are no more files to read.
+        """
         ## Randomly decide between positive and negative data
         if len(self.avail_class) == 0: ## No more data to read in both classes
             raise StopIteration
@@ -154,6 +216,24 @@ class BinaryClassDatasetIterator:
 
 
 class NanoporeDataset(IterableDataset):
+    """
+    Iterable dataset for loading Nanopore data from NPZ files.
+
+    Args:
+        pos_data_path (str): Path to the directory containing positive samples.
+        neg_data_path (str): Path to the directory containing negative samples.
+        batch_size (int): Batch size for loading data.
+        disk_shard_size (int): Size of the disk shard.
+        rank (int): Rank of the current process.
+        num_replicas (int): Number of replicas.
+        shuffle_buffer_size (int): Size of the shuffle buffer.
+        yield_period (int): Period for yielding data.
+        seed (int): Random seed.
+        shuffle (bool): Whether to shuffle the data.
+        drop_last (bool): Whether to drop the last incomplete batch.
+        class_ratio (float): Ratio of positive to negative samples.
+        soft_label (bool): Whether to use soft labels.
+    """
     def __init__(self, pos_data_path, neg_data_path, batch_size, disk_shard_size, rank, num_replicas, shuffle_buffer_size,
                  yield_period = None, seed = 0, shuffle = True, drop_last = True, class_ratio = 1, soft_label = False):
         super(NanoporeDataset).__init__()
@@ -192,14 +272,19 @@ class NanoporeDataset(IterableDataset):
             self.pos_num_shard = min(self.pos_num_shard, int(self.neg_num_shard / self.class_ratio))
             self.neg_num_shard = int(self.pos_num_shard * self.class_ratio)
             self.pos_total_num_shard = self.pos_num_shard * num_replicas
-            self.pos_dataset_size = self.pos_total_num_shard * disk_shard_size
+            self.pos_dataset_size = self.pos_total_num_shard * self.disk_shard_size
             self.neg_total_num_shard = self.neg_num_shard * num_replicas
-            self.neg_dataset_size = self.neg_total_num_shard * disk_shard_size
+            self.neg_dataset_size = self.neg_total_num_shard * self.disk_shard_size
 
         self.dataset_size = self.pos_dataset_size + self.neg_dataset_size
 
-
     def reinit(self):
+        """
+        Reinitializes the dataset using worker information.
+
+        Returns:
+            None
+        """
         ## After replicating the dataset, reinitialize the dataset using worker_info
         worker_info = torch.utils.data.get_worker_info()
 
@@ -231,9 +316,21 @@ class NanoporeDataset(IterableDataset):
         self.dataset_size = self.pos_dataset_size + self.neg_dataset_size
 
     def __len__(self):
+        """
+        Returns the length of the dataset.
+
+        Returns:
+            int: Number of samples in the dataset.
+        """
         return self.dataset_size
 
     def __iter__(self):
+        """
+        Returns an iterator for the dataset.
+
+        Returns:
+            BinaryClassDatasetIterator: Iterator for the dataset.
+        """
         self.reinit()
         pos_file_paths = self._deterministic_shuffle_and_sample(self.pos_file_paths, self.pos_num_shard, self.pos_total_num_shard)
         neg_file_paths = self._deterministic_shuffle_and_sample(self.neg_file_paths, self.neg_num_shard, self.neg_total_num_shard)
@@ -244,10 +341,30 @@ class NanoporeDataset(IterableDataset):
                                           soft_label = self.soft_label, yield_period = self.yield_period, batch_size = self.batch_size)
 
     def set_epoch(self, epoch: int) -> None:
+        """
+        Sets the epoch for the dataset.
+
+        Args:
+            epoch (int): The epoch number.
+
+        Returns:
+            None
+        """
         self.epoch = epoch
         return None
 
     def _deterministic_shuffle_and_sample(self, data_path_list, num_shard, total_num_shard):
+        """
+        Deterministically shuffles and samples the data paths.
+
+        Args:
+            data_path_list (list): List of data paths.
+            num_shard (int): Number of shards.
+            total_num_shard (int): Total number of shards.
+
+        Returns:
+            list: List of shuffled and sampled data paths.
+        """
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
@@ -279,6 +396,18 @@ class NanoporeDataset(IterableDataset):
 
 
 class NanoporeDataLoader(DataLoader):
+    """
+    DataLoader for loading Nanopore data.
+
+    Args:
+        dataset (NanoporeDataset): The dataset to load data from.
+        batch_size (int): Batch size for loading data.
+        num_workers (int): Number of worker processes.
+        pin_memory (bool): Whether to pin memory.
+        drop_last (bool): Whether to drop the last incomplete batch.
+        collate_fn (callable): Function to collate data into batches.
+        prefetch_factor (int): Number of batches to prefetch.
+    """
     def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
         shuffle = False
         sampler = None
@@ -288,9 +417,24 @@ class NanoporeDataLoader(DataLoader):
                          prefetch_factor=prefetch_factor, persistent_workers=True)
 
     def __len__(self):
+        """
+        Returns the length of the DataLoader.
+
+        Returns:
+            int: Number of batches in the DataLoader.
+        """
         return len(self.dataset) // self.batch_size
 
     def set_epoch(self, epoch: int) -> None:
+        """
+        Sets the epoch for the DataLoader.
+
+        Args:
+            epoch (int): The epoch number.
+
+        Returns:
+            None
+        """
         self.dataset.set_epoch(epoch)
         return None
 
@@ -302,6 +446,37 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
                  seed = 0, shuffle = True, drop_last = True, pad_to = 200, bq_clip = 40,
                  class_ratio = 1, prefetch_factor = 512, pin_memory = True, soft_label = False,
                  num_workers = 4, signal_stride = 6, kmer_size = 5, **kwargs):
+    """
+    Loads the Nanopore dataset using DataLoader.
+
+    Args:
+        pos_data_path (str): Path to the directory containing positive samples.
+        neg_data_path (str): Path to the directory containing negative samples.
+        batch_size (int): Batch size for loading data.
+        disk_shard_size (int): Size of the disk shard.
+        rank (int): Rank of the current process.
+        num_replicas (int): Number of replicas.
+        shuffle_buffer_size (int): Size of the shuffle buffer.
+        yield_period (int): Period for yielding data.
+        seed (int, optional): Random seed. Defaults to 0.
+        shuffle (bool, optional): Whether to shuffle the data. Defaults to True.
+        drop_last (bool, optional): Whether to drop the last incomplete batch. Defaults to True.
+        pad_to (int, optional): Padding length for sequences. Defaults to 200.
+        bq_clip (int, optional): Base quality clipping value. Defaults to 40.
+        class_ratio (float, optional): Ratio of positive to negative samples. Defaults to 1.
+        prefetch_factor (int, optional): Number of batches to prefetch. Defaults to 512.
+        pin_memory (bool, optional): Whether to pin memory. Defaults to True.
+        soft_label (bool, optional): Whether to use soft labels. Defaults to False.
+        num_workers (int, optional): Number of worker processes. Defaults to 4.
+        signal_stride (int, optional): Signal stride. Defaults to 6.
+        kmer_size (int, optional): K-mer size. Defaults to 5.
+        **kwargs: Additional keyword arguments.
+
+
+    Returns:
+        NanoporeDataLoader: DataLoader for loading the dataset.
+    """
+
     pad_collate_func = functools.partial(pad_collate, pad_to = pad_to, signal_stride = signal_stride, kmer_size = kmer_size)
     ## Use DataLoader to load the dataset
     pos_data_paths = glob.glob(f"{pos_data_path}/*.npz")
@@ -333,10 +508,21 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
 
 
 def pad_collate(batch, pad_to, signal_stride, kmer_size, trim = 2):
-    ## Collate function for DataLoader
-    ## Based on NanoporeDataset
-    ## Transform into Batch First
-    ## ORDER: ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token"]
+    """
+    Collate function for DataLoader.
+
+    Args:
+        batch (list): List of samples in the batch.
+        pad_to (int): Padding length for sequences.
+        signal_stride (int): Signal stride.
+        kmer_size (int): K-mer size.
+        trim (int, optional): Trim length. Defaults to 2.
+
+    Returns:
+        tuple: A tuple containing the source and target tensors.
+    """
+    # Transform into Batch First
+    # ORDER: ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token"]
 
     label_list = []
     kmer_token_list = []
