@@ -606,35 +606,6 @@ def save_npz(save_path, df):
     return None
 
 
-def parse_args():
-    """
-    Parses command-line arguments.
-
-    Returns:
-        argparse.Namespace: Parsed command-line arguments.
-    """
-    ## Usage: "python segment_normalize_signal.py --cpu {args.thread} --pod5 {pod5_path} --bam {bam_path} --block {block_path} --output {signal_path}"
-    parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
-    num_cpu = os.cpu_count()
-    parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
-    parser.add_argument("--pod5", "-p", type=str, default=None, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, default=None, help="Dorado BAM file")
-    parser.add_argument("--block", "-k", type=str, default=None, help="Block dataframe path")
-    parser.add_argument("--output", "-o", type=str, default=None, help="Output directory")
-    parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
-    parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
-    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
-    parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files", default=True)
-    parser.add_argument("--skip_intermediate", "-si", action="store_true", help="Skip intermediate files")
-    parser.add_argument("--postfix", "-x", type=str, default="token_dwell_bq", help="Output file postfix")
-    args = parser.parse_args()
-    # if not os.path.exists(args.pod5):
-    #     raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    # if not os.path.exists(args.bam):
-    #     raise FileNotFoundError(f"BAM file {args.bam} does not exist")
-    return args
-
-
 def assign_block_id(block_df):
     """
     Assigns block IDs to the dataframe.
@@ -708,6 +679,39 @@ def get_norm_factor():
     return norm_factor_default
 
 
+def parse_args():
+    """
+    Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+
+    Raises:
+        FileNotFoundError: If the input directory or BAM file does not exist.
+    """
+    ## Usage: "python segment_normalize_signal.py --cpu {args.thread} --pod5 {pod5_path} --bam {bam_path} --block {block_path} --output {signal_path}"
+    parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
+    num_cpu = os.cpu_count()
+    parser.add_argument("--cpu", "-c", type=int, default=int(num_cpu * 0.9), help="Number of threads")
+    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
+    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--block", "-k", type=str, required=True, help="Block dataframe path")
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
+    parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
+    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
+    parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files", default=True)
+    parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
+    args = parser.parse_args()
+    if not os.path.exists(args.pod5):
+        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+    if not os.path.exists(args.bam):
+        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    if not os.path.exists(args.block):
+        raise FileNotFoundError(f"Context Block file {args.block} does not exist")
+    return args
+
+
 def main():
     """
     Main function to segment and normalize signal data.
@@ -733,7 +737,7 @@ def main():
 
     if not args.skip_intermediate:
         if not args.keep_intermediate:
-            atexit.register(lambda: os.system(f"rm -rf {intermediate_path}"))
+            atexit.register(lambda: os.system(f"rm -r {intermediate_path}"))
 
         index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.cpu, args.chunk, args.max_size, args.min_size)
         signal_path_arr = list(index_dict.keys())

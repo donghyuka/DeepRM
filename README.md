@@ -1,4 +1,4 @@
-# AIRNA
+# AIR
 #### Artificial Intelligence for RNA Modification
 
 ## Table of Contents
@@ -18,39 +18,40 @@
 * [Acknowledgements](#acknowledgements)
 
 ## Introduction
-AIRNA is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
-This repository contains the source code for training and running AIRNA.
+AIR is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
+This repository contains the source code for training and running AIR.
 
 ## Usage
 ### Preprocessing
 #### Training Data
 * To preprocess the training data (synthetic oligonucleotide) from the DRS sequencing result (POD5), run the following command:
 ```bash
-python -m preprocess.master_pipeline --input <input_dir> --output <output_file>
+python -m preprocess.master_pipeline --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
 ```
 * This will create:
-  * Files for training: /block/*.npz
+  * Training dataset: /block
   * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
   * Quality check results: /qc/*.png
 
 #### Inference Data
 * To preprocess the inference data (transcriptome) from the DRS sequencing result (POD5), run the following command:
 ```bash
-python -m inference.master_pipeline --input <input_dir> --output <output_path> --ref <reference_file> --dorado <dorado_dir>
+python -m inference.master_pipeline --input <input_POD5_dir> --output <output_path> --ref <reference_fasta> --dorado <dorado_dir>
 ```
 * This will create:
-  * Files for inference: /block/*.npz
+  * Inference dataset: /block
   * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
   * Quality check results: /qc/*.png
 
 ### Training
  * To train the model, run the following command:
 ```bash
-python -m train.train --model airna --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
+python -m train.train --model air_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
 
 ### Inference
+* The trained AIR model file is attached in the repository: `model/air_model.pt`.
 * For inference, run the following command:
 ```bash
 python -m inference.inference --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
@@ -58,7 +59,7 @@ python -m inference.inference --model <model_file> --data <data_dir> --output <p
 * This will create a directory with single-molecule level result files.
 * To get a site-level result, run the following command:
 ```bash
-python -m inference.pileup --input <prediction_dir> --output <pileup_dir> --mpileup <mpileup_file>
+python -m inference.pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
 ```
 * This will create a directory with site-level result files.
 
@@ -83,22 +84,18 @@ pip install -r requirements.txt
 ![airna_architecture.png](docs/images/airna_architecture.png)
 
 ## Installation
-Clone the repository:
-```bash
-git clone https://github.com/vadanamu/AIRNA.git
-cd AIRNA
-```
-PIP and Conda support will be added later.
+Clone the repository to a desired directory.
 
 ## Contributors
 This repository is maintained by the following authors:
 * **Hyeonseo Hwang** - Laboratory of Computational Biology, Seoul National University
 
 ## License
-See the [LICENSE](LICENSE) file for details.
+The repository is not released for public use until publication.
+The current version is provided only for the reviewers of the manuscript.
 
 ## Citation
-If you use AIRNA in your research, please cite the following paper:
+If you use AIR in your research, please cite the following paper:
 ```bibtex
 @article{
   title={},

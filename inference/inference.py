@@ -26,25 +26,27 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
+    parser.add_argument("--model_type", "-t", type=str, default="air_model", help="Model type")
     parser.add_argument("--data", "-d", type=str, required=True, help="Data path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
-    parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device")
+    parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device", dest="num_gpu")
     parser.add_argument("--nfile", "-n", type=int, default=16, help="Number of files to load")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
     parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
-    parser.add_argument("--no_bq", action="store_true", help="No BQ")
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
     parser.add_argument("--gpu_pool", "-gp", type=int, nargs="+", help="GPU pool")
     args = parser.parse_args()
-    if args.gpu is None:
+    if args.num_gpu is None:
         if args.gpu_pool is None:
-            args.gpu = torch.cuda.device_count()
+            args.num_gpu = torch.cuda.device_count()
         else:
-            args.gpu = len(args.gpu_pool)
+            args.num_gpu = len(args.gpu_pool)
+    if args.gpu_pool is None:
+        args.gpu_pool = list(range(args.num_gpu))
     return args
 
 
@@ -100,8 +102,8 @@ def run_inference(args):
     torch.multiprocessing.set_sharing_strategy('file_system')
     args_dict = vars(args)
     printmessage("Inference Program Started.")
-    if args_dict["gpu"] > 0:
-        printmessage(f"Using {args.gpu} GPUs.")
+    if args_dict["num_gpu"] > 0:
+        printmessage(f"Using {args_dict['num_gpu']} GPUs.")
     else:
         printmessage("Using CPU.")
 
@@ -128,7 +130,7 @@ def run_inference(args):
         print(out_dir)
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
-        mp.spawn(inference_worker, nprocs=max(1, args.gpu), args=(args_dict_model,))
+        mp.spawn(inference_worker, nprocs=max(1, args_dict['num_gpu']), args=(args_dict_model,))
     return None
 
 
@@ -145,13 +147,13 @@ def inference_worker(rank, args_dict):
     """
     gpu_id = args_dict["gpu_pool"][rank]
     setup_ddp(rank, args_dict["num_gpu"], gpu_id)
-    if args_dict["gpu"] > 0:
+    if args_dict["num_gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
     else:
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
     model_config = save_dict["model_config"]
 
-    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
+    TransformerModel = importlib.import_module(f"model.{args_dict['model_type']}").TransformerModel
     model = TransformerModel(d_model=model_config["enc_dim"], n_heads=model_config["head"], d_ff=model_config["lin_dim"],
                              n_layers=model_config["enc_layer"], lin_depth=model_config["lin_layer"],
                              t_act=model_config["t_act"], lin_act=model_config["lin_act"],
@@ -165,11 +167,11 @@ def inference_worker(rank, args_dict):
             params = parameter.numel()
             total_params += params
         printmessage(f"Total Params: {total_params:,}")
-    if args_dict["gpu"] > 0:
+    if args_dict["num_gpu"] > 0:
         model.to(gpu_id)
     model.load_state_dict(state_dict=save_dict["model_state_dict"])
     save_dict.clear()
-    if args_dict["gpu"] > 0:
+    if args_dict["num_gpu"] > 0:
         model = DDP(model, device_ids=[gpu_id], output_device=gpu_id, find_unused_parameters=False)
     model.eval()
 
@@ -183,7 +185,7 @@ def inference_worker(rank, args_dict):
     else:
         saved = 0
 
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1, args_dict["gpu"]),
+    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1, args_dict["num_gpu"]),
                                num_files_read_once=args_dict["nfile"], prefetch_factor=args_dict["prefetch"],
                                worker=args_dict["worker"],
                                cb_len=model_config["block_len"] + model_config["kmer_size"] - 1,
@@ -196,13 +198,17 @@ def inference_worker(rank, args_dict):
     pred_list = []
 
     for idx, data in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), smoothing=0):
-        src_kmer = data["kmer_token"].to(gpu_id)
-        src_signal = data["signal_token"].to(gpu_id)
-        src_seg_len = data["segment_len"].to(gpu_id)
-        src_bq = data["bq_token"].to(gpu_id)
+
+        src_kmer = data["kmer_token"].to(rank)
+        src_signal = data["signal_token"].to(rank)
+        src_seg_len = data["segment_len"].to(rank)
+        src_dwell_motor = data["dwell_motor_token"].to(rank)
+        src_dwell_pore = data["dwell_pore_token"].to(rank)
+        src_bq = data["bq_token"].to(rank)
+        src_dwell_bq = torch.stack([src_dwell_motor, src_dwell_pore, src_bq], dim=-1)
 
         with torch.no_grad():
-            pred = model(src_kmer, src_signal, src_seg_len, src_bq)
+            pred = model(src_kmer, src_signal, src_seg_len, src_dwell_bq)
 
         pred_list.append(pred.cpu().detach().numpy())
         id_list.append(np.array(data["label_id"]))
@@ -220,7 +226,7 @@ def inference_worker(rank, args_dict):
     out_path = f"{args_dict['out_dir']}/inference_{rank}_last.npz"
     np.savez_compressed(out_path, label_id=id_list, pred=pred_list)
 
-    if args_dict["gpu"] > 0:
+    if args_dict["num_gpu"] > 0:
         dist.destroy_process_group()
 
     return None

@@ -165,12 +165,6 @@ def main():
     # delete temp files
     shutil.rmtree(f"{args.output}/temp")
 
-    with np.load(f"{args.output}/pileup.npz", allow_pickle=True) as data:
-        final_df = {key:data[key] for key in data.keys()}
-    final_df = pd.DataFrame(final_df)
-    print(final_df)
-
-
     if isinstance(final_df["label_id"][0],str):
         if final_df["label_id"][0].isnumeric():
             reindex_flag = True

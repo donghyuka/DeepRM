@@ -48,25 +48,6 @@ def ncid_to_chr(ncid):
     return chr
 
 
-def parse_refflat_v2(refflat_path):
-    """
-    Parses a RefFlat file and returns a DataFrame with relevant columns.
-
-    Args:
-        refflat_path (str): Path to the RefFlat file.
-
-    Returns:
-        pd.DataFrame: DataFrame containing parsed RefFlat data.
-    """
-    refflat_df = pd.read_pickle(refflat_path)
-    refflat_df = refflat_df[refflat_df["cdsEnd"] >= refflat_df["cdsStart"]]
-    refflat_df["chrstrand"] = refflat_df["chr"].astype(str) + refflat_df["strand"]
-    refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]] = refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]].astype(int)
-    refflat_df["exonStarts"] = refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
-    refflat_df["exonEnds"] = refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
-    return refflat_df
-
-
 def reformat_transcript_id(transcript_id):
     """
     Reformats a transcript ID by removing the version number if it starts with 'EN'.

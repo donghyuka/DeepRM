@@ -43,6 +43,7 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
         return None
     return signal_segmented
 
+
 def create_segment_len_arr(segment_arr, sampling):
     """
     Creates an array of segment lengths.
@@ -58,44 +59,6 @@ def create_segment_len_arr(segment_arr, sampling):
     segment_len_arr = segment_len_arr // sampling
     return segment_len_arr
 
-def standardise_trim_segment_signal(signal, move, sp, ts, ns, offset, scale, mean, stdev):
-    """
-    Standardizes and trims the signal.
-
-    Args:
-        signal (np.ndarray): The signal to standardize and trim.
-        move (np.ndarray): Move array.
-        sp (int): Start position.
-        ts (int): Trim start.
-        ns (int): Trim end.
-        offset (float): Offset for calibration.
-        scale (float): Scale for calibration.
-        mean (float): Mean for standardization.
-        stdev (float): Standard deviation for standardization.
-
-    Returns:
-        np.ndarray: The standardized and trimmed signal.
-    """
-    signal = signal[sp:]
-    signal_len = len(signal)
-    if ns == 0:
-        ns = signal_len
-    signal = signal[ts:ns]
-    if len(signal) == 0:
-        return None
-    signal = np.flip(signal, axis=0)
-    signal = (signal + offset) * scale
-    signal = (signal - mean) / stdev
-
-    stride = move[0]
-    move = move[1:]
-    move_idx = np.where(move == 1)[0][1:] * stride
-    move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0)
-    signal = np.array_split(signal, move_idx)
-    if len(signal) == 0:
-        return None
-    return signal
 
 def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult):
     """
@@ -638,7 +601,7 @@ def get_label_pos_list(ref, start, cigar, label_df):
     return pos_tuple_list_filtered
 
 
-def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, norm_mode, token_output_path,
+def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df, pid, token_output_path,
                              cb_len=21, kmer_len=5, chunk_size=10000, max_token_len=200, sampling=6,
                              boi="A", dwell_shift=10, sig_window=5):
     """
@@ -650,7 +613,6 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         norm_factor (dict): Dictionary containing normalization factors.
         label_df (pd.DataFrame): DataFrame containing label information.
         pid (int): Process ID.
-        norm_mode (str): Normalization mode ('normalise' or 'standardise').
         token_output_path (str): Path to save the tokenized output.
         cb_len (int, optional): Context block length. Defaults to 21.
         kmer_len (int, optional): K-mer length. Defaults to 5.
@@ -665,18 +627,11 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         None
     """
     trim = kmer_len // 2
-    mean, stdev, quantile_a, quantile_b, shift_mult, scale_mult = None, None, None, None, None, None
 
-    if norm_mode == "normalise":
-        shift_mult = norm_factor["shift_mult"]
-        scale_mult = norm_factor["scale_mult"]
-        quantile_a = norm_factor["quantile_a"]
-        quantile_b = norm_factor["quantile_b"]
-    elif norm_mode == "standardise":
-        mean = norm_factor["mean"]
-        stdev = norm_factor["stdev"]
-    else:
-        raise ValueError(f"Invalid norm_mode: {norm_mode}")
+    shift_mult = norm_factor["shift_mult"]
+    scale_mult = norm_factor["scale_mult"]
+    quantile_a = norm_factor["quantile_a"]
+    quantile_b = norm_factor["quantile_b"]
 
     cb_half_len = cb_len // 2
     buffer = []
@@ -712,16 +667,8 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["dwell_token"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5))
 
-        if norm_mode == "normalise":
-            signal_df["signal"] = signal_df.apply(lambda x: normalise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                          quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
-
-        elif norm_mode == "standardise":
-            signal_df["signal"] = signal_df.apply(lambda x: standardise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                            x["offset"], x["scale"], mean, stdev), axis=1)
-
-        else:
-            raise ValueError(f"Invalid norm_mode: {norm_mode}")
+        signal_df["signal"] = signal_df.apply(lambda x: normalise_trim_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
+                                                                                      quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
 
         signal_df = signal_df[["bq", "seq", "signal", "dwell_token", "pos"]].copy()
         gc.collect()
@@ -866,7 +813,6 @@ def parse_args():
     parser.add_argument("--label", "-l", type=str, required=True, help="Label file")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
-    parser.add_argument("--norm_mode", "-n", type=str, required=True, help="Normalisation mode: normalise or standardise")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output files")
     parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
     parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
@@ -920,7 +866,7 @@ def main():
     """
     args = parse_args()
 
-    token_output_path = f"{args.output}/token_{args.norm_mode}_{args.postfix}/"
+    token_output_path = f"{args.output}/token_{args.postfix}/"
     intermediate_path = f"{args.output}/intermediates/"
     signal_raw_path = f"{intermediate_path}/signal_raw/"
     signal_index_path = f"{intermediate_path}/signal_index.pkl"
@@ -990,7 +936,7 @@ def main():
     proc_list = []
     for pid, signal_paths in enumerate(signal_path_arr_split):
         proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, signal_paths, norm_factor, label_df, pid, args.norm_mode, token_output_path,
+                          args=(args.output, signal_paths, norm_factor, label_df, pid, token_output_path,
                                 args.cb_len, args.kmer_len, args.chunk, args.max_token_len, args.sampling, args.boi))
         proc_list.append(proc)
         proc.start()

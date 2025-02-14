@@ -641,7 +641,7 @@ def parse_args():
     parser.add_argument("--cb", dest="cb_per_bb", type=int, default=3)
     parser.add_argument("--rbq", dest="read_bq_cutoff", type=int, default=7)
     parser.add_argument("--cbq", dest="cb_bq_cutoff", type=int, default=0)
-    parser.add_argument("--fi", dest="flush_interval", type=int, default=1000) # smaller->faster, larger->less memory
+    parser.add_argument("--fi", dest="flush_interval", type=int, default=1000)
     parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
     parser.add_argument("--min", dest="min_read_length", type=int, default=0)
     parser.add_argument("--sample", dest="sample", type=int, default=None)

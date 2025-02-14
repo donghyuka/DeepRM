@@ -27,12 +27,12 @@ def parse_args():
     parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
     parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
     parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=1000, help="Number of epochs to train")
     parser.add_argument("--data", dest="data_path", type=str, required=True, help="Path to the dataset")
     parser.add_argument("--output", type=str, required=True, help="Output directory for saving models and logs")
     parser.add_argument("--tb", dest="tb_path", type=str, default=None, help="TensorBoard log directory")
-    parser.add_argument("--model", dest="model_type", type=str, default="transformer_prototype_v11", help="Model type")
+    parser.add_argument("--model", dest="model_type", type=str, default="air_model", help="Model type")
     parser.add_argument("--es_delta", type=float, default=1e-5, help="Early stopping delta")
     parser.add_argument("--es_patience", type=int, default=50, help="Early stopping patience")
     parser.add_argument("--es_start", type=int, default=1000, help="Epoch to start early stopping")
@@ -44,21 +44,21 @@ def parse_args():
     parser.add_argument("--enc_layer", type=int, default=6, help="Number of encoder layers")
     parser.add_argument("--lin_layer", type=int, default=4, help="Number of linear layers")
     parser.add_argument("--enc_dropout", type=float, default=0.1, help="Dropout rate for encoder")
-    parser.add_argument("--lin_dropout", type=float, default=0.2, help="Dropout rate for linear layers")
+    parser.add_argument("--lin_dropout", type=float, default=0.1, help="Dropout rate for linear layers")
     parser.add_argument("--period", type=int, default=30, help="Period for logging")
-    parser.add_argument("--buffer_size", dest="shuffle_buffer_size", type=int, default=10000, help="Shuffle buffer size")
+    parser.add_argument("--buffer_size", dest="shuffle_buffer_size", type=int, default=160000, help="Shuffle buffer size")
     parser.add_argument("--kmer_size", type=int, default=5, help="K-mer size")
     parser.add_argument("--signal_size", type=int, default=30, help="Signal size")
     parser.add_argument("--block_len", type=int, default=17, help="Block length")
     parser.add_argument("--seq_len", type=int, default=200, help="Sequence length")
     parser.add_argument("--t_act", type=str, default="gelu", help="Activation function for transformer")
     parser.add_argument("--lin_act", type=str, default="gelu", help="Activation function for linear layers")
-    parser.add_argument("--lr_step", type=int, default=1000, help="Learning rate step size")
+    parser.add_argument("--lr_step", type=int, default=4000, help="Learning rate step size")
     parser.add_argument("--lr_interval", type=int, default=100, help="Learning rate interval")
     parser.add_argument("--weight_decay", type=float, default=0.1, help="Weight decay for optimizer")
     parser.add_argument("--class_ratio", type=int, default=None, help="Class ratio for balancing")
     parser.add_argument("--log_interval", type=int, default=10, help="Interval for logging")
-    parser.add_argument("--eval_interval", type=int, default=100, help="Interval for evaluation")
+    parser.add_argument("--eval_interval", type=int, default=1000, help="Interval for evaluation")
     parser.add_argument("--save_interval", type=int, default=None, help="Interval for saving checkpoints")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="Gradient clipping value")
     parser.add_argument("--profiler", type=int, default=0, help="Profiler flag")
@@ -91,7 +91,7 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.model_name is None:
-        args.model_name = f"AIRNA-DW-{args.model_type.split('_')[-1]}-{args.comment}-{strfttime}"
+        args.model_name = f"AIR-{args.model_type.split('_')[-1]}-{args.comment}-{strfttime}"
     if args.yield_period is None:
         args.yield_period = args.disk_shard_size
     if args.save_interval is None:
@@ -99,6 +99,7 @@ def parse_args():
     else:
         if len(args.gpu_pool) < args.num_gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
+
     return args
 
 
