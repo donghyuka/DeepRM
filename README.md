@@ -1,5 +1,5 @@
-# AIR
-#### Artificial Intelligence for RNA Modification
+# DeepRM
+#### Deep learning for RNA Modification
 
 ## Table of Contents
 * [Introduction](#introduction)
@@ -18,8 +18,8 @@
 * [Acknowledgements](#acknowledgements)
 
 ## Introduction
-AIR is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
-This repository contains the source code for training and running AIR.
+DeepRM is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
+This repository contains the source code for training and running DeepRM.
 
 ## Usage
 ### Preprocessing
@@ -46,12 +46,12 @@ python -m inference.master_pipeline --input <input_POD5_dir> --output <output_pa
 ### Training
  * To train the model, run the following command:
 ```bash
-python -m train.train --model air_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
+python -m train.train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
 
 ### Inference
-* The trained AIR model file is attached in the repository: `model/air_model.pt`.
+* The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
 python -m inference.inference --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
@@ -78,10 +78,10 @@ pip install -r requirements.txt
 
 ## Design
 ### Pipeline
-![airna_pipeline.png](docs/images/airna_pipeline.png)
+![deeprm_pipeline.png](docs/images/deeprm_pipeline.png)
 
 ### Architecture
-![airna_architecture.png](docs/images/airna_architecture.png)
+![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
 ## Installation
 Clone the repository to a desired directory.
@@ -95,7 +95,7 @@ The repository is not released for public use until publication.
 The current version is provided only for the reviewers of the manuscript.
 
 ## Citation
-If you use AIR in your research, please cite the following paper:
+If you use DeepRM in your research, please cite the following paper:
 ```bibtex
 @article{
   title={},

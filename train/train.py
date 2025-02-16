@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--data", dest="data_path", type=str, required=True, help="Path to the dataset")
     parser.add_argument("--output", type=str, required=True, help="Output directory for saving models and logs")
     parser.add_argument("--tb", dest="tb_path", type=str, default=None, help="TensorBoard log directory")
-    parser.add_argument("--model", dest="model_type", type=str, default="air_model", help="Model type")
+    parser.add_argument("--model", dest="model_type", type=str, default="deeprm_model", help="Model type")
     parser.add_argument("--es_delta", type=float, default=1e-5, help="Early stopping delta")
     parser.add_argument("--es_patience", type=int, default=50, help="Early stopping patience")
     parser.add_argument("--es_start", type=int, default=1000, help="Epoch to start early stopping")
@@ -91,7 +91,7 @@ def parse_args():
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.model_name is None:
-        args.model_name = f"AIR-{args.model_type.split('_')[-1]}-{args.comment}-{strfttime}"
+        args.model_name = f"{args.model_type}-{args.comment}-{strfttime}"
     if args.yield_period is None:
         args.yield_period = args.disk_shard_size
     if args.save_interval is None:

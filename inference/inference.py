@@ -26,7 +26,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
-    parser.add_argument("--model_type", "-t", type=str, default="air_model", help="Model type")
+    parser.add_argument("--model_type", "-t", type=str, default="deeprm_model", help="Model type")
     parser.add_argument("--data", "-d", type=str, required=True, help="Data path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
