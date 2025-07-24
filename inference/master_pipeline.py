@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument("--base", "-x", type=str, default="A", help="Base of Interest")
     parser.add_argument("--comment", "-c", type=str, default="", help="Comment")
     parser.add_argument("--ivt", "-v", action="store_true", default=False, help="Option for IVT sample. Disables trimming.")
+    parser.add_argument("--qc", "-q", action="store_true", default=False, help="Perform QC.")
     parser.add_argument("--dry", "-y", action="store_true", default=False, help="Dry run")
     args = parser.parse_args()
 
@@ -104,7 +105,7 @@ def main():
 
     if 1 in args.step:
         ## step 1. Run Dorado Basecaller and SAMtools
-        printmessage(f"[Step 1/3] Running Dorado Basecaller and SAMtools")
+        printmessage(f"[Step 1/2] Running Dorado Basecaller and SAMtools")
 
         if args.batch is not None:
             args.batch = f"-b {args.batch}"
@@ -129,27 +130,17 @@ def main():
         cmd = f"samtools index -@ {args.cpu} {bam_path}"
         print_run(cmd, args.dry)
 
-        cmd = f"python -m qc.inspect_alignment -i {bam_path} -o {qc_path} -r {args.ref} -c {args.cpu} -m 30 -b 7"
-        print_run(cmd, args.dry)
+        if args.qc:
+            ## Run QC
+            cmd = f"python -m qc.inspect_alignment -i {bam_path} -o {qc_path} -r {args.ref} -c {args.cpu} -m 30 -b 7"
+            print_run(cmd, args.dry)
 
-        cmd = f"python -m qc.inspect_run -i {bam_path} -o {qc_path} --mrna"
-        print_run(cmd, args.dry)
-
+            cmd = f"python -m qc.inspect_run -i {bam_path} -o {qc_path} --mrna"
+            print_run(cmd, args.dry)
 
     if 2 in args.step:
-        ## step 2. Run Pileup and Label
-        printmessage(f"[Step 2/3] Running Pileup and Label")
-
-        cmd = f"samtools mpileup -B -Q 0 -f {args.ref} -a {bam_path} > {raw_pileup_path}"
-        print_run(cmd, args.dry)
-
-        cmd = f"python -m inference.filter_mpileup -i {raw_pileup_path} -o {pileup_path} -c {args.cpu} -m 1"
-        print_run(cmd, args.dry)
-
-
-    if 3 in args.step:
-        ## Step 3. Run tokenize_transcript.py
-        printmessage(f"[Step 3/3] Tokenize Transcript")
+        ## Step 2. Run tokenize_transcript.py
+        printmessage(f"[Step 2/2] Tokenize Transcript")
 
         cmd = f"python -m inference.tokenize_transcript --boi {args.base} -q {args.qcut} -p {args.pod5} -b {bam_path} -o {block_path} -l {pileup_path} -c {args.cpu} -x {args.comment}"
         print_run(cmd, args.dry)

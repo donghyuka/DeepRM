@@ -19,11 +19,13 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cpu", "-c", type=int, default=None, help="Number of CPUs to use")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input path")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
-    parser.add_argument("--mpileup", "-m", type=str, required=True, help="Filtered mpileup file path")
+    parser.add_argument("--output", "-o", type=str, required=True,  help="Output path")
+    parser.add_argument("--mpileup", "-m", type=str, required=True,  help="Label file path")
     parser.add_argument("--pos", "-p", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-e", type=float, default=1e-30, help="Epsilon value")
-    parser.add_argument("--postfix", "-x", type=str, default="final", help="Comment")
+    parser.add_argument("--postfix", "-x", type=str, default="", help="Comment")
+    parser.add_argument("--slice", "-s", type=int, default=None, help="Slice")
+    parser.add_argument("--flip", "-f", action="store_true", help="Flip label")
 
     args = parser.parse_args()
     if args.cpu is None:
@@ -36,16 +38,17 @@ def parse_args():
 
     args.output = os.path.join(args.output, os.path.basename(args.input) + args.postfix)
     os.makedirs(args.output, exist_ok=True)
-    os.makedirs(f"{args.output}/temp", exist_ok=True)
     return args
 
-def worker(pid, file_paths, out_path, threshold_pos = 0.98,epsilon = 1e-30, key_dict={}):
+def worker(pid, file_paths, index_id_dict, out_path,
+           slice= None, threshold_pos = 0.98, epsilon = 1e-30, key_dict={}, flip=False):
     """
     Worker function to process a subset of files.
 
     Args:
         pid (int): Process ID.
         file_paths (list): List of file paths to process.
+        index_id_dict (dict): Dictionary mapping index to label_id.
         out_path (str): Output path.
         threshold_pos (float, optional): Positive threshold. Defaults to 0.98.
         epsilon (float, optional): Epsilon value. Defaults to 1e-30.
@@ -54,6 +57,7 @@ def worker(pid, file_paths, out_path, threshold_pos = 0.98,epsilon = 1e-30, key_
     Returns:
         None
     """
+
     keys = np.concatenate(list(key_dict.values()))
 
     data_dict = {"str": [], "float32": [], "int32": []}
@@ -62,23 +66,33 @@ def worker(pid, file_paths, out_path, threshold_pos = 0.98,epsilon = 1e-30, key_
 
         if path.endswith(".pkl"):
             data_df_all = pd.read_pickle(path)
+            if slice is not None:
+                data_df_all["pred"] = data_df_all["pred"][:,slice]
         elif path.endswith(".tsv"):
             data_df_all = pd.read_csv(path, sep="\t")
+            if slice is not None:
+                data_df_all["pred"] = data_df_all["pred"][:,slice]
         elif path.endswith(".npz"):
             with np.load(path, allow_pickle=True) as data:
                 data_df_all = {key: data[key] for key in data.keys()}
-                data_df_all = pd.DataFrame(data_df_all)
+            if slice is not None:
+                data_df_all["pred"] = data_df_all["pred"][:,slice]
+            data_df_all = pd.DataFrame(data_df_all)
         else:
-            raise ValueError("Input file must be either .tsv or .pkl")
+            raise ValueError("Input file must be either .tsv or .pkl or .npz")
         data_df_all = pd.DataFrame(data_df_all)
-
+        ## Drop NaN values
+        data_df_all = data_df_all.dropna()
         assert np.min(data_df_all["pred"].values) >= 0.0, f"Minimum value of pred is {np.min(data_df_all['pred'].values)}"
         assert np.max(data_df_all["pred"].values) <= 1.0, f"Maximum value of pred is {np.max(data_df_all['pred'].values)}"
+
+        if flip:
+            data_df_all["pred"] = 1 - data_df_all["pred"]
 
         data_df_all["count_all"] = 1
         data_df_all["count_pos"] = data_df_all["pred"].apply(lambda x: 1 if x >= threshold_pos else 0)
         data_df_all["logsum_1_p_pos"] = np.log10(np.clip(1 - data_df_all["pred"].values, epsilon, 1.0)) * data_df_all["count_pos"]
-        data_df_all["kl_div"] = data_df_all["pred"] * np.log2(2*data_df_all["pred"]) + (1-data_df_all["pred"])*np.log2(2*(1-data_df_all["pred"]))
+        data_df_all["kl_div"] = data_df_all["pred"] * np.log2(2*data_df_all["pred"]+epsilon) + (1-data_df_all["pred"])*np.log2(2*(1-data_df_all["pred"])+epsilon)
         data_df_all["kl_div_neg"] = data_df_all["kl_div"] * (data_df_all["pred"] <= 0.5)
         data_df_all["kl_div_pos"] = data_df_all["kl_div"] * (data_df_all["pred"] > 0.5)
         ## groupby label_id
@@ -103,7 +117,7 @@ def worker(pid, file_paths, out_path, threshold_pos = 0.98,epsilon = 1e-30, key_
     gc.collect()
 
     data_dict = data_dict.groupby("label_id").agg({key: "sum" for key in keys if key != "label_id"}).reset_index()
-
+    data_dict["label_id"] = data_dict["label_id"].map(index_id_dict)
     path = f"{out_path}/temp/pileup_temp_{pid}.npz"
 
     np.savez_compressed(path, **{key: data_dict[key].values for key in keys})
@@ -122,10 +136,11 @@ def main():
         None
     """
     args = parse_args()
+    os.makedirs(f"{args.output}/temp", exist_ok=True)
+
     file_paths = glob.glob(f"{args.input}/*.pkl") + glob.glob(f"{args.input}/*.tsv") + glob.glob(f"{args.input}/*.npz")
     proc_list = []
     file_paths_split = np.array_split(file_paths, args.cpu)
-    file_per_worker = np.ceil(len(file_paths) / args.cpu).astype(int)
 
     key_dict = {"str": ["label_id"],
                 "float32": ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos"],
@@ -133,9 +148,28 @@ def main():
 
     keys = np.concatenate(list(key_dict.values()))
 
+    os.makedirs(f"{args.output}/reindex_temp", exist_ok=True)
+
+    if args.mpileup.endswith(".pkl"):
+        label_df = pd.read_pickle(args.mpileup)
+    elif args.mpileup.endswith(".tsv"):
+        label_df = pd.read_csv(args.mpileup, sep="\t")
+    else:
+        raise ValueError("Depth label file must be either .tsv or .pkl")
+
+    label_df["index"] = label_df.index
+    label_df["ref"] = label_df["ref"].apply(reformat_transcript_id)
+    label_df["label_id"] = label_df["ref"] + ":" + (label_df["pos"]-1).astype(str)
+
+    manager = mp.Manager()
+    index_id_dict = dict(zip(label_df["index"], label_df["label_id"]))
+    index_id_dict = manager.dict(index_id_dict)
+
     for pid, file_paths in enumerate(file_paths_split):
-        proc = mp.Process(target=worker, args=(pid, file_paths, args.output,
-                                               args.pos, args.epsilon, key_dict))
+        proc = mp.Process(target=worker, args=(pid, file_paths,
+                                               index_id_dict, args.output, args.slice,
+                                               args.pos, args.epsilon, key_dict, args.flip,
+                                               ))
         proc.start()
         proc_list.append(proc)
     for proc in proc_list:
@@ -159,44 +193,13 @@ def main():
 
     keys = ["label_id", "pm6a", "dom", "count_all", "count_pos", "kl_div_neg", "kl_div_pos", "logsum_1_p_pos"]
 
-    path = f"{args.output}/pileup.npz"
+    path = f"{args.output}/pileup_strid.npz"
     np.savez_compressed(path, **{key: final_df[key].values for key in keys})
 
     # delete temp files
     shutil.rmtree(f"{args.output}/temp")
-
-    if isinstance(final_df["label_id"][0],str):
-        if final_df["label_id"][0].isnumeric():
-            reindex_flag = True
-        else:
-            reindex_flag = False
-    else:
-        reindex_flag = True
-
-    if reindex_flag:
-        if args.mpileup.endswith(".pkl"):
-            label_df = pd.read_pickle(args.mpileup)
-        elif args.mpileup.endswith(".tsv"):
-            label_df = pd.read_csv(args.mpileup, sep="\t")
-        else:
-            raise ValueError("Filtered mpileup file must be either .tsv or .pkl")
-
-
-        label_df["index"] = label_df.index
-        label_df["ref"] = label_df["ref"].apply(reformat_transcript_id)
-        label_df["label_id"] = label_df["ref"] + ":" + (label_df["pos"]-1).astype(str)
-
-        index_id_dict = dict(zip(label_df["index"], label_df["label_id"]))
-        del label_df
-        gc.collect()
-
-        final_df["label_id"] = final_df["label_id"].map(index_id_dict)
-
-        path = f"{args.output}/pileup_strid.npz"
-        np.savez_compressed(path, **{key: final_df[key].values for key in keys})
-        print(final_df)
-
     return None
+
 
 
 if __name__ == "__main__":

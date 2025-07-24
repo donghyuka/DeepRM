@@ -1,12 +1,11 @@
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import torch
-import math
-from torch.utils.data.dataset import Dataset
-from torch.utils.data import DataLoader
 import glob
-from utils.utils import printmessage
+from torch.utils.data import IterableDataset
+from torch.utils.data import DataLoader
+import math
 
-## Partially based on https://discuss.pytorch.org/t/an-iterabledataset-implementation-for-chunked-data/124437 by Majid Hajiheidari
 
 class NanoporeDatasetIterator:
     """
@@ -14,24 +13,47 @@ class NanoporeDatasetIterator:
 
     Args:
         file_paths (list): List of file paths to NPZ files.
-        num_files_read_once (int): Number of files to read at once.
         cb_len (int): Context block length.
         kmer_len (int): K-mer length.
         sampling (int): Sampling rate.
         sig_window (int): Signal window size.
     """
-    def __init__(self, file_paths, num_files_read_once = 1000,
-                 cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5):
+    def __init__(self, file_paths,
+                 cb_len=21, kmer_len=5, sampling=6, sig_window=5,
+                 max_workers=4):
 
         self.file_paths = file_paths
-        self.current_path = None
-        self.num_files_read_once = num_files_read_once
         self.cb_len = cb_len
         self.kmer_len = kmer_len
         self.sampling = sampling
         self.sig_window = sig_window
-        self.cb_lr_pad = (cb_len-kmer_len)//2
-        self.trim = kmer_len//2
+        self.cb_lr_pad = (cb_len - kmer_len) // 2
+        self.trim = kmer_len // 2
+        self.max_workers = max_workers
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._file_index = 0
+        self._futures = []
+
+    def _read_df(self, path):
+        """
+        Reads a single NPZ file and returns the data as a dictionary.
+        Args:
+            path (str): Path to the NPZ file.
+        Returns:
+            dict: Dictionary containing the data from the NPZ file.
+        """
+        npz = np.load(path)
+        data =  {
+            "label_id": npz["label_id"],
+            "segment_len": npz["segment_len_arr"],
+            "signal_token": npz["signal_token"],
+            "kmer_token": npz["kmer_token"],
+            "dwell_motor_token": npz["dwell_motor_token"],
+            "dwell_pore_token": npz["dwell_pore_token"],
+            "bq_token": npz["bq_token"],
+        }
+        npz.close()
+        return data
 
     def __iter__(self):
         """
@@ -41,31 +63,6 @@ class NanoporeDatasetIterator:
             NanoporeDatasetIterator: The iterator object.
         """
         return self
-
-    def _read_df(self, path):
-        """
-        Reads data from an NPZ file.
-
-        Args:
-            path (str): Path to the NPZ file.
-
-        Returns:
-            dict: Dictionary containing the data from the NPZ file.
-        """
-        data = {}
-        try:
-            with np.load(path, allow_pickle=True) as npz:
-                data["label_id"] = npz["label_id"]
-                data["segment_len"] = torch.tensor(npz["segment_len_arr"], dtype=torch.int32)
-                data["signal_token"] = torch.tensor(npz["signal_token"], dtype=torch.float32)
-                data["kmer_token"] = torch.tensor(npz["kmer_token"], dtype=torch.int32)
-                data["dwell_motor_token"] = torch.tensor(npz["dwell_motor_token"], dtype=torch.float32)
-                data["dwell_pore_token"] = torch.tensor(npz["dwell_pore_token"], dtype=torch.float32)
-                data["bq_token"] = torch.tensor(npz["bq_token"], dtype=torch.float32)
-        except:
-            printmessage(f"Error loading {path}")
-            return None
-        return data
 
     def __next__(self):
         """
@@ -77,15 +74,23 @@ class NanoporeDatasetIterator:
         Raises:
             StopIteration: If there are no more files to read.
         """
-        try:
-            self.current_path = self.file_paths.pop(0)
-        except IndexError:
+        if not self._futures:
+            end_index = min(self._file_index + self.max_workers, len(self.file_paths))
+            paths_batch = self.file_paths[self._file_index:end_index]
+            self._futures = [self.executor.submit(self._read_df, p) for p in paths_batch]
+            self._file_index = end_index
+
+        if not self._futures:
             raise StopIteration
-        return self._read_df(self.current_path)
 
-    ## END of BinaryClassDatasetIterator
+        future = self._futures.pop(0)
+        data = future.result()
+        if data is None:
+            return self.__next__()
+        return data
 
-class NanoporeDataset(torch.utils.data.IterableDataset):
+
+class NanoporeDataset(IterableDataset):
     """
     Iterable dataset for loading Nanopore data from NPZ files.
 
@@ -105,51 +110,26 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         resume_from (int): Number of files to skip from the start.
     """
     def __init__(self, data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 seed = 0, num_files_read_once = 1000, cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5,
-                 num_workers = 1, resume_from = 0):
-        super(NanoporeDataset).__init__()
+                 seed=0, num_files_read_once=1000, cb_len=21, kmer_len=5,
+                 sampling=6, sig_window=5, num_workers=1, resume_from=0):
 
+        super().__init__()
         self.data_path = data_path
         self.batch_size = batch_size
         self.disk_shard_size = disk_shard_size
         self.rank = rank
         self.num_replicas = num_replicas
-        self.file_paths = glob.glob(f"{self.data_path}/*.npz")
+        self.file_paths = sorted(glob.glob(f"{self.data_path}/*.npz"))
         self.epoch = 0
         self.seed = seed
-
         self.num_shard = math.ceil(len(self.file_paths)/num_replicas)
         self.num_files_read_once = num_files_read_once
-
         self.cb_len = cb_len
         self.kmer_len = kmer_len
         self.sampling = sampling
         self.sig_window = sig_window
         self.resume_from = resume_from
-
-        if resume_from > 0:
-            if resume_from % num_workers == 0:
-                self.skip = resume_from // num_workers
-            else:
-                worker_info = torch.utils.data.get_worker_info()
-                if worker_info is None:
-                    self.skip = resume_from // num_workers
-                else:
-                    if worker_info.id < resume_from % num_workers:
-                        self.skip = resume_from // num_workers + 1
-                    else:
-                        self.skip = resume_from // num_workers
-        else:
-            self.skip = 0
-
-    def __len__(self):
-        """
-        Returns the length of the dataset.
-
-        Returns:
-            int: Number of shards in the dataset.
-        """
-        return self.num_shard - self.resume_from
+        self.skip = 0
 
     def __iter__(self):
         """
@@ -160,17 +140,36 @@ class NanoporeDataset(torch.utils.data.IterableDataset):
         """
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
-            self.file_paths = self.file_paths[self.rank::self.num_replicas]
+            id = self.rank
+            nw = self.num_replicas
         else:
-            id = worker_info.id + self.rank * worker_info.num_workers
-            nw = worker_info.num_workers * self.num_replicas
-            self.file_paths = self.file_paths[id::nw]
+            id = self.rank * worker_info.num_workers + worker_info.id
+            nw = self.num_replicas * worker_info.num_workers
 
-        if self.skip > 0:
-            self.file_paths = self.file_paths[self.skip:]
+        # Shard file paths across workers
+        file_paths = self.file_paths[id::nw]
+        if self.resume_from:
+            file_paths = file_paths[self.resume_from:]
 
-        return NanoporeDatasetIterator(self.file_paths, num_files_read_once = self.num_files_read_once,
-                                       cb_len=self.cb_len, kmer_len=self.kmer_len, sampling=self.sampling, sig_window=self.sig_window)
+        return NanoporeDatasetIterator(
+            file_paths,
+            cb_len=self.cb_len,
+            kmer_len=self.kmer_len,
+            sampling=self.sampling,
+            sig_window=self.sig_window,
+            max_workers=16
+        )
+
+
+    def __len__(self):
+        """
+        Returns the length of the dataset.
+
+        Returns:
+            int: Number of shards in the dataset.
+        """
+        return self.num_shard - self.resume_from
+
 
 class NanoporeDataLoader(DataLoader):
     """
@@ -194,6 +193,7 @@ class NanoporeDataLoader(DataLoader):
                          prefetch_factor=prefetch_factor)
 
     ## END of NanoporeDataLoader
+
 
 def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
                  pad_to = 200, bq_clip = 40, num_files_read_once = 1, prefetch_factor = 100000, worker = 16,
@@ -221,11 +221,33 @@ def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
     Returns:
         NanoporeDataLoader: DataLoader for loading the dataset.
     """
-    ## Use DataLoader to load the dataset
+
     batch_size = None
     dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
                               num_files_read_once = num_files_read_once, cb_len = cb_len, kmer_len = kmer_len,
                               sampling = sampling, sig_window = sig_window, num_workers = worker, resume_from = resume_from)
     dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=worker, pin_memory=True, drop_last=False,
-                                    collate_fn = None, prefetch_factor=prefetch_factor)
+                                    collate_fn = collate_fn, prefetch_factor=prefetch_factor)
     return dataloader
+
+
+
+def collate_fn(batch):
+    """
+    Collate function to process a batch of data from the Nanopore dataset.
+    Args:
+        batch (list): List of dictionaries containing data from the dataset.
+    Returns:
+        dict: Dictionary containing processed data ready for model input.
+    """
+    source = {}
+    source["label_id"] = batch["label_id"]
+    source["segment_len"] = torch.tensor(batch["segment_len"], dtype=torch.int32)
+    source["signal_token"] = torch.tensor(batch["signal_token"], dtype=torch.float32)
+    source["kmer_token"] = torch.tensor(batch["kmer_token"], dtype=torch.int32)
+    source["dwell_bq_token"] = torch.tensor(np.stack((batch["dwell_motor_token"],
+                                                      batch["dwell_pore_token"],
+                                                      batch["bq_token"],
+                                                      ),
+                                                     axis=-1), dtype=torch.float32)
+    return source

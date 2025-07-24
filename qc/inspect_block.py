@@ -1,18 +1,18 @@
 
 import pandas as pd
 import numpy as np
-import multiprocessing as mp
-import os, argparse, tqdm, gc, glob
-from collections import defaultdict
-from utils.utils import mean_phred, seq_to_onehot
-import pysam
-from tqdm import tqdm
+import os
+from utils.utils import seq_to_onehot
 from matplotlib import pyplot as plt
 import seaborn as sns
 import pickle
 import argparse
 from utils.utils import printmessage
+import itertools as it
 
+plt.style.use('default')
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.framealpha': 1, "legend.frameon": 1, "lines.linewidth": 2})
 def motif_cdf(block_df_dict, color_dict, output):
 
     motif_cdf_dict = {}
@@ -39,7 +39,7 @@ def motif_cdf(block_df_dict, color_dict, output):
     return None
 
 
-def motif_composition(block_df_dict,  output):
+def motif_composition(block_df_dict, color_dict,  output):
     ## Plot ratio of nucleotides in each position
     ## Each nucleotide is represented as a box, and the height of the box is the ratio of the nucleotide
 
@@ -64,13 +64,35 @@ def motif_composition(block_df_dict,  output):
     return None
 
 
+def nucleotide_composition(block_df_dict, color_dict,  output):
+    ## Plot ratio of nucleotides in pie chart
+    nrows =  2
+    ncols =  int(np.ceil(len(block_df_dict)/nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(8*ncols, 8*nrows))
+    for i, (block_name, block_df) in enumerate(block_df_dict.items()):
+        ax = axes[i//ncols, i%ncols]
+        motif = block_df["motif"].apply(lambda x: seq_to_onehot(x))
+        motif_sum = motif.to_numpy().sum(axis=0)
+        motif_sum = np.concatenate([motif_sum[:motif_sum.shape[0]//2], motif_sum[motif_sum.shape[0]//2+1:]]).sum(axis=0)
+        motif_sum = motif_sum/np.sum(motif_sum)
+        ax.pie(motif_sum, labels=["A","C","G","U"], autopct='%1.1f%%')
+        ax.set_title(f"{block_name}")
+        ax.set_ylabel("")
+        ax.set_xlabel("")
+
+    plt.savefig(f"{output}/nucleotide_composition.png", dpi=300)
+    plt.close()
+
+    return None
+
+
 def bq_plot(block_df_dict, color_dict, output, sample=int(1e+4), comment=""):
     ## Plot the distribution of base quality. Plot position-wise mean with CI95.
 
     stat_dict = {}
     for block_name, block_df in block_df_dict.items():
         if sample is not None:
-            block_df = block_df.sample(sample)
+            block_df = block_df.sample(min(sample, len(block_df))).copy()
         bq_arr = np.stack(block_df["bq"].values, axis=0)
         bq_mean = np.mean(bq_arr, axis=0)
         bq_std = np.std(bq_arr, axis=0)
@@ -100,8 +122,11 @@ def block_score_distribution(block_df_dict, color_dict, output):
     plt.rcParams.update({'font.size': 24})
     fig, ax = plt.subplots(figsize=(20,20))
     for block_name, block_df in block_df_dict.items():
-        sns.kdeplot(block_df["block_score"], ax=ax, label=f"{block_name} (n={len(block_df):,})",
-                    color=color_dict[block_name], bw_adjust=4, linewidth=5)
+        if "block_score" in block_df.columns:
+            block_df["score"] = block_df["block_score"]
+        sns.histplot(block_df["score"], ax=ax, label=f"{block_name} (n={len(block_df):,})",
+                     color=color_dict[block_name], linewidth=5, element="step", stat="density",
+                     fill=False, binwidth = 5)
     ax.set_title("Block Score Distribution")
     ax.set_xlabel("Block Score")
     ax.set_ylabel("Density")
@@ -114,11 +139,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
     parser.add_argument("--intermediate", "-i", type=str, nargs="+", default = None,  help="Intermediate files prefix")
-    parser.add_argument("--penalty", "-p", type=int, default=10, help="Penalty cutoff")
+    parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
     parser.add_argument("--block", "-k", type=str, required=True, nargs="+", help="Block file")
     parser.add_argument("--name", "-n", type=str, default = None, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
     parser.add_argument("--sample", "-s", type=int, default=int(1e+6), help="Sampling fraction")
+    parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
     args = parser.parse_args()
     assert len(args.block) == len(args.type)
     assert all([os.path.exists(b) for b in args.block])
@@ -145,15 +171,13 @@ def parse_args():
         printmessage("Names detected:",args.name)
     return args
 
-
-def plot_violin(block_df_dict, color_dict, output):
-    cb_len = 21
+def plot_violin(block_df_dict, color_dict, cb_len, output):
     ## merge df
     df_list = []
     color_list = []
     for name, df in block_df_dict.items():
         df = df[["bq"]].copy()
-        df = df.sample(frac=0.1)
+        # df = df.sample(frac=0.1)
         bq_idx = range(cb_len)
         df["bq_idx"] = np.tile(bq_idx, (len(df),1)).tolist()
         df = df.explode(["bq", "bq_idx"])
@@ -172,7 +196,7 @@ def plot_violin(block_df_dict, color_dict, output):
 
     fig, ax = plt.subplots(1, 1, figsize=(30,10))
     sns.violinplot(x="bq_idx", y="bq", hue="name", data=df, ax=ax, palette=palette, linewidth=0.5,
-                     inner=None, hue_order=list(block_df_dict.keys()))
+                   inner=None, hue_order=list(block_df_dict.keys()))
     ax.set_title("Base Quality Distribution")
     ax.set_xlabel("Position")
     ax.set_ylabel("Base Quality")
@@ -182,12 +206,13 @@ def plot_violin(block_df_dict, color_dict, output):
     return None
 
 
+
 def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    warm_color_list = ["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"]
-    cool_color_list = ["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"]
+    warm_color_list = it.cycle(["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"])
+    cool_color_list = it.cycle(["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"])
     modified_name_list = ["m6A", "m1A", "Am", "I",
                           "m5C", "hm5C", "Cm",
                           "m7G", "m1G", "Gm",
@@ -200,9 +225,9 @@ def main():
     for block, name, block_type in zip(args.block, args.name, args.type):
         block_name = f"{name} ({block_type})"
         if block_type in modified_name_list:
-            color = warm_color_list.pop(0)
+            color = next(warm_color_list)
         else:
-            color = cool_color_list.pop(0)
+            color = next(cool_color_list)
         color_dict[block_name] = color
 
     load_success = False
@@ -245,11 +270,10 @@ def main():
         for block, name, block_type in zip(args.block, args.name, args.type):
             block_name = f"{name} ({block_type})"
             block_df = pd.read_pickle(block)
-            block_df["block_score"] = block_df["penalty"].apply(lambda x: 1-(x/args.penalty))
-            perfect_block_df = block_df[block_df["penalty"] == 0]
-            perfect_block_df = perfect_block_df.sample(args.sample).copy()
+            perfect_block_df = block_df[block_df["score"] >= args.score]
+            perfect_block_df = perfect_block_df.sample(min(args.sample, len(perfect_block_df))).copy()
             perfect_block_df_dict[block_name] = perfect_block_df
-            block_df = block_df.sample(args.sample).copy()
+            block_df = block_df.sample(min(args.sample, len(block_df))).copy()
             block_df_dict[block_name] = block_df
 
     if not output_file_exists:
@@ -259,13 +283,33 @@ def main():
         with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
             pickle.dump(perfect_block_df_dict, f)
 
+    nucleotide_composition(perfect_block_df_dict, color_dict, args.output)
+    motif_composition(perfect_block_df_dict, color_dict, args.output)
     bq_plot(perfect_block_df_dict, color_dict, args.output)
-    plot_violin(perfect_block_df_dict, color_dict, args.output)
+    plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
     motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    motif_composition(perfect_block_df_dict, args.output)
     block_score_distribution(block_df_dict, color_dict, args.output)
 
     return None
+
+
+def plot_motif(perfect_block_df_dict, color_dict, args, motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]):
+
+    for block_name, block_df in perfect_block_df_dict.items():
+        block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
+        perfect_block_df_dict[block_name] = block_df
+
+    for motif in motif_list:
+        motif_block_df_dict= {}
+        for block_name, block_df in perfect_block_df_dict.items():
+            motif_block_df = block_df[block_df["motif"] == motif].copy()
+            motif_block_df_dict[block_name] = motif_block_df
+        print(motif_block_df_dict)
+        bq_plot(motif_block_df_dict, color_dict, args.output, sample=None, comment=f"-{motif}")
+        plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
+
+    return None
+
 
 
 if __name__ == "__main__":

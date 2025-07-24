@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="deep1" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="sonic@147.47.218.58:7777 password">
+      <paths name="deep1">
         <serverdata>
           <mappings>
-            <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/modformer" local="$PROJECT_DIR$" />
+            <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/release" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

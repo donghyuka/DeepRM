@@ -1,0 +1,936 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>inference package &mdash; DeepRM 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="preprocess package" href="preprocess.html" />
+    <link rel="prev" title="API Reference" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            DeepRM
+              <img src="../_static/deeprm_architecture.png" class="logo" alt="Logo"/>
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick‑start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../usage.html">Usage Guide</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">inference package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.filter_mpileup">inference.filter_mpileup module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.filter_mpileup.filter_pileup"><code class="docutils literal notranslate"><span class="pre">filter_pileup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.filter_mpileup.filter_pileup_proc"><code class="docutils literal notranslate"><span class="pre">filter_pileup_proc()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.filter_mpileup.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.filter_mpileup.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.filter_mpileup.process_df"><code class="docutils literal notranslate"><span class="pre">process_df()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.inference">inference.inference module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.inference_loop"><code class="docutils literal notranslate"><span class="pre">inference_loop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.inference_worker"><code class="docutils literal notranslate"><span class="pre">inference_worker()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.pred_step"><code class="docutils literal notranslate"><span class="pre">pred_step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.run_inference"><code class="docutils literal notranslate"><span class="pre">run_inference()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference.to_gpu"><code class="docutils literal notranslate"><span class="pre">to_gpu()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.inference_dataloader_npz">inference.inference_dataloader_npz module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDataLoader"><code class="docutils literal notranslate"><span class="pre">NanoporeDataLoader</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDataset"><code class="docutils literal notranslate"><span class="pre">NanoporeDataset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDatasetIterator"><code class="docutils literal notranslate"><span class="pre">NanoporeDatasetIterator</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference_dataloader_npz.collate_fn"><code class="docutils literal notranslate"><span class="pre">collate_fn()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.inference_dataloader_npz.load_dataset"><code class="docutils literal notranslate"><span class="pre">load_dataset()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.master_pipeline">inference.master_pipeline module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.master_pipeline.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.master_pipeline.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.master_pipeline.print_run"><code class="docutils literal notranslate"><span class="pre">print_run()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.pileup">inference.pileup module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.pileup.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.pileup.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.pileup.worker"><code class="docutils literal notranslate"><span class="pre">worker()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-inference.tokenize_transcript">inference.tokenize_transcript module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.create_segment_len_arr"><code class="docutils literal notranslate"><span class="pre">create_segment_len_arr()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.extract_move"><code class="docutils literal notranslate"><span class="pre">extract_move()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.extract_signal_proc"><code class="docutils literal notranslate"><span class="pre">extract_signal_proc()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.get_label_pos_list"><code class="docutils literal notranslate"><span class="pre">get_label_pos_list()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.get_norm_factor"><code class="docutils literal notranslate"><span class="pre">get_norm_factor()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.move_to_dwell"><code class="docutils literal notranslate"><span class="pre">move_to_dwell()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.normalise_trim_segment_signal"><code class="docutils literal notranslate"><span class="pre">normalise_trim_segment_signal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.preprocess_pod5"><code class="docutils literal notranslate"><span class="pre">preprocess_pod5()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.ref_pos_to_query_pos"><code class="docutils literal notranslate"><span class="pre">ref_pos_to_query_pos()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.save_npz"><code class="docutils literal notranslate"><span class="pre">save_npz()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.segment_normalize_signal"><code class="docutils literal notranslate"><span class="pre">segment_normalize_signal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.segmented_signal_to_block"><code class="docutils literal notranslate"><span class="pre">segmented_signal_to_block()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.split_pod5"><code class="docutils literal notranslate"><span class="pre">split_pod5()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.split_pod5_proc"><code class="docutils literal notranslate"><span class="pre">split_pod5_proc()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#inference.tokenize_transcript.write_df"><code class="docutils literal notranslate"><span class="pre">write_df()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="preprocess.html">preprocess package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="train.html">train package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qc.html">qc package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="model.html">model package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="utils.html">utils package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">DeepRM</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API Reference</a></li>
+      <li class="breadcrumb-item active">inference package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/inference.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-inference">
+<span id="inference-package"></span><h1>inference package<a class="headerlink" href="#module-inference" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-inference.filter_mpileup">
+<span id="inference-filter-mpileup-module"></span><h2>inference.filter_mpileup module<a class="headerlink" href="#module-inference.filter_mpileup" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.filter_mpileup.filter_pileup">
+<span class="sig-prename descclassname"><span class="pre">inference.filter_mpileup.</span></span><span class="sig-name descname"><span class="pre">filter_pileup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.filter_mpileup.filter_pileup" title="Link to this definition"></a></dt>
+<dd><p>Filters the pileup file based on the provided arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.filter_mpileup.filter_pileup_proc">
+<span class="sig-prename descclassname"><span class="pre">inference.filter_mpileup.</span></span><span class="sig-name descname"><span class="pre">filter_pileup_proc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df_proc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">collect_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.filter_mpileup.filter_pileup_proc" title="Link to this definition"></a></dt>
+<dd><p>Worker function to filter a subset of the pileup DataFrame.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed command-line arguments.</p></li>
+<li><p><strong>df_proc</strong> (<em>pd.DataFrame</em>) – Subset of the pileup DataFrame to process.</p></li>
+<li><p><strong>collect_dict</strong> (<em>multiprocessing.Manager.dict</em>) – Dictionary to collect results from worker processes.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.filter_mpileup.main">
+<span class="sig-prename descclassname"><span class="pre">inference.filter_mpileup.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.filter_mpileup.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to parse arguments and filter the pileup file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.filter_mpileup.parse_args">
+<span class="sig-prename descclassname"><span class="pre">inference.filter_mpileup.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.filter_mpileup.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.filter_mpileup.process_df">
+<span class="sig-prename descclassname"><span class="pre">inference.filter_mpileup.</span></span><span class="sig-name descname"><span class="pre">process_df</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.filter_mpileup.process_df" title="Link to this definition"></a></dt>
+<dd><p>Processes a DataFrame by creating 5-mer motifs and filtering based on depth and base.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>df</strong> (<em>pd.DataFrame</em>) – DataFrame to process.</p></li>
+<li><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed command-line arguments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Processed DataFrame.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>pd.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-inference.inference">
+<span id="inference-inference-module"></span><h2>inference.inference module<a class="headerlink" href="#module-inference.inference" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.inference_loop">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">inference_loop</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rank</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpu_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_loader</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.inference_loop" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.inference_worker">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">inference_worker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rank</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.inference_worker" title="Link to this definition"></a></dt>
+<dd><p>Worker function for running inference on a single GPU.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>rank</strong> (<em>int</em>) – Rank of the current process.</p></li>
+<li><p><strong>args_dict</strong> (<em>dict</em>) – Dictionary of command-line arguments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.main">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to run the evaluation pipeline.</p>
+<dl class="simple">
+<dt>Steps:</dt><dd><ol class="arabic simple">
+<li><p>Parse command-line arguments.</p></li>
+<li><p>Create necessary directories.</p></li>
+<li><p>Run inference.</p></li>
+</ol>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.parse_args">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.pred_step">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">pred_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.pred_step" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.run_inference">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">run_inference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.run_inference" title="Link to this definition"></a></dt>
+<dd><p>Runs the inference process.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference.to_gpu">
+<span class="sig-prename descclassname"><span class="pre">inference.inference.</span></span><span class="sig-name descname"><span class="pre">to_gpu</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rank</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference.to_gpu" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-inference.inference_dataloader_npz">
+<span id="inference-inference-dataloader-npz-module"></span><h2>inference.inference_dataloader_npz module<a class="headerlink" href="#module-inference.inference_dataloader_npz" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="inference.inference_dataloader_npz.NanoporeDataLoader">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">inference.inference_dataloader_npz.</span></span><span class="sig-name descname"><span class="pre">NanoporeDataLoader</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDataset" title="inference.inference_dataloader_npz.NanoporeDataset"><span class="pre">NanoporeDataset</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_workers</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pin_memory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">drop_last</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">collate_fn</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefetch_factor</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference_dataloader_npz.NanoporeDataLoader" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code></p>
+<p>DataLoader for loading Nanopore data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>dataset</strong> (<a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDataset" title="inference.inference_dataloader_npz.NanoporeDataset"><em>NanoporeDataset</em></a>) – The dataset to load data from.</p></li>
+<li><p><strong>batch_size</strong> (<em>int</em>) – Batch size for loading data.</p></li>
+<li><p><strong>num_workers</strong> (<em>int</em>) – Number of worker processes.</p></li>
+<li><p><strong>pin_memory</strong> (<em>bool</em>) – Whether to pin memory.</p></li>
+<li><p><strong>drop_last</strong> (<em>bool</em>) – Whether to drop the last incomplete batch.</p></li>
+<li><p><strong>collate_fn</strong> (<em>callable</em>) – Function to collate data into batches.</p></li>
+<li><p><strong>prefetch_factor</strong> (<em>int</em>) – Number of batches to prefetch.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="inference.inference_dataloader_npz.NanoporeDataset">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">inference.inference_dataloader_npz.</span></span><span class="sig-name descname"><span class="pre">NanoporeDataset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">disk_shard_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rank</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_replicas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_files_read_once</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">21</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_workers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resume_from</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference_dataloader_npz.NanoporeDataset" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">IterableDataset</span></code></p>
+<p>Iterable dataset for loading Nanopore data from NPZ files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data_path</strong> (<em>str</em>) – Path to the directory containing NPZ files.</p></li>
+<li><p><strong>batch_size</strong> (<em>int</em>) – Batch size for loading data.</p></li>
+<li><p><strong>disk_shard_size</strong> (<em>int</em>) – Size of the disk shard.</p></li>
+<li><p><strong>rank</strong> (<em>int</em>) – Rank of the current process.</p></li>
+<li><p><strong>num_replicas</strong> (<em>int</em>) – Number of replicas.</p></li>
+<li><p><strong>seed</strong> (<em>int</em>) – Random seed.</p></li>
+<li><p><strong>num_files_read_once</strong> (<em>int</em>) – Number of files to read at once.</p></li>
+<li><p><strong>cb_len</strong> (<em>int</em>) – Context block length.</p></li>
+<li><p><strong>kmer_len</strong> (<em>int</em>) – K-mer length.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em>) – Signal window size.</p></li>
+<li><p><strong>num_workers</strong> (<em>int</em>) – Number of worker processes.</p></li>
+<li><p><strong>resume_from</strong> (<em>int</em>) – Number of files to skip from the start.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="inference.inference_dataloader_npz.NanoporeDatasetIterator">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">inference.inference_dataloader_npz.</span></span><span class="sig-name descname"><span class="pre">NanoporeDatasetIterator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_paths</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">21</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_workers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference_dataloader_npz.NanoporeDatasetIterator" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Iterator for loading Nanopore dataset from NPZ files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>file_paths</strong> (<em>list</em>) – List of file paths to NPZ files.</p></li>
+<li><p><strong>cb_len</strong> (<em>int</em>) – Context block length.</p></li>
+<li><p><strong>kmer_len</strong> (<em>int</em>) – K-mer length.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em>) – Signal window size.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference_dataloader_npz.collate_fn">
+<span class="sig-prename descclassname"><span class="pre">inference.inference_dataloader_npz.</span></span><span class="sig-name descname"><span class="pre">collate_fn</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference_dataloader_npz.collate_fn" title="Link to this definition"></a></dt>
+<dd><p>Collate function to process a batch of data from the Nanopore dataset.
+:param batch: List of dictionaries containing data from the dataset.
+:type batch: list</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary containing processed data ready for model input.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.inference_dataloader_npz.load_dataset">
+<span class="sig-prename descclassname"><span class="pre">inference.inference_dataloader_npz.</span></span><span class="sig-name descname"><span class="pre">load_dataset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">disk_shard_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rank</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_replicas</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad_to</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">200</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bq_clip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">40</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_files_read_once</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefetch_factor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">100000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">worker</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">16</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">21</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resume_from</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.inference_dataloader_npz.load_dataset" title="Link to this definition"></a></dt>
+<dd><p>Loads the Nanopore dataset using DataLoader.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data_path</strong> (<em>str</em>) – Path to the directory containing NPZ files.</p></li>
+<li><p><strong>batch_size</strong> (<em>int</em>) – Batch size for loading data.</p></li>
+<li><p><strong>disk_shard_size</strong> (<em>int</em>) – Size of the disk shard.</p></li>
+<li><p><strong>rank</strong> (<em>int</em>) – Rank of the current process.</p></li>
+<li><p><strong>num_replicas</strong> (<em>int</em>) – Number of replicas.</p></li>
+<li><p><strong>pad_to</strong> (<em>int</em>) – Padding length for sequences.</p></li>
+<li><p><strong>bq_clip</strong> (<em>int</em>) – Base quality clipping value.</p></li>
+<li><p><strong>num_files_read_once</strong> (<em>int</em>) – Number of files to read at once.</p></li>
+<li><p><strong>prefetch_factor</strong> (<em>int</em>) – Number of batches to prefetch.</p></li>
+<li><p><strong>worker</strong> (<em>int</em>) – Number of worker processes.</p></li>
+<li><p><strong>cb_len</strong> (<em>int</em>) – Context block length.</p></li>
+<li><p><strong>kmer_len</strong> (<em>int</em>) – K-mer length.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em>) – Signal window size.</p></li>
+<li><p><strong>resume_from</strong> (<em>int</em>) – Number of files to skip from the start.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>DataLoader for loading the dataset.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#inference.inference_dataloader_npz.NanoporeDataLoader" title="inference.inference_dataloader_npz.NanoporeDataLoader">NanoporeDataLoader</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-inference.master_pipeline">
+<span id="inference-master-pipeline-module"></span><h2>inference.master_pipeline module<a class="headerlink" href="#module-inference.master_pipeline" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.master_pipeline.main">
+<span class="sig-prename descclassname"><span class="pre">inference.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.master_pipeline.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to run the preprocessing pipeline.</p>
+<dl class="simple">
+<dt>Steps:</dt><dd><ol class="arabic simple">
+<li><p>Run Dorado Basecaller and SAMtools.</p></li>
+<li><p>Run Pileup and Label.</p></li>
+<li><p>Run preproce.py.</p></li>
+</ol>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>FileNotFoundError</strong> – If the input directory does not exist.</p></li>
+<li><p><strong>ValueError</strong> – If the step argument is invalid or if the run name or base of interest cannot be detected.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.master_pipeline.parse_args">
+<span class="sig-prename descclassname"><span class="pre">inference.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.master_pipeline.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>FileNotFoundError</strong> – If the Dorado installation path does not exist.</p></li>
+<li><p><strong>FileNotFoundError</strong> – If the Dorado model does not exist.</p></li>
+<li><p><strong>FileNotFoundError</strong> – If the input directory does not exist.</p></li>
+<li><p><strong>ValueError</strong> – If the step argument is invalid</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.master_pipeline.print_run">
+<span class="sig-prename descclassname"><span class="pre">inference.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">print_run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cmd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.master_pipeline.print_run" title="Link to this definition"></a></dt>
+<dd><p>Print command and run if not dry run.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>cmd</strong> (<em>str</em>) – Command to run.</p></li>
+<li><p><strong>dry</strong> (<em>bool</em>) – Dry run flag.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-inference.pileup">
+<span id="inference-pileup-module"></span><h2>inference.pileup module<a class="headerlink" href="#module-inference.pileup" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.pileup.main">
+<span class="sig-prename descclassname"><span class="pre">inference.pileup.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.pileup.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to parse arguments and process files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.pileup.parse_args">
+<span class="sig-prename descclassname"><span class="pre">inference.pileup.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.pileup.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.pileup.worker">
+<span class="sig-prename descclassname"><span class="pre">inference.pileup.</span></span><span class="sig-name descname"><span class="pre">worker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_paths</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_id_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">slice</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">threshold_pos</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.98</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">epsilon</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1e-30</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key_dict</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.pileup.worker" title="Link to this definition"></a></dt>
+<dd><p>Worker function to process a subset of files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>file_paths</strong> (<em>list</em>) – List of file paths to process.</p></li>
+<li><p><strong>index_id_dict</strong> (<em>dict</em>) – Dictionary mapping index to label_id.</p></li>
+<li><p><strong>out_path</strong> (<em>str</em>) – Output path.</p></li>
+<li><p><strong>threshold_pos</strong> (<em>float</em><em>, </em><em>optional</em>) – Positive threshold. Defaults to 0.98.</p></li>
+<li><p><strong>epsilon</strong> (<em>float</em><em>, </em><em>optional</em>) – Epsilon value. Defaults to 1e-30.</p></li>
+<li><p><strong>key_dict</strong> (<em>dict</em><em>, </em><em>optional</em>) – Dictionary of keys for data types. Defaults to {}.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-inference.tokenize_transcript">
+<span id="inference-tokenize-transcript-module"></span><h2>inference.tokenize_transcript module<a class="headerlink" href="#module-inference.tokenize_transcript" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.create_segment_len_arr">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">create_segment_len_arr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">segment_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.create_segment_len_arr" title="Link to this definition"></a></dt>
+<dd><p>Creates an array of segment lengths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>segment_arr</strong> (<em>list</em>) – List of segments.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Array of segment lengths.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.extract_move">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">extract_move</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bam_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">intermediate_path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.extract_move" title="Link to this definition"></a></dt>
+<dd><p>Extracts move data from BAM files and saves it to separate files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bam_path</strong> (<em>str</em>) – Path to the BAM file.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>bq_cutoff</strong> (<em>int</em>) – Base quality cutoff.</p></li>
+<li><p><strong>signal_path_dict</strong> (<em>dict</em>) – Dictionary mapping read IDs to signal paths.</p></li>
+<li><p><strong>signal_path_arr</strong> (<em>list</em>) – List of signal paths.</p></li>
+<li><p><strong>intermediate_path</strong> (<em>str</em>) – Path to save the intermediate data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.extract_signal_proc">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">extract_signal_proc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_path_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.extract_signal_proc" title="Link to this definition"></a></dt>
+<dd><p>Extracts signal data from POD5 files and saves it to a dataframe.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_path_list</strong> (<em>list</em>) – List of POD5 file paths.</p></li>
+<li><p><strong>signal_df_path</strong> (<em>str</em>) – Path to save the signal dataframe.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>index_list</strong> (<em>list</em>) – List to store index information.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the dataframe in MB.</p></li>
+<li><p><strong>min_mb</strong> (<em>int</em>) – Minimum size of the dataframe in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.get_label_pos_list">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">get_label_pos_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ref</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cigar</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_df</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.get_label_pos_list" title="Link to this definition"></a></dt>
+<dd><p>Gets the list of label positions for a given reference, start position, and CIGAR string.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ref</strong> (<em>str</em>) – Reference sequence name.</p></li>
+<li><p><strong>start</strong> (<em>int</em>) – Start position of the alignment.</p></li>
+<li><p><strong>cigar</strong> (<em>str</em>) – CIGAR string representing the alignment.</p></li>
+<li><p><strong>label_df</strong> (<em>pd.DataFrame</em>) – DataFrame containing label information.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>List of tuples containing index and query positions.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.get_norm_factor">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">get_norm_factor</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.get_norm_factor" title="Link to this definition"></a></dt>
+<dd><p>Returns the default normalization factors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A dictionary containing the default normalization factors.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.main">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to segment and normalize signal data.</p>
+<dl class="simple">
+<dt>Steps:</dt><dd><ol class="arabic simple">
+<li><p>Parse command-line arguments.</p></li>
+<li><p>Set up directories and normalization factors.</p></li>
+<li><p>Preprocess POD5 files.</p></li>
+<li><p>Extract move data.</p></li>
+<li><p>Segment and normalize signal data.</p></li>
+</ol>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.move_to_dwell">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">move_to_dwell</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">move</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shift_mult</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale_mult</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.move_to_dwell" title="Link to this definition"></a></dt>
+<dd><p>Converts move array to dwell time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>move</strong> (<em>np.ndarray</em>) – Move array.</p></li>
+<li><p><strong>quantile_a</strong> (<em>float</em>) – Quantile A for normalization.</p></li>
+<li><p><strong>quantile_b</strong> (<em>float</em>) – Quantile B for normalization.</p></li>
+<li><p><strong>shift_mult</strong> (<em>float</em>) – Shift multiplier for normalization.</p></li>
+<li><p><strong>scale_mult</strong> (<em>float</em>) – Scale multiplier for normalization.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dwell time array.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.normalise_trim_segment_signal">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">normalise_trim_segment_signal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">move</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ts</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ns</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shift_mult</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale_mult</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.normalise_trim_segment_signal" title="Link to this definition"></a></dt>
+<dd><p>Normalizes and trims the signal.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal</strong> (<em>np.ndarray</em>) – The signal to normalize and trim.</p></li>
+<li><p><strong>move</strong> (<em>np.ndarray</em>) – Move array.</p></li>
+<li><p><strong>sp</strong> (<em>int</em>) – Start position.</p></li>
+<li><p><strong>ts</strong> (<em>int</em>) – Trim start.</p></li>
+<li><p><strong>ns</strong> (<em>int</em>) – Trim end.</p></li>
+<li><p><strong>quantile_a</strong> (<em>float</em>) – Quantile A for normalization.</p></li>
+<li><p><strong>quantile_b</strong> (<em>float</em>) – Quantile B for normalization.</p></li>
+<li><p><strong>shift_mult</strong> (<em>float</em>) – Shift multiplier for normalization.</p></li>
+<li><p><strong>scale_mult</strong> (<em>float</em>) – Scale multiplier for normalization.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The normalized and trimmed signal.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.parse_args">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.preprocess_pod5">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">preprocess_pod5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.preprocess_pod5" title="Link to this definition"></a></dt>
+<dd><p>Preprocesses POD5 files by splitting and extracting signal data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_path</strong> (<em>str</em>) – Path to the POD5 files.</p></li>
+<li><p><strong>save_path</strong> (<em>str</em>) – Path to save the processed data.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the dataframe in MB.</p></li>
+<li><p><strong>min_mb</strong> (<em>int</em>) – Minimum size of the dataframe in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary containing index information.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.ref_pos_to_query_pos">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">ref_pos_to_query_pos</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ref_pos_request_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cigar</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_pos</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.ref_pos_to_query_pos" title="Link to this definition"></a></dt>
+<dd><p>Maps reference positions to query positions based on the CIGAR string.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ref_pos_request_arr</strong> (<em>list</em>) – List of reference positions to map.</p></li>
+<li><p><strong>cigar</strong> (<em>str</em>) – CIGAR string representing the alignment.</p></li>
+<li><p><strong>start_pos</strong> (<em>int</em>) – Starting position of the alignment.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>List of query positions corresponding to the reference positions.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.save_npz">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">save_npz</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">save_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.save_npz" title="Link to this definition"></a></dt>
+<dd><p>Saves the given DataFrame to a compressed NPZ file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>save_path</strong> (<em>str</em>) – The path where the NPZ file will be saved.</p></li>
+<li><p><strong>df</strong> (<em>pd.DataFrame</em>) – The DataFrame containing the data to be saved.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.segment_normalize_signal">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">segment_normalize_signal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seg_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">norm_factor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">token_output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">21</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_token_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">200</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">boi</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'A'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dwell_shift</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.segment_normalize_signal" title="Link to this definition"></a></dt>
+<dd><p>Segments and normalizes the signal data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>seg_df_path</strong> (<em>str</em>) – Path to the segment data frame.</p></li>
+<li><p><strong>signal_path_arr</strong> (<em>list</em>) – List of signal paths.</p></li>
+<li><p><strong>norm_factor</strong> (<em>dict</em>) – Dictionary containing normalization factors.</p></li>
+<li><p><strong>label_df</strong> (<em>pd.DataFrame</em>) – DataFrame containing label information.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>token_output_path</strong> (<em>str</em>) – Path to save the tokenized output.</p></li>
+<li><p><strong>cb_len</strong> (<em>int</em><em>, </em><em>optional</em>) – Context block length. Defaults to 21.</p></li>
+<li><p><strong>kmer_len</strong> (<em>int</em><em>, </em><em>optional</em>) – K-mer length. Defaults to 5.</p></li>
+<li><p><strong>chunk_size</strong> (<em>int</em><em>, </em><em>optional</em>) – Chunk size. Defaults to 10000.</p></li>
+<li><p><strong>max_token_len</strong> (<em>int</em><em>, </em><em>optional</em>) – Maximum token length. Defaults to 200.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em><em>, </em><em>optional</em>) – Sampling rate. Defaults to 6.</p></li>
+<li><p><strong>boi</strong> (<em>str</em><em>, </em><em>optional</em>) – Base of interest. Defaults to “A”.</p></li>
+<li><p><strong>dwell_shift</strong> (<em>int</em><em>, </em><em>optional</em>) – Dwell shift. Defaults to 10.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em><em>, </em><em>optional</em>) – Signal window. Defaults to 5.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.segmented_signal_to_block">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">segmented_signal_to_block</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal_segmented</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">segment_len_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad_to</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.segmented_signal_to_block" title="Link to this definition"></a></dt>
+<dd><p>Segments the signal into blocks and pads it to the specified length.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal_segmented</strong> (<em>np.ndarray</em>) – The segmented signal.</p></li>
+<li><p><strong>segment_len_arr</strong> (<em>np.ndarray</em>) – Array of segment lengths.</p></li>
+<li><p><strong>kmer</strong> (<em>int</em>) – K-mer size.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em>) – Signal window size.</p></li>
+<li><p><strong>pad_to</strong> (<em>int</em>) – Length to pad the signal to.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The segmented and padded signal.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.split_pod5">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">split_pod5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_size_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.split_pod5" title="Link to this definition"></a></dt>
+<dd><p>Splits POD5 files into smaller chunks.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_dir</strong> (<em>str</em>) – Directory containing POD5 files.</p></li>
+<li><p><strong>max_size_mb</strong> (<em>int</em>) – Maximum size of each chunk in MB.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.split_pod5_proc">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">split_pod5_proc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_size_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.split_pod5_proc" title="Link to this definition"></a></dt>
+<dd><p>Splits a list of POD5 files into smaller chunks.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_list</strong> (<em>list</em>) – List of POD5 files to split.</p></li>
+<li><p><strong>max_size_mb</strong> (<em>int</em>) – Maximum size of each chunk in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="inference.tokenize_transcript.write_df">
+<span class="sig-prename descclassname"><span class="pre">inference.tokenize_transcript.</span></span><span class="sig-name descname"><span class="pre">write_df</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal_df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pod5_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#inference.tokenize_transcript.write_df" title="Link to this definition"></a></dt>
+<dd><p>Writes the signal dataframe to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal_df</strong> (<em>pd.DataFrame</em>) – Dataframe containing signal data.</p></li>
+<li><p><strong>signal_df_path</strong> (<em>str</em>) – Path to save the dataframe.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>pod5_idx</strong> (<em>int</em>) – POD5 index.</p></li>
+<li><p><strong>save_idx</strong> (<em>int</em>) – Save index.</p></li>
+<li><p><strong>index_dict</strong> (<em>dict</em>) – Dictionary to store index information.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the dataframe in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Updated save index.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="API Reference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="preprocess.html" class="btn btn-neutral float-right" title="preprocess package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Your Lab.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -725,7 +725,7 @@ def segment_normalize_signal(seg_df_path, signal_path_arr, norm_factor, label_df
 
         signal_df = signal_df[["segment_len_arr", "signal", "motif", "dwell_motor_token", "dwell_pore_token", "bq", "label_id"]].copy()
         signal_df.rename(columns={"motif": "kmer_token", "signal": "signal_token", "bq": "bq_token"}, inplace=True)
-        signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x.astype(np.uint8))
+        signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x.astype(np.int16))
         signal_df["signal_token"] = signal_df["signal_token"].apply(lambda x: x.astype(np.float32))
         signal_df["kmer_token"] = signal_df["kmer_token"].apply(lambda x: np.array(list(x)).view(np.int32).astype(np.uint8))
         signal_df["bq_token"] = signal_df["bq_token"].apply(lambda x: np.clip(x, 0, 60).astype(np.uint8))

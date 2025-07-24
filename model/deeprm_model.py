@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn, Tensor
 from utils.activations import get_activation_fn
+from typing import Tuple
 
 class TransformerModel(nn.Module):
     """
@@ -122,43 +123,27 @@ class TransformerModel(nn.Module):
         src_seg_len_flat = src_seg_len_flat.flatten()
         return src_seg_len_flat
 
-    def create_src_pad_mask(self, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
-        """
-        Creates a padding mask for the source signal.
 
-        Args:
-            src_signal (Tensor): Input signal tensor.
-            src_seg_len (Tensor): Segment length tensor.
-
-        Returns:
-            Tensor: Source padding mask tensor.
+    def create_mask(self, src_seg_len: Tensor, src_seg_len_flat: Tensor) -> Tuple[Tensor, Tensor]:
         """
-        batch = src_signal.shape[0]
-        src_pad_mask = torch.arange(self.seq_len, device=src_signal.device)
-        src_pad_mask = src_pad_mask.repeat(batch, 1)
-        src_pad_mask = src_pad_mask >= src_seg_len.sum(dim=1, keepdim=True)
-        return src_pad_mask
-
-    def create_target_mask(self, src_seg_len: Tensor, src_seg_len_flat: Tensor) -> Tensor:
-        """
-        Creates a target mask.
+        Creates a target mask and a padding mask for the source signal.
 
         Args:
             src_seg_len (Tensor): Segment length tensor.
             src_seg_len_flat (Tensor): Flattened segment length tensor.
 
         Returns:
-            Tensor: Target mask tensor.
+            Tuple[Tensor, Tensor]: Target mask tensor, padding mask tensor.
         """
         batch = src_seg_len.shape[0]
         width = src_seg_len.shape[1]
-        target_mask = torch.arange(width+1,device=src_seg_len.device, dtype = torch.int)
-        target_mask = target_mask ==self.block_len//2
-        target_mask = target_mask.repeat(batch)
-        target_mask = target_mask.repeat_interleave(src_seg_len_flat)
-        target_mask = target_mask.reshape(batch, self.seq_len)
-        target_mask = target_mask.int()
-        return target_mask
+        cb_size = width - (src_seg_len == 0).sum(dim = 1, keepdim=True)
+        base_index = torch.arange(width+1,device=src_seg_len.device, dtype = torch.int)
+        base_index = base_index.unsqueeze(0).expand(batch,-1).flatten().repeat_interleave(src_seg_len_flat).reshape(batch, self.seq_len)
+        target_mask = (base_index == (cb_size // 2)).float() ## dtype = float
+        pad_mask = base_index < cb_size ## dtype = bool
+        return target_mask, pad_mask
+
 
     def process_dwell_bq(self, src_dwell_bq: Tensor, src_seg_len_flat: Tensor) -> Tensor:
         """
@@ -174,10 +159,9 @@ class TransformerModel(nn.Module):
         batch = src_dwell_bq.shape[0]
         channel = src_dwell_bq.shape[2]
         src_dwell_bq = torch.cat([src_dwell_bq, torch.zeros(batch, 1, channel, device = src_dwell_bq.device, dtype = torch.float32)], dim = 1)
-        src_dwell_bq = src_dwell_bq.flatten(end_dim=1)
-        src_dwell_bq = src_dwell_bq.repeat_interleave(src_seg_len_flat,dim=0)
-        src_dwell_bq = src_dwell_bq.reshape(batch, self.seq_len, channel)
+        src_dwell_bq = src_dwell_bq.flatten(end_dim=1).repeat_interleave(src_seg_len_flat,dim=0).reshape(batch, self.seq_len, channel)
         return src_dwell_bq
+
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor, src_dwell_bq: Tensor) -> Tensor:
         """
@@ -197,8 +181,7 @@ class TransformerModel(nn.Module):
             src_kmer = self.process_kmer(src_kmer, src_seg_len_flat)
             src_signal = self.process_signal(src_signal)
             src_dwell_bq = self.process_dwell_bq(src_dwell_bq, src_seg_len_flat)
-            src_pad_mask = self.create_src_pad_mask(src_signal, src_seg_len)
-            target_mask = self.create_target_mask(src_seg_len, src_seg_len_flat)
+            target_mask, src_pad_mask = self.create_mask(src_seg_len, src_seg_len_flat)
 
         src_signal = torch.cat([src_signal, src_dwell_bq], dim = -1)
         kmer_embedding = self.kmer_embedding(src_kmer)
@@ -206,7 +189,7 @@ class TransformerModel(nn.Module):
         pos_encoding = self.pos_encoding(src_kmer.shape[0])
 
         ## add all embeddings and dropout
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
+        final_embedding = kmer_embedding + signal_embedding + pos_encoding
         output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## apply regression head to each token:

@@ -1,0 +1,1107 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>preprocess package &mdash; DeepRM 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="train package" href="train.html" />
+    <link rel="prev" title="inference package" href="inference.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            DeepRM
+              <img src="../_static/deeprm_architecture.png" class="logo" alt="Logo"/>
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick‑start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../usage.html">Usage Guide</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="inference.html">inference package</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">preprocess package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-preprocess.compile_dataset">preprocess.compile_dataset module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.chunk_save_data"><code class="docutils literal notranslate"><span class="pre">chunk_save_data()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.pad_signal"><code class="docutils literal notranslate"><span class="pre">pad_signal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.sample_and_save"><code class="docutils literal notranslate"><span class="pre">sample_and_save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.sample_and_save_worker"><code class="docutils literal notranslate"><span class="pre">sample_and_save_worker()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.compile_dataset.save_split_data"><code class="docutils literal notranslate"><span class="pre">save_split_data()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-preprocess.dag_extract_cb">preprocess.dag_extract_cb module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.dag_longest_path"><code class="docutils literal notranslate"><span class="pre">dag_longest_path()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.extract_blocks_from_read_list"><code class="docutils literal notranslate"><span class="pre">extract_blocks_from_read_list()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.extract_blocks_from_read_list_mp_worker"><code class="docutils literal notranslate"><span class="pre">extract_blocks_from_read_list_mp_worker()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.find_block_candidates"><code class="docutils literal notranslate"><span class="pre">find_block_candidates()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_ed_kmers"><code class="docutils literal notranslate"><span class="pre">get_ed_kmers()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_ideal_displacement"><code class="docutils literal notranslate"><span class="pre">get_ideal_displacement()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_integer_partition"><code class="docutils literal notranslate"><span class="pre">get_integer_partition()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_kmer_dict"><code class="docutils literal notranslate"><span class="pre">get_kmer_dict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_kmer_tuple"><code class="docutils literal notranslate"><span class="pre">get_kmer_tuple()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.get_min_ideal_displacement_dict"><code class="docutils literal notranslate"><span class="pre">get_min_ideal_displacement_dict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.dag_extract_cb.validate_anchor"><code class="docutils literal notranslate"><span class="pre">validate_anchor()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-preprocess.master_pipeline">preprocess.master_pipeline module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.master_pipeline.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.master_pipeline.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.master_pipeline.print_run"><code class="docutils literal notranslate"><span class="pre">print_run()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-preprocess.segment_normalize_signal">preprocess.segment_normalize_signal module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.assign_block_id"><code class="docutils literal notranslate"><span class="pre">assign_block_id()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.create_move_token"><code class="docutils literal notranslate"><span class="pre">create_move_token()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.create_segment_len_arr"><code class="docutils literal notranslate"><span class="pre">create_segment_len_arr()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.create_target_mask"><code class="docutils literal notranslate"><span class="pre">create_target_mask()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.expand_token_to_segment"><code class="docutils literal notranslate"><span class="pre">expand_token_to_segment()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.extract_move"><code class="docutils literal notranslate"><span class="pre">extract_move()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.extract_signal_proc"><code class="docutils literal notranslate"><span class="pre">extract_signal_proc()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.get_norm_factor"><code class="docutils literal notranslate"><span class="pre">get_norm_factor()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.move_to_dwell"><code class="docutils literal notranslate"><span class="pre">move_to_dwell()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.parse_args"><code class="docutils literal notranslate"><span class="pre">parse_args()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.preprocess_pod5"><code class="docutils literal notranslate"><span class="pre">preprocess_pod5()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.save_npz"><code class="docutils literal notranslate"><span class="pre">save_npz()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.segment_normalize_signal"><code class="docutils literal notranslate"><span class="pre">segment_normalize_signal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.segmented_signal_to_block"><code class="docutils literal notranslate"><span class="pre">segmented_signal_to_block()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.sequence_to_kmer_token"><code class="docutils literal notranslate"><span class="pre">sequence_to_kmer_token()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.split_block_df"><code class="docutils literal notranslate"><span class="pre">split_block_df()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.trim_scale_segment_signal"><code class="docutils literal notranslate"><span class="pre">trim_scale_segment_signal()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preprocess.segment_normalize_signal.write_df"><code class="docutils literal notranslate"><span class="pre">write_df()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="train.html">train package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="qc.html">qc package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="model.html">model package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="utils.html">utils package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">DeepRM</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API Reference</a></li>
+      <li class="breadcrumb-item active">preprocess package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/preprocess.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-preprocess">
+<span id="preprocess-package"></span><h1>preprocess package<a class="headerlink" href="#module-preprocess" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-preprocess.compile_dataset">
+<span id="preprocess-compile-dataset-module"></span><h2>preprocess.compile_dataset module<a class="headerlink" href="#module-preprocess.compile_dataset" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.chunk_save_data">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">chunk_save_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">set_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">column_keys</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">set_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">buffer_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_digit</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.chunk_save_data" title="Link to this definition"></a></dt>
+<dd><p>Saves data in chunks to the output directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>file_id</strong> (<em>list</em>) – List containing the file ID.</p></li>
+<li><p><strong>set_data</strong> (<em>dict</em>) – Dictionary containing the data to save.</p></li>
+<li><p><strong>column_keys</strong> (<em>list</em>) – List of column keys for the data.</p></li>
+<li><p><strong>out_path</strong> (<em>str</em>) – Output directory path.</p></li>
+<li><p><strong>label_str</strong> (<em>str</em>) – Label string for the data.</p></li>
+<li><p><strong>set_name</strong> (<em>str</em>) – Set name (train or val).</p></li>
+<li><p><strong>buffer_dict</strong> (<em>dict</em>) – Dictionary to store buffer data.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for saving data.</p></li>
+<li><p><strong>score_name</strong> (<em>float</em>) – Score threshold.</p></li>
+<li><p><strong>id_digit</strong> (<em>int</em>) – Number of digits for file IDs.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.main">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to run the data compilation process.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.pad_signal">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">pad_signal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_len</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.pad_signal" title="Link to this definition"></a></dt>
+<dd><p>Pads the signal to the maximum length with zeros.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal</strong> (<em>np.ndarray</em>) – Input signal array.</p></li>
+<li><p><strong>max_len</strong> (<em>int</em>) – Maximum length to pad to.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Padded signal array.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.parse_args">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.sample_and_save">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">sample_and_save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">in_path_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_dict</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{0:</span> <span class="pre">'neg',</span> <span class="pre">1:</span> <span class="pre">'pos'}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">set_split_dict</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{'train':</span> <span class="pre">0.95,</span> <span class="pre">'val':</span> <span class="pre">0.05}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_name_list</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">[0.0,</span> <span class="pre">1.0]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_digit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">9</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shuffle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">read_once</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">100</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.sample_and_save" title="Link to this definition"></a></dt>
+<dd><p>Samples data from input files and saves it to the output directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>in_path_list</strong> (<em>list</em>) – List of input file paths.</p></li>
+<li><p><strong>out_path</strong> (<em>str</em>) – Output directory path.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>label</strong> (<em>int</em>) – Label for the data (0 for negative, 1 for positive).</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for saving data.</p></li>
+<li><p><strong>label_dict</strong> (<em>dict</em>) – Dictionary mapping labels to strings.</p></li>
+<li><p><strong>set_split_dict</strong> (<em>dict</em>) – Dictionary defining the split ratios for train and validation sets.</p></li>
+<li><p><strong>score_name_list</strong> (<em>list</em>) – List of score thresholds.</p></li>
+<li><p><strong>id_digit</strong> (<em>int</em>) – Number of digits for file IDs.</p></li>
+<li><p><strong>shuffle</strong> (<em>bool</em>) – Whether to shuffle the data.</p></li>
+<li><p><strong>read_once</strong> (<em>int</em>) – Number of files to read at once.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.sample_and_save_worker">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">sample_and_save_worker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">in_file_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">set_split_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_name_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remainder_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_digit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shuffle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">read_once</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">column_keys</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.sample_and_save_worker" title="Link to this definition"></a></dt>
+<dd><p>Worker function to sample and save data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>in_file_list</strong> (<em>list</em>) – List of input file paths.</p></li>
+<li><p><strong>out_path</strong> (<em>str</em>) – Output directory path.</p></li>
+<li><p><strong>label_str</strong> (<em>str</em>) – Label string for the data.</p></li>
+<li><p><strong>set_split_dict</strong> (<em>dict</em>) – Dictionary defining the split ratios for train and validation sets.</p></li>
+<li><p><strong>score_name_list</strong> (<em>list</em>) – List of score thresholds.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for saving data.</p></li>
+<li><p><strong>label</strong> (<em>int</em>) – Label for the data (0 for negative, 1 for positive).</p></li>
+<li><p><strong>remainder_dict</strong> (<em>dict</em>) – Dictionary to store remainder data.</p></li>
+<li><p><strong>id_digit</strong> (<em>int</em>) – Number of digits for file IDs.</p></li>
+<li><p><strong>shuffle</strong> (<em>bool</em>) – Whether to shuffle the data.</p></li>
+<li><p><strong>read_once</strong> (<em>int</em>) – Number of files to read at once.</p></li>
+<li><p><strong>column_keys</strong> (<em>list</em>) – List of column keys for the data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.compile_dataset.save_split_data">
+<span class="sig-prename descclassname"><span class="pre">preprocess.compile_dataset.</span></span><span class="sig-name descname"><span class="pre">save_split_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">column_keys</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">set_split_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_digit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">buffer_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.compile_dataset.save_split_data" title="Link to this definition"></a></dt>
+<dd><p>Saves split data to the output directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPUs to use.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>file_id</strong> (<em>list</em>) – List containing the file ID.</p></li>
+<li><p><strong>data</strong> (<em>dict</em>) – Dictionary containing the data to save.</p></li>
+<li><p><strong>column_keys</strong> (<em>list</em>) – List of column keys for the data.</p></li>
+<li><p><strong>out_path</strong> (<em>str</em>) – Output directory path.</p></li>
+<li><p><strong>label_str</strong> (<em>str</em>) – Label string for the data.</p></li>
+<li><p><strong>set_split_dict</strong> (<em>dict</em>) – Dictionary defining the split ratios for train and validation sets.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for saving data.</p></li>
+<li><p><strong>score_name</strong> (<em>float</em>) – Score threshold.</p></li>
+<li><p><strong>id_digit</strong> (<em>int</em>) – Number of digits for file IDs.</p></li>
+<li><p><strong>buffer_dict</strong> (<em>dict</em>) – Dictionary to store buffer data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-preprocess.dag_extract_cb">
+<span id="preprocess-dag-extract-cb-module"></span><h2>preprocess.dag_extract_cb module<a class="headerlink" href="#module-preprocess.dag_extract_cb" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.dag_longest_path">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">dag_longest_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">edge_list</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.dag_longest_path" title="Link to this definition"></a></dt>
+<dd><p>Finds the longest path in a directed acyclic graph (DAG).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>edge_list</strong> (<em>list</em>) – List of edges in the DAG.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Longest path in the DAG.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.extract_blocks_from_read_list">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">extract_blocks_from_read_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_read_length</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_pad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_per_bb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">read_bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flush_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flush_interval</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resume</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.extract_blocks_from_read_list" title="Link to this definition"></a></dt>
+<dd><p>Extracts context blocks from a list of reads using multiprocessing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>input</strong> (<em>str</em>) – Path to the input BAM file.</p></li>
+<li><p><strong>output</strong> (<em>str</em>) – Path to save the output pickle file.</p></li>
+<li><p><strong>indel_tolerance</strong> (<em>int</em>) – Indel tolerance.</p></li>
+<li><p><strong>indel_penalty</strong> (<em>int</em>) – Penalty for indels.</p></li>
+<li><p><strong>cb_size_tolerance</strong> (<em>int</em>) – Context block size tolerance.</p></li>
+<li><p><strong>skip_size_tolerance</strong> (<em>int</em>) – Tolerance for skip size.</p></li>
+<li><p><strong>anchor_mismatch_penalty</strong> (<em>int</em>) – Penalty for anchor mismatches.</p></li>
+<li><p><strong>spacer_size_tolerance</strong> (<em>int</em>) – Tolerance for spacer size.</p></li>
+<li><p><strong>spacer_mismatch_tolerance</strong> (<em>int</em>) – Tolerance for mismatches in spacers.</p></li>
+<li><p><strong>max_read_length</strong> (<em>int</em>) – Maximum read length.</p></li>
+<li><p><strong>spacer_mismatch_penalty</strong> (<em>int</em>) – Penalty for spacer mismatches.</p></li>
+<li><p><strong>anchor_list</strong> (<em>list</em>) – List of anchors.</p></li>
+<li><p><strong>spacer_list</strong> (<em>list</em>) – List of spacers.</p></li>
+<li><p><strong>spacer_size</strong> (<em>int</em>) – Size of the spacer.</p></li>
+<li><p><strong>cb_pad</strong> (<em>int</em>) – Context block padding.</p></li>
+<li><p><strong>cb_per_bb</strong> (<em>int</em>) – Number of context blocks per base block.</p></li>
+<li><p><strong>read_bq_cutoff</strong> (<em>float</em>) – Base quality cutoff for reads.</p></li>
+<li><p><strong>cb_bq_cutoff</strong> (<em>float</em>) – Base quality cutoff for context blocks.</p></li>
+<li><p><strong>flush_path</strong> (<em>str</em>) – Path to save intermediate flush files.</p></li>
+<li><p><strong>flush_interval</strong> (<em>int</em>) – Interval for flushing data to disk.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPU threads to use.</p></li>
+<li><p><strong>resume</strong> (<em>str</em>) – Path to resume from previous run.</p></li>
+<li><p><strong>sample</strong> (<em>int</em>) – Number of reads to sample.</p></li>
+<li><p><strong>**kwargs</strong> – Additional arguments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.extract_blocks_from_read_list_mp_worker">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">extract_blocks_from_read_list_mp_worker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">record_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_pad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_per_bb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_kmer_ed_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bb_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flush_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flush_interval</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_converting_func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_ideal_displacement_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resume</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.extract_blocks_from_read_list_mp_worker" title="Link to this definition"></a></dt>
+<dd><p>Worker function to extract blocks from a list of reads using multiprocessing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>record_list</strong> (<em>list</em>) – List of read records.</p></li>
+<li><p><strong>indel_penalty</strong> (<em>int</em>) – Penalty for indels.</p></li>
+<li><p><strong>cb_size_tolerance</strong> (<em>int</em>) – Context block size tolerance.</p></li>
+<li><p><strong>skip_size_tolerance</strong> (<em>int</em>) – Tolerance for skip size.</p></li>
+<li><p><strong>anchor_mismatch_penalty</strong> (<em>int</em>) – Penalty for anchor mismatches.</p></li>
+<li><p><strong>spacer_size_tolerance</strong> (<em>int</em>) – Tolerance for spacer size.</p></li>
+<li><p><strong>spacer_mismatch_tolerance</strong> (<em>int</em>) – Tolerance for mismatches in spacers.</p></li>
+<li><p><strong>spacer_mismatch_penalty</strong> (<em>int</em>) – Penalty for spacer mismatches.</p></li>
+<li><p><strong>cb_pad</strong> (<em>int</em>) – Context block padding.</p></li>
+<li><p><strong>cb_per_bb</strong> (<em>int</em>) – Number of context blocks per base block.</p></li>
+<li><p><strong>cb_bq_cutoff</strong> (<em>float</em>) – Base quality cutoff for context blocks.</p></li>
+<li><p><strong>indel_dict</strong> (<em>dict</em>) – Dictionary of integer partitions for indel tolerance.</p></li>
+<li><p><strong>spacer_kmer_ed_dict</strong> (<em>dict</em>) – Dictionary of k-mers with edit distances for spacers.</p></li>
+<li><p><strong>anchor_list</strong> (<em>list</em>) – List of anchors.</p></li>
+<li><p><strong>spacer_list</strong> (<em>list</em>) – List of spacers.</p></li>
+<li><p><strong>spacer_size</strong> (<em>int</em>) – Size of the spacer.</p></li>
+<li><p><strong>bb_size</strong> (<em>int</em>) – Size of the base block.</p></li>
+<li><p><strong>flush_path</strong> (<em>str</em>) – Path to save intermediate flush files.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>flush_interval</strong> (<em>int</em>) – Interval for flushing data to disk.</p></li>
+<li><p><strong>score_converting_func</strong> (<em>function</em>) – Function to convert penalty to score.</p></li>
+<li><p><strong>cb_size</strong> (<em>int</em>) – Size of the context block.</p></li>
+<li><p><strong>min_ideal_displacement_dict</strong> (<em>dict</em>) – Dictionary of minimum ideal displacements.</p></li>
+<li><p><strong>resume</strong> (<em>str</em>) – Path to resume from previous run.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.find_block_candidates">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">find_block_candidates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">phred</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_kmer_ed_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_pad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_per_bb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_ideal_displacement_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">score_converting_func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bb_size</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.find_block_candidates" title="Link to this definition"></a></dt>
+<dd><p>Finds block candidates in the read sequence.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>seq</strong> (<em>str</em>) – The read sequence.</p></li>
+<li><p><strong>phred</strong> (<em>list</em>) – List of Phred quality scores.</p></li>
+<li><p><strong>cb_bq_cutoff</strong> (<em>float</em>) – Base quality cutoff for context blocks.</p></li>
+<li><p><strong>spacer_kmer_ed_dict</strong> (<em>dict</em>) – Dictionary of k-mers with edit distances for spacers.</p></li>
+<li><p><strong>skip_size_tolerance</strong> (<em>int</em>) – Tolerance for skip size.</p></li>
+<li><p><strong>cb_pad</strong> (<em>int</em>) – Context block padding.</p></li>
+<li><p><strong>cb_per_bb</strong> (<em>int</em>) – Number of context blocks per base block.</p></li>
+<li><p><strong>indel_penalty</strong> (<em>int</em>) – Penalty for indels.</p></li>
+<li><p><strong>anchor_mismatch_penalty</strong> (<em>int</em>) – Penalty for anchor mismatches.</p></li>
+<li><p><strong>spacer_mismatch_penalty</strong> (<em>int</em>) – Penalty for spacer mismatches.</p></li>
+<li><p><strong>spacer_size</strong> (<em>int</em>) – Size of the spacer.</p></li>
+<li><p><strong>spacer_list</strong> (<em>list</em>) – List of spacers.</p></li>
+<li><p><strong>indel_dict</strong> (<em>dict</em>) – Dictionary of integer partitions for indel tolerance.</p></li>
+<li><p><strong>min_ideal_displacement_dict</strong> (<em>dict</em>) – Dictionary of minimum ideal displacements.</p></li>
+<li><p><strong>anchor_list</strong> (<em>list</em>) – List of anchors.</p></li>
+<li><p><strong>score_converting_func</strong> (<em>function</em>) – Function to convert penalty to score.</p></li>
+<li><p><strong>cb_size_tolerance</strong> (<em>int</em>) – Context block size tolerance.</p></li>
+<li><p><strong>spacer_mismatch_tolerance</strong> (<em>int</em>) – Tolerance for mismatches in spacers.</p></li>
+<li><p><strong>spacer_size_tolerance</strong> (<em>int</em>) – Tolerance for spacer size.</p></li>
+<li><p><strong>bb_size</strong> (<em>int</em>) – Size of the base block.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary of context block information, list of DAG edges, and dictionary of DAG edges with scores.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_ed_kmers">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_ed_kmers</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">kmer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_tolerance</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_ed_kmers" title="Link to this definition"></a></dt>
+<dd><p>Generates a dictionary of k-mers with edit distances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>kmer</strong> (<em>str</em>) – The k-mer sequence.</p></li>
+<li><p><strong>spacer_mismatch_tolerance</strong> (<em>int</em>) – Tolerance for mismatches in spacers.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary with edit distances as keys and lists of k-mers as values.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>defaultdict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_ideal_displacement">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_ideal_displacement</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">from_spacer_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_spacer_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">displacement</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_ideal_displacement_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_per_bb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bb_size</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_ideal_displacement" title="Link to this definition"></a></dt>
+<dd><p>Calculates the ideal displacement and steps between spacers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>from_spacer_idx</strong> (<em>int</em>) – Index of the starting spacer.</p></li>
+<li><p><strong>to_spacer_idx</strong> (<em>int</em>) – Index of the ending spacer.</p></li>
+<li><p><strong>displacement</strong> (<em>int</em>) – Actual displacement between spacers.</p></li>
+<li><p><strong>min_ideal_displacement_dict</strong> (<em>dict</em>) – Dictionary of minimum ideal displacements.</p></li>
+<li><p><strong>cb_per_bb</strong> (<em>int</em>) – Number of context blocks per base block.</p></li>
+<li><p><strong>bb_size</strong> (<em>int</em>) – Size of the base block.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Ideal displacement, small steps, and big steps.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_integer_partition">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_integer_partition</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">indel_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size_tolerance</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_integer_partition" title="Link to this definition"></a></dt>
+<dd><p>Generates a dictionary of integer partitions for indel tolerance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>indel_tolerance</strong> (<em>int</em>) – Indel tolerance.</p></li>
+<li><p><strong>cb_size_tolerance</strong> (<em>int</em>) – Context block size tolerance.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary with keys as spacing errors and values as lists of tuples of (front_error, back_error).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_kmer_dict">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_kmer_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">read</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">k</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bq_cutoff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">phred</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_kmer_dict" title="Link to this definition"></a></dt>
+<dd><p>Generates a dictionary of k-mers from a read.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>read</strong> (<em>str</em>) – The read sequence.</p></li>
+<li><p><strong>k</strong> (<em>int</em>) – Length of the k-mer.</p></li>
+<li><p><strong>bq_cutoff</strong> (<em>float</em>) – Base quality cutoff.</p></li>
+<li><p><strong>phred</strong> (<em>list</em>) – List of Phred quality scores.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary with k-mers as keys and positions as values.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>defaultdict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_kmer_tuple">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_kmer_tuple</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spacer_mismatch_tolerance</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_spacer_kmer_ed_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_spacer_kmer_ed_dict</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_kmer_tuple" title="Link to this definition"></a></dt>
+<dd><p>Generates a list of k-mer tuples with mismatches.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>spacer_mismatch_tolerance</strong> (<em>int</em>) – Tolerance for mismatches in spacers.</p></li>
+<li><p><strong>from_spacer_kmer_ed_dict</strong> (<em>dict</em>) – Dictionary of k-mers with edit distances for the starting spacer.</p></li>
+<li><p><strong>to_spacer_kmer_ed_dict</strong> (<em>dict</em>) – Dictionary of k-mers with edit distances for the ending spacer.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>List of tuples of (from_kmer, to_kmer, total_mismatch).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.get_min_ideal_displacement_dict">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">get_min_ideal_displacement_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cb_per_bb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_size</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.get_min_ideal_displacement_dict" title="Link to this definition"></a></dt>
+<dd><p>Generates a dictionary of minimum ideal displacements for given parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>cb_per_bb</strong> (<em>int</em>) – Number of context blocks per base block.</p></li>
+<li><p><strong>spacer_size</strong> (<em>int</em>) – Size of the spacer.</p></li>
+<li><p><strong>cb_size</strong> (<em>int</em>) – Size of the context block.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary with keys as tuples of (from_idx, to_idx) and values as tuples of (displacement, small_steps, big_steps).</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.main">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to extract context blocks from a basecalled BAM file using a directed acyclic graph (DAG).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.parse_args">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.dag_extract_cb.validate_anchor">
+<span class="sig-prename descclassname"><span class="pre">preprocess.dag_extract_cb.</span></span><span class="sig-name descname"><span class="pre">validate_anchor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">read</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_pos</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_pos</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">possible_indel_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacer_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_pad</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">single_anchor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">indel_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">anchor_mismatch_penalty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">displacement_error</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.dag_extract_cb.validate_anchor" title="Link to this definition"></a></dt>
+<dd><p>Validates the anchor in the read sequence.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>read</strong> (<em>str</em>) – The read sequence.</p></li>
+<li><p><strong>from_pos</strong> (<em>int</em>) – Starting position.</p></li>
+<li><p><strong>to_pos</strong> (<em>int</em>) – Ending position.</p></li>
+<li><p><strong>possible_indel_list</strong> (<em>list</em>) – List of possible indels.</p></li>
+<li><p><strong>spacer_size</strong> (<em>int</em>) – Size of the spacer.</p></li>
+<li><p><strong>cb_pad</strong> (<em>int</em>) – Context block padding.</p></li>
+<li><p><strong>single_anchor</strong> (<em>str</em>) – Single anchor sequence.</p></li>
+<li><p><strong>indel_penalty</strong> (<em>int</em>) – Penalty for indels.</p></li>
+<li><p><strong>anchor_mismatch_penalty</strong> (<em>int</em>) – Penalty for anchor mismatches.</p></li>
+<li><p><strong>displacement_error</strong> (<em>int</em>) – Displacement error.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Missing anchor, anchor position, and total indel.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-preprocess.master_pipeline">
+<span id="preprocess-master-pipeline-module"></span><h2>preprocess.master_pipeline module<a class="headerlink" href="#module-preprocess.master_pipeline" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.master_pipeline.main">
+<span class="sig-prename descclassname"><span class="pre">preprocess.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.master_pipeline.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to run the preprocessing pipeline.</p>
+<dl class="simple">
+<dt>Steps:</dt><dd><ol class="arabic simple">
+<li><p>Run Dorado Basecaller and SAMtools.</p></li>
+<li><p>Run DAG-based CB Extraction.</p></li>
+<li><p>Run Signal Segmentation &amp; Normalization.</p></li>
+</ol>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>FileNotFoundError</strong> – If the input directory does not exist.</p></li>
+<li><p><strong>ValueError</strong> – If the step argument is invalid or if the run name or base of interest cannot be detected.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.master_pipeline.parse_args">
+<span class="sig-prename descclassname"><span class="pre">preprocess.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.master_pipeline.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>FileNotFoundError</strong> – If the Dorado installation path does not exist.</p></li>
+<li><p><strong>FileNotFoundError</strong> – If the Dorado model does not exist.</p></li>
+<li><p><strong>FileNotFoundError</strong> – If the input directory does not exist.</p></li>
+<li><p><strong>ValueError</strong> – If the step argument is invalid</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.master_pipeline.print_run">
+<span class="sig-prename descclassname"><span class="pre">preprocess.master_pipeline.</span></span><span class="sig-name descname"><span class="pre">print_run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cmd</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.master_pipeline.print_run" title="Link to this definition"></a></dt>
+<dd><p>Print command and run if not dry run.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>cmd</strong> (<em>str</em>) – Command to run.</p></li>
+<li><p><strong>dry</strong> (<em>bool</em>) – Dry run flag.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-preprocess.segment_normalize_signal">
+<span id="preprocess-segment-normalize-signal-module"></span><h2>preprocess.segment_normalize_signal module<a class="headerlink" href="#module-preprocess.segment_normalize_signal" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.assign_block_id">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">assign_block_id</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">block_df</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.assign_block_id" title="Link to this definition"></a></dt>
+<dd><p>Assigns block IDs to the dataframe.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>block_df</strong> (<em>pd.DataFrame</em>) – Dataframe containing block data.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dataframe with assigned block IDs.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>pd.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.create_move_token">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">create_move_token</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">segment_len_arr</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.create_move_token" title="Link to this definition"></a></dt>
+<dd><p>Creates move tokens.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>segment_len_arr</strong> (<em>np.ndarray</em>) – Array of segment lengths.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Array of move tokens.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.create_segment_len_arr">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">create_segment_len_arr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">segment_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.create_segment_len_arr" title="Link to this definition"></a></dt>
+<dd><p>Creates an array of segment lengths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>segment_arr</strong> (<em>list</em>) – List of segments.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Array of segment lengths.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.create_target_mask">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">create_target_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">segment_len_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lr_pad</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.create_target_mask" title="Link to this definition"></a></dt>
+<dd><p>Creates a target mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>segment_len_arr</strong> (<em>np.ndarray</em>) – Array of segment lengths.</p></li>
+<li><p><strong>lr_pad</strong> (<em>int</em>) – Left-right padding.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Target mask.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.expand_token_to_segment">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">expand_token_to_segment</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">token_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">segment_len_arr</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.expand_token_to_segment" title="Link to this definition"></a></dt>
+<dd><p>Expands tokens to segments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>token_arr</strong> (<em>np.ndarray</em>) – Array of tokens.</p></li>
+<li><p><strong>segment_len_arr</strong> (<em>np.ndarray</em>) – Array of segment lengths.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Expanded array of tokens.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.extract_move">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">extract_move</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bam_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">intermediate_path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.extract_move" title="Link to this definition"></a></dt>
+<dd><p>Extracts the ‘mv’ tag from a BAM file and saves it to separate files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bam_path</strong> (<em>str</em>) – Path to the BAM file.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPU threads to use.</p></li>
+<li><p><strong>signal_path_dict</strong> (<em>dict</em>) – Dictionary mapping read IDs to signal paths.</p></li>
+<li><p><strong>signal_path_arr</strong> (<em>list</em>) – List of signal paths.</p></li>
+<li><p><strong>intermediate_path</strong> (<em>str</em>) – Path to save intermediate files.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.extract_signal_proc">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">extract_signal_proc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_path_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.extract_signal_proc" title="Link to this definition"></a></dt>
+<dd><p>Extracts signal data from POD5 files and processes it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_path_list</strong> (<em>list</em>) – List of POD5 file paths.</p></li>
+<li><p><strong>signal_df_path</strong> (<em>str</em>) – Path to save the signal data.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>index_list</strong> (<em>list</em>) – List to store the index data.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for processing.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the dataframe in MB.</p></li>
+<li><p><strong>min_mb</strong> (<em>int</em>) – Minimum size of the dataframe in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.get_norm_factor">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">get_norm_factor</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.get_norm_factor" title="Link to this definition"></a></dt>
+<dd><p>Returns the default normalization factors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary containing default normalization factors.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.main">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to segment and normalize signal data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.move_to_dwell">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">move_to_dwell</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">move</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shift_mult</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale_mult</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.move_to_dwell" title="Link to this definition"></a></dt>
+<dd><p>Converts move data to dwell time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>move</strong> (<em>np.ndarray</em>) – Move data.</p></li>
+<li><p><strong>quantile_a</strong> (<em>float</em>) – Quantile A for normalization.</p></li>
+<li><p><strong>quantile_b</strong> (<em>float</em>) – Quantile B for normalization.</p></li>
+<li><p><strong>shift_mult</strong> (<em>float</em>) – Shift multiplier for normalization.</p></li>
+<li><p><strong>scale_mult</strong> (<em>float</em>) – Scale multiplier for normalization.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dwell time data.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.parse_args">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parses command-line arguments.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed command-line arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>FileNotFoundError</strong> – If the input directory or BAM file does not exist.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.preprocess_pod5">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">preprocess_pod5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pod5_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ncpu</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.preprocess_pod5" title="Link to this definition"></a></dt>
+<dd><p>Exports POD5 files to DataFrame format.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>pod5_path</strong> (<em>str</em>) – Path to the POD5 files.</p></li>
+<li><p><strong>save_path</strong> (<em>str</em>) – Path to save the DataFrame files.</p></li>
+<li><p><strong>ncpu</strong> (<em>int</em>) – Number of CPU threads to use.</p></li>
+<li><p><strong>chunk</strong> (<em>int</em>) – Chunk size for processing.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the DataFrame in MB.</p></li>
+<li><p><strong>min_mb</strong> (<em>int</em>) – Minimum size of the DataFrame in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary mapping file paths to read IDs.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.save_npz">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">save_npz</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">save_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.save_npz" title="Link to this definition"></a></dt>
+<dd><p>Saves the dataframe to a compressed NPZ file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>save_path</strong> (<em>str</em>) – Path to save the NPZ file.</p></li>
+<li><p><strong>df</strong> (<em>pd.DataFrame</em>) – Dataframe containing the data to be saved.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.segment_normalize_signal">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">segment_normalize_signal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seg_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">postfix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">norm_factor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">21</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">6</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_penalty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_token_len</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">200</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dwell_shift</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.segment_normalize_signal" title="Link to this definition"></a></dt>
+<dd><p>Segments and normalizes the signal data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>seg_df_path</strong> (<em>str</em>) – Path to the segmented dataframe.</p></li>
+<li><p><strong>postfix</strong> (<em>str</em>) – Postfix for the output files.</p></li>
+<li><p><strong>signal_path_arr</strong> (<em>list</em>) – List of signal paths.</p></li>
+<li><p><strong>norm_factor</strong> (<em>dict</em>) – Normalization factors.</p></li>
+<li><p><strong>kmer</strong> (<em>int</em><em>, </em><em>optional</em>) – Length of the k-mer. Defaults to 5.</p></li>
+<li><p><strong>cb_len</strong> (<em>int</em><em>, </em><em>optional</em>) – Length of the codebook. Defaults to 21.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em><em>, </em><em>optional</em>) – Sampling rate. Defaults to 6.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em><em>, </em><em>optional</em>) – Signal window size. Defaults to 5.</p></li>
+<li><p><strong>max_penalty</strong> (<em>int</em><em>, </em><em>optional</em>) – Maximum penalty. Defaults to 10.</p></li>
+<li><p><strong>chunk_size</strong> (<em>int</em><em>, </em><em>optional</em>) – Chunk size for processing. Defaults to 1000.</p></li>
+<li><p><strong>max_token_len</strong> (<em>int</em><em>, </em><em>optional</em>) – Maximum token length. Defaults to 200.</p></li>
+<li><p><strong>dwell_shift</strong> (<em>int</em><em>, </em><em>optional</em>) – Dwell shift. Defaults to 10.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.segmented_signal_to_block">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">segmented_signal_to_block</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal_segmented</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">segment_len_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sampling</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig_window</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad_to</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.segmented_signal_to_block" title="Link to this definition"></a></dt>
+<dd><p>Segments and pads the signal.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal_segmented</strong> (<em>np.ndarray</em>) – Segmented signal.</p></li>
+<li><p><strong>segment_len_arr</strong> (<em>np.ndarray</em>) – Array of segment lengths.</p></li>
+<li><p><strong>kmer</strong> (<em>int</em>) – Length of the k-mer.</p></li>
+<li><p><strong>sampling</strong> (<em>int</em>) – Sampling rate.</p></li>
+<li><p><strong>sig_window</strong> (<em>int</em>) – Signal window size.</p></li>
+<li><p><strong>pad_to</strong> (<em>int</em>) – Padding size.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Padded signal.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.sequence_to_kmer_token">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">sequence_to_kmer_token</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seq</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kmer</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.sequence_to_kmer_token" title="Link to this definition"></a></dt>
+<dd><p>Converts a DNA sequence to k-mer tokens.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>seq</strong> (<em>str</em>) – DNA sequence.</p></li>
+<li><p><strong>kmer</strong> (<em>int</em>) – Length of the k-mer.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Array of k-mer tokens.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.split_block_df">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">split_block_df</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_path_arr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">intermediate_path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.split_block_df" title="Link to this definition"></a></dt>
+<dd><p>Splits the block dataframe into smaller dataframes based on signal paths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed command-line arguments.</p></li>
+<li><p><strong>signal_path_dict</strong> (<em>dict</em>) – Dictionary mapping read IDs to signal paths.</p></li>
+<li><p><strong>signal_path_arr</strong> (<em>list</em>) – List of signal paths.</p></li>
+<li><p><strong>intermediate_path</strong> (<em>str</em>) – Path to save intermediate files.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.trim_scale_segment_signal">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">trim_scale_segment_signal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">move</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ts</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ns</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_a</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantile_b</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shift_mult</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale_mult</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.trim_scale_segment_signal" title="Link to this definition"></a></dt>
+<dd><p>Trims and scales the signal.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal</strong> (<em>np.ndarray</em>) – Signal data.</p></li>
+<li><p><strong>move</strong> (<em>np.ndarray</em>) – Move data.</p></li>
+<li><p><strong>sp</strong> (<em>int</em>) – Start position.</p></li>
+<li><p><strong>ts</strong> (<em>int</em>) – Timestamp.</p></li>
+<li><p><strong>ns</strong> (<em>int</em>) – Number of samples.</p></li>
+<li><p><strong>quantile_a</strong> (<em>float</em>) – Quantile A for normalization.</p></li>
+<li><p><strong>quantile_b</strong> (<em>float</em>) – Quantile B for normalization.</p></li>
+<li><p><strong>shift_mult</strong> (<em>float</em>) – Shift multiplier for normalization.</p></li>
+<li><p><strong>scale_mult</strong> (<em>float</em>) – Scale multiplier for normalization.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Trimmed and scaled signal.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="preprocess.segment_normalize_signal.write_df">
+<span class="sig-prename descclassname"><span class="pre">preprocess.segment_normalize_signal.</span></span><span class="sig-name descname"><span class="pre">write_df</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signal_df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signal_df_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pod5_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_mb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#preprocess.segment_normalize_signal.write_df" title="Link to this definition"></a></dt>
+<dd><p>Writes the signal dataframe to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>signal_df</strong> (<em>pd.DataFrame</em>) – Dataframe containing the signal data.</p></li>
+<li><p><strong>signal_df_path</strong> (<em>str</em>) – Path to save the signal data.</p></li>
+<li><p><strong>pid</strong> (<em>int</em>) – Process ID.</p></li>
+<li><p><strong>pod5_idx</strong> (<em>int</em>) – POD5 file index.</p></li>
+<li><p><strong>save_idx</strong> (<em>int</em>) – Save index.</p></li>
+<li><p><strong>index_dict</strong> (<em>dict</em>) – Dictionary to store the index data.</p></li>
+<li><p><strong>max_mb</strong> (<em>int</em>) – Maximum size of the dataframe in MB.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Updated save index.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="inference.html" class="btn btn-neutral float-left" title="inference package" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="train.html" class="btn btn-neutral float-right" title="train package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Your Lab.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,26 @@
+# pyproject.toml at repo root
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deeprm"
+version = "0.1.0"
+description = "DeepRM – post‑processing & QC for Nanopore m6A detection"
+authors = [{name = "Hyeonseo Hwang", email = "your@email"}]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.2",
+    "pysam>=0.22",
+    # …whatever else is in requirements.txt …
+]
+
+# --- expose the CLI ---
+[project.scripts]
+deeprm = "deeprm.cli:main"
+# ^^^^^  executable     module.function
+
+[tool.setuptools.package-data]
+"deeprm" = ["*.png", "*.json"]   # ship any data files you need

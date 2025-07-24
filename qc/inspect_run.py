@@ -12,16 +12,23 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 from utils.utils import mean_phred, printmessage
+import multiprocessing as mp
+from collections import deque
 
+plt.style.use('default')
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.framealpha': 0.5, "legend.frameon": 1, "lines.linewidth": 2})
 
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument("--in", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
     args.add_argument("--out","-o", dest="out_path", type=str, required=True, help="Output directory")
-    args.add_argument("--cpu","-c", dest="cpu", type=int, default=8, help="Number of CPUs")
+    args.add_argument("--process", "-p", dest="process", type=int, default=int(mp.cpu_count()*0.95//4), help="Number of processes")
+    args.add_argument("--threads", "-t", dest="threads", type=int, default=4, help="Number of threads")
     args.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
-    args.add_argument("--bb", "-b", dest="bb_length", type=int, default=87, help="BB length")
+    args.add_argument("--bb", "-b", dest="bb_length", type=int, default=71, help="BB length")
     args.add_argument("--mrna", "-m", action="store_true", help="mRNA mode")
+    args.add_argument("--len", "-l", dest="len_cutoff", type=int, default=200, help="Length cutoff")
     args = args.parse_args()
     return args
 
@@ -37,7 +44,7 @@ def plot_read_len_oligo(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_leng
     binwidth = 10
 
     if bb_length is not None:
-        for i in (2,3,4,5, 6):
+        for i in range(1,1000//bb_length+1):
             ligate_length = bb_length * i
             ax.axvline(ligate_length, color="grey", linestyle="-", linewidth=2)
 
@@ -137,8 +144,15 @@ def plot_qual(mean_qual_arr, out_path, bq_thres = 7, max_bq = 30):
     fail_percent = len(fail_arr) / len(mean_qual_arr) * 100
     sns.histplot(data=pass_arr, ax=ax, color = "royalblue", label=f"Pass (n={len(pass_arr):,}, {pass_percent:.2f}%)", binwidth=0.1, binrange=(0, max_bq))
     sns.histplot(data=fail_arr, ax=ax, color = "tomato", label=f"Fail (n={len(fail_arr):,}, {fail_percent:.2f}%)", binwidth=0.1, binrange=(0, max_bq))
-    ## vline at median
-    ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
+    # ## vline at median
+    # ax.axvline(np.median(mean_qual_arr), color="black", linestyle="--", linewidth=2)
+    # ax.text(np.median(mean_qual_arr), 0.9 * ax.get_ylim()[1], f"Median = {np.median(mean_qual_arr):.2f}", color="black")
+    ## vline at passed median
+    ax.axvline(np.median(pass_arr), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(pass_arr), 0.8 * ax.get_ylim()[1], f"Passed Median = {np.median(pass_arr):.2f}", color="black")
+    ## vline at failed median
+    ax.axvline(np.median(fail_arr), color="black", linestyle="--", linewidth=2)
+    ax.text(np.median(fail_arr), 0.7 * ax.get_ylim()[1], f"Failed Median = {np.median(fail_arr):.2f}", color="black")
     ax.legend()
     ax.set_xlim(0, max_bq)
     fig.savefig(f"{out_path}/mean_qual_hist.png", dpi=300)
@@ -146,8 +160,57 @@ def plot_qual(mean_qual_arr, out_path, bq_thres = 7, max_bq = 30):
     return None
 
 
+def read_bam_worker(args, pid, collect_dict):
+
+    bam_file = pysam.AlignmentFile(args.bam_path, "rb", check_sq=False, threads=args.threads)
+    total = bam_file.mapped + bam_file.unmapped
+    proc_len = (total // args.process) + 1
+    read_len_arr = deque(maxlen=proc_len)
+    qual_arr = deque(maxlen=proc_len)
+    polya_len_arr = deque(maxlen=proc_len)
+
+    for i, read in tqdm(enumerate(bam_file), total = total):
+        if i % args.process == pid:
+            if read.is_secondary:
+                continue
+            if read.has_tag("pi"):
+                continue
+            if args.len_cutoff > 0:
+                if read.query_length < args.len_cutoff:
+                    continue
+
+            bq = np.array(read.query_qualities, dtype=int)
+            rl = read.query_length
+
+            if read.has_tag("TL") and read.has_tag("TR"):
+                trim_5p = read.get_tag("TL")
+                trim_3p = read.get_tag("TR")
+                if trim_3p - trim_5p <= 0:
+                    continue
+                bq = read.query_qualities[trim_5p:trim_3p]
+                rl = trim_3p - trim_5p
+
+            qual_arr.append(mean_phred(bq))
+            read_len_arr.append(rl)
+
+            try:
+                polya_len_arr.append(read.get_tag("pt"))
+            except:
+                polya_len_arr.append(0)
+
+    collect_dict["read_len_arr"].append(np.array(read_len_arr))
+    collect_dict["qual_arr"].append(np.array(qual_arr))
+    collect_dict["polya_len_arr"].append(np.array(polya_len_arr))
+    return None
+
+
 def main():
     args = parse_args()
+    ## Check if BAM is indexed
+    if not os.path.exists(args.bam_path + ".bai"):
+        printmessage("BAM file is not indexed. Indexing BAM file...")
+        pysam.index(args.bam_path, nthreads=args.threads * args.process)
+        printmessage("BAM file indexed.")
 
     load_success = False
 
@@ -167,32 +230,27 @@ def main():
 
     if not load_success:
         os.makedirs(args.out_path, exist_ok=True)
+        manager = mp.Manager()
+        collect_dict = manager.dict()
+        collect_dict["read_len_arr"] = manager.list()
+        collect_dict["qual_arr"] = manager.list()
+        collect_dict["polya_len_arr"] = manager.list()
 
-        bam_file = pysam.AlignmentFile(args.bam_path, "rb", check_sq=False, threads=args.cpu)
-        read_len_arr = []
-        qual_arr = []
-        polya_len_arr = []
         printmessage("Reading BAM file")
+        processes = []
+        for pid in range(args.process):
+            p = mp.Process(target=read_bam_worker, args=(args, pid, collect_dict))
+            processes.append(p)
+            p.start()
+        for p in processes:
+            p.join()
 
-        for read in tqdm(bam_file, total = bam_file.mapped + bam_file.unmapped):
-            if read.is_secondary:
-                continue
-            if read.has_tag("pi"):
-                continue
-            try:
-                bq = mean_phred(np.array(read.query_qualities, dtype=int))
-                qual_arr.append(bq)
-            except:
-                continue
-            try:
-                polya_len_arr.append(read.get_tag("pt"))
-            except:
-                polya_len_arr.append(0)
-            read_len_arr.append(read.query_length)
+        printmessage("Collecting results")
+        read_len_arr = np.concatenate(collect_dict["read_len_arr"])
+        mean_qual_arr = np.concatenate(collect_dict["qual_arr"])
+        polya_len_arr = np.concatenate(collect_dict["polya_len_arr"])
 
-        read_len_arr = np.array(read_len_arr)
-        mean_qual_arr = np.array(qual_arr)
-        polya_len_arr = np.array(polya_len_arr)
+        manager.shutdown()
 
         printmessage("Saving pickle")
         ## save pickle
