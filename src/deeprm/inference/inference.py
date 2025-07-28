@@ -3,8 +3,8 @@ import torch
 import os, glob
 import argparse
 import numpy as np
-from inference.inference_dataloader import load_dataset
-from utils.utils import printmessage
+from deeprm.inference.inference_dataloader import load_dataset
+from deeprm.utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import importlib

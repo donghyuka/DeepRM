@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 import pickle
 import argparse
-from utils.utils import printmessage
+from deeprm.utils.utils import printmessage
 import itertools as it
 
 plt.style.use('default')

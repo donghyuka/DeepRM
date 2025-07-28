@@ -3,7 +3,7 @@ import gc
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from train.train_dataloader import load_dataset, NanoporeDataLoader
+from deeprm.train.train_dataloader import load_dataset, NanoporeDataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
@@ -12,7 +12,7 @@ import os
 import time
 import tqdm
 import numpy as np
-from utils.utils import printmessage
+from deeprm.utils.utils import printmessage
 import importlib
 
 

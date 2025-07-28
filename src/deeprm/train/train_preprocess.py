@@ -15,8 +15,8 @@ import pandas as pd
 import pysam
 from tqdm import tqdm
 import shutil
-from train.extract_block import extract_block
-from utils.utils import printmessage, oom_killer
+from deeprm.train.extract_block import extract_block
+from deeprm.utils.utils import printmessage, oom_killer
 
 
 def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):

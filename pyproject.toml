@@ -24,3 +24,10 @@ deeprm = "deeprm.cli:main"
 
 [tool.setuptools.package-data]
 "deeprm" = ["*.png", "*.json"]   # ship any data files you need
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deeprm*"]

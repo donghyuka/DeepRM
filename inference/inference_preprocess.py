@@ -23,7 +23,7 @@ Requires:
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-import argparse, gc, os, pod5, pysam, tqdm, glob, psutil
+import argparse, gc, os, pod5, pysam, tqdm, glob
 import multiprocessing as mp
 import numpy as np
 import pandas as pd
@@ -296,8 +296,6 @@ def segment_normalize_signal(bam_df, pod5_paths, norm_factor, pid, token_output_
     Returns:
         None (writes .npz files).
     """
-    p = psutil.Process(os.getpid())
-    p.ionice(psutil.IOPRIO_CLASS_BE, 0)
     trim = kmer_len//2
     shift_mult = norm_factor["shift_mult"]
     scale_mult = norm_factor["scale_mult"]

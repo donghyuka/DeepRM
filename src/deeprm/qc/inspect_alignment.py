@@ -1,11 +1,11 @@
 import argparse
-import os, re
+import os, sys, re, pickle
 import pysam
 import numpy as np
 import multiprocessing as mp
 import pandas as pd
 from tqdm import tqdm
-from utils.utils import mean_phred, printmessage
+from deeprm.utils.utils import mean_phred, printmessage
 from matplotlib import pyplot as plt
 import seaborn as sns
 from collections import deque
