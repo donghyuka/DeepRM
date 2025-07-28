@@ -21,12 +21,10 @@
   * [Inference](#inference)
 * [Requirements](#requirements)
 * [Installation](#installation)
-* [Design](#design)
-  * [Pipeline](#pipeline)
-  * [Architecture](#architecture)
-* [Contributors](#contributors)
+* [Architecture](#architecture)
 * [License](#license)
 * [Citation](#citation)
+* [Contributors](#contributors)
 * [Acknowledgements](#acknowledgements)
 
 ## Introduction
@@ -35,8 +33,10 @@ This repository contains the source code for training and running DeepRM.
 
 ## Usage
 ### Inference
+![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
+
 #### Prepare Data
-* If your POD5 files are already basecalled to BAM files, you can skip this step.
+* You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
 dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}"
 ```
@@ -68,8 +68,9 @@ deeprm pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered
 * This will create a directory with site-level result files.
 
 ### Training
+![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
 #### Prepare Data
-* If your POD5 files are already basecalled to BAM files, you can skip this step.
+* You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
 dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}
 samtools index -@ {args.cpu} {bam_path}
@@ -86,8 +87,8 @@ deeprm compile_dataset --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
   * Training dataset: /block
-* To train the model, run the following command:
 #### Run Training
+* To train the model, run the following command:
 ```bash
 deeprm train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
@@ -123,14 +124,8 @@ cd deeprm
 python -m pip install -e .
 ```
 
-## Design
-### Inference Pipeline
-![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
 
-### Training Pipeline
-![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
-
-### Architecture
+## Architecture
 ![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
 
