@@ -3,17 +3,30 @@ Usage Guide
 
 Workflow
 --------
+..
+    Insert pipeline image here
 
-.. mermaid::
+Inference pipeline
+.. image:: ../images/inference_pipeline.png
+   :width: 600px
+   :align: center
 
-   flowchart TD
-       A[Raw FAST5] -->|segment_normalize_signal.py| B(Normalised signal)
-       B --> C{DeepRM model}
-       C -->|PM6A, DOM| D[pileup.py]
+Training pipeline
+.. image:: ../images/training_pipeline.png
+   :width: 600px
+   :align: center
 
 CLI reference
 -------------
+.. toctree::
+   :maxdepth: 1
+   :caption: CLI Commands
 
-.. code-block:: bash
+   cli/preprocess
+   cli/inference
+   cli/pileup
+   cli/train
+   cli/evaluate
+   cli/convert
 
-   python inference/pileup.py -i <predictions_dir> -o results.npz
+

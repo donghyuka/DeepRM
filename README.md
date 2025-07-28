@@ -1,10 +1,22 @@
 # DeepRM
 #### Deep learning for RNA Modification
+![GitHub](https://img.shields.io/github/license/vadanamu/deeprm)
+![GitHub Repo stars](https://img.shields.io/github/stars/vadanamu/deeprm?style=social)
+![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/deeprm)
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/vadanamu/deeprm/CI?label=CI%20Status)
+![GitHub issues](https://img.shields.io/github/issues/vadanamu/deeprm)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/vadanamu/deeprm)
+![GitHub contributors](https://img.shields.io/github/contributors/vadanamu/deeprm)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/vadanamu/deeprm)
+![GitHub language count](https://img.shields.io/github/languages/count/vadanamu/deeprm)
+![GitHub top language](https://img.shields.io/github/languages/top/vadanamu/deeprm)
+![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/deeprm)
+
+![deeprm.png](docs/images/deeprm.png)
 
 ## Table of Contents
 * [Introduction](#introduction)
 * [Usage](#usage)
-  * [Preprocessing](#preprocessing)
   * [Training](#training)
   * [Inference](#inference)
 * [Requirements](#requirements)
@@ -22,46 +34,64 @@ DeepRM is a transformer-based model for RNA modification detection using Nanopor
 This repository contains the source code for training and running DeepRM.
 
 ## Usage
-### Preprocessing
-#### Training Data
-* To preprocess the training data (synthetic oligonucleotide) from the DRS sequencing result (POD5), run the following command:
+### Inference
+#### Prepare Data
+* If your POD5 files are already basecalled to BAM files, you can skip this step.
 ```bash
-python -m preprocess.master_pipeline --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
+dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}"
 ```
-* This will create:
-  * Training dataset: /block
-  * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
-  * Quality check results: /qc/*.png
-
-#### Inference Data
-* To preprocess the inference data (transcriptome) from the DRS sequencing result (POD5), run the following command:
+* Filter, sort, and index the BAM files:
 ```bash
-python -m inference.master_pipeline --input <input_POD5_dir> --output <output_path> --ref <reference_fasta> --dorado <dorado_dir>
+samtools view -@ {args.cpu} -bh -F 276 -o {bam_path} {raw_bam_path}
+samtools sort -@ {args.cpu} -o {bam_path} {bam_path}
+samtools index -@ {args.cpu} {bam_path}
+```
+* To preprocess the inference data (transcriptome), run the following command:
+```bash
+deeprm preprocess --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
 ```
 * This will create:
   * Inference dataset: /block
   * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
   * Quality check results: /qc/*.png
-
-### Training
- * To train the model, run the following command:
-```bash
-python -m train.train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
-```
-* This will create a directory with the trained model file.
-
-### Inference
+#### Run Inference
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
-python -m inference.inference --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
+deeprm inference --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
 ```
 * This will create a directory with single-molecule level result files.
 * To get a site-level result, run the following command:
 ```bash
-python -m inference.pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
+deeprm pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
 ```
 * This will create a directory with site-level result files.
+
+### Training
+#### Prepare Data
+* If your POD5 files are already basecalled to BAM files, you can skip this step.
+```bash
+dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}
+samtools index -@ {args.cpu} {bam_path}
+```
+* To preprocess the training data (synthetic oligonucleotide), run the following command:
+```bash
+python -m train_preprocess --input <input_POD5_dir> --output <output_file>
+```
+* This will create:
+  * Training dataset: /block
+* To compile the training dataset, run the following command:
+```bash
+deeprm compile_dataset --input <input_POD5_dir> --output <output_file>
+```
+* This will create:
+  * Training dataset: /block
+* To train the model, run the following command:
+#### Run Training
+```bash
+deeprm train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
+```
+* This will create a directory with the trained model file.
 
 ## Requirements
 * Python 3.8+
@@ -69,42 +99,65 @@ python -m inference.pileup --input <prediction_dir> --output <pileup_dir> --mpil
 * SAMtools 1.16.1+ (http://www.htslib.org/)
 
 
-* Package requirements are listed in `requirements.txt`
-* To install the required packages, run the following command:
+* Python package requirements are listed in `requirements.txt` and will be installed automatically when you install DeepRM.
+
+
+## Installation
+1. Install via PIP (recommended)
+
 ```bash
-pip install -r requirements.txt
+python -m pip install -e deeprm
 ```
-* Dorado and SAMtools should be installed separately from the links above.
+
+2. Install via Conda
+
+```bash
+conda install -c conda-forge deeprm
+```
+
+3. Install from GitHub
+
+```bash
+git clone https://github.com/vadanamu/deeprm
+cd deeprm
+python -m pip install -e .
+```
 
 ## Design
-### Pipeline
-![deeprm_pipeline.png](docs/images/deeprm_pipeline.png)
+### Inference Pipeline
+![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
+
+### Training Pipeline
+![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
 
 ### Architecture
 ![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
-## Installation
-Clone the repository to a desired directory.
-
-## Contributors
-This repository is maintained by the following authors:
-* **Hyeonseo Hwang** - Laboratory of Computational Biology, Seoul National University
 
 ## License
-The repository is not released for public use until publication.
-The current version is provided only for the reviewers of the manuscript.
+see [LICENSE](LICENSE) file for details.
+
 
 ## Citation
 If you use DeepRM in your research, please cite the following paper:
 ```bibtex
 @article{
-  title={},
-  author={},
-  journal={},
-  year={},
-  publisher={}
+  title={Comprehensive discovery of RNA modification sites in the human transcriptome},
+  author={Gihyeon Kang, Hyeonseo Hwang, Hyeonseong Jeon, Heejin Choi, Hee Ryung Chang, Junehee Park, Narae Son, Eunkyeong Jeon, Jungmin Lim, Jaeung Yun, Nagyeong Yeo, Yoon Ki Kim, Daehyun Baek},
+  journal={In review},
+  year={In review},
+  publisher={In review}
 }
 ```
+
+## Contributors
+This repositoratory is developed by the following organization:
+* **Laboratory of Computational Biology, School of Biological Sciences, Seoul National University**
+  * Principal Investigator: Prof. Daehyun Baek
+  
+This repository is maintained by the following authors:
+* **Hyeonseo Hwang**
+
 
 ## Acknowledgements
 This work was supported by the National Research Foundation of Korea (NRF) funded by the Ministry of Science and ICT, Republic of Korea (MSIT) (NRF-2019M3E5D3073104, NRF-2020R1A2C3007032, NRF-2020R1A5A1018081, and NRF-2022M3A9I2082294), by Artificial Intelligence Industrial Convergence Cluster Development Project funded by MSIT and Gwangju Metropolitan City, by National IT Industry Promotion Agency (NIPA) funded by MSIT, and by Korea Research Environment Open Network (KREONET) managed and operated by Korea Institute of Science and Technology Information (KISTI).

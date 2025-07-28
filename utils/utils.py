@@ -8,61 +8,6 @@ from colorama import Fore, Style
 
 ## This file is a collection of small utility functions that are used in multiple scripts.
 
-def seq_to_onehot(seq: str):
-    """
-    Converts a nucleotide sequence to a one-hot encoded matrix.
-
-    Args:
-        seq (str): Nucleotide sequence (A, C, G, T/U).
-
-    Returns:
-        np.ndarray: One-hot encoded matrix of the sequence.
-    """
-    seq = seq.upper()
-    seq = seq.replace('T', 'U')
-    mapping = dict(zip("ACGU", range(4)))
-    mapped = [mapping[i] for i in seq]
-    result = np.eye(4)[mapped].astype(float)
-    return result
-
-
-def ncid_to_chr(ncid):
-    """
-    Converts an NCBI ID to a chromosome identifier.
-
-    Args:
-        ncid (str): NCBI ID.
-
-    Returns:
-        str: Chromosome identifier.
-    """
-    ncid_int = int(ncid.split(".")[0][3:])
-    if ncid_int <= 22:
-        chr = f"chr{ncid_int}"
-    elif ncid_int == 23:
-        chr = "chrX"
-    elif ncid_int == 24:
-        chr = "chrY"
-    else:
-        chr = "chrUnk"
-    return chr
-
-
-def reformat_transcript_id(transcript_id):
-    """
-    Reformats a transcript ID by removing the version number if it starts with 'EN'.
-
-    Args:
-        transcript_id (str): Transcript ID.
-
-    Returns:
-        str: Reformatted transcript ID.
-    """
-    if transcript_id.startswith("EN"):
-        transcript_id = transcript_id.split(".")[0]
-    return transcript_id
-
-
 def printmessage(*string, color=None, color_time="green", end='\n', msg_type=None, error=None):
     """
     Prints a formatted message with optional color and message type.

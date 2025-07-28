@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 import os
-from utils.utils import seq_to_onehot
 from matplotlib import pyplot as plt
 import seaborn as sns
 import pickle
@@ -13,6 +12,26 @@ import itertools as it
 plt.style.use('default')
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.framealpha': 1, "legend.frameon": 1, "lines.linewidth": 2})
+
+
+def seq_to_onehot(seq: str):
+    """
+    Converts a nucleotide sequence to a one-hot encoded matrix.
+
+    Args:
+        seq (str): Nucleotide sequence (A, C, G, T/U).
+
+    Returns:
+        np.ndarray: One-hot encoded matrix of the sequence.
+    """
+    seq = seq.upper()
+    seq = seq.replace('T', 'U')
+    mapping = dict(zip("ACGU", range(4)))
+    mapped = [mapping[i] for i in seq]
+    result = np.eye(4)[mapped].astype(float)
+    return result
+
+
 def motif_cdf(block_df_dict, color_dict, output):
 
     motif_cdf_dict = {}

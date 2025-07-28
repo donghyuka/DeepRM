@@ -20,11 +20,12 @@ extensions = [
     "myst_parser",
     "sphinxcontrib.mermaid",
 ]
+source_suffix = ['.rst', '.md']
 
 autosummary_generate = True  # create stub pages automatically
 napoleon_google_docstring = True
 html_theme = "sphinx_rtd_theme"
 
 # ─── HTML tweaks ──────────────────────────────────────────────────────────────
-html_logo   = "../images/deeprm_architecture.png"  # optional – adjust or remove
+html_logo   = "../images/deeprm.png"  # optional – adjust or remove
 mermaid_version = "10.9.1"

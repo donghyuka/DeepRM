@@ -1,7 +1,7 @@
 from .utils import *
 from .inference import *
 from .train import *
-from .preprocess import *
+from .train_preprocess import *
 from .model import *
 
 

@@ -3,12 +3,12 @@
 This file installs a `deeprm` shell command (via the entry‑point in
 `pyproject.toml`) that exposes four high‑level sub‑commands:
 
-  • preprocess – data preparation utilities
+  • train_preprocess – data preparation utilities
   • train      – model training pipeline
   • inference  – run the trained model and post‑processing (pileup)
   • qc         – quality‑control helpers
 
-Each sub‑command delegates to a corresponding module (`deeprm.preprocess.cli`,
+Each sub‑command delegates to a corresponding module (`deeprm.train_preprocess.cli`,
 `deeprm.train.cli`, etc.) if it exists.  If the target module defines a
 ``main(argv: list[str])`` function, we call it; otherwise we execute the
 module as ``python -m`` so users can keep their existing scripts unchanged.
@@ -27,7 +27,7 @@ from typing import List
 # ---------------------------------------------------------------------------
 
 _SUBMODULES: dict[str, str] = {
-    "preprocess": "deeprm.preprocess.cli",
+    "train_preprocess": "deeprm.train_preprocess.cli",
     "train": "deeprm.train.cli",
     "inference": "deeprm.inference.cli",
     "qc": "deeprm.qc.cli",
@@ -63,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
     for cmd, help_text in (
-            ("preprocess", "Prepare raw data for training / inference"),
+            ("train_preprocess", "Prepare raw data for training / inference"),
             ("train", "Train a DeepRM model"),
             ("inference", "Run model prediction + pileup aggregation"),
             ("qc", "Run quality‑control routines"),

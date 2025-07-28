@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 name = "deeprm"
 version = "0.1.0"
 description = "DeepRM – post‑processing & QC for Nanopore m6A detection"
-authors = [{name = "Hyeonseo Hwang", email = "your@email"}]
+authors = [{name = "Laboratory of Computational Biology, Seoul National University"}]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

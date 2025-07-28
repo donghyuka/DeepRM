@@ -1,13 +1,19 @@
 Quick‑start
 ===========
 
-A 10‑line snippet to run DeepRM on a demo file:
+To run DeepRM Inference on a demo file:
 
-.. code-block:: python
+.. code-block:: bash
 
-   from inference.pileup import run_pileup
-   import numpy as np
+   deeprm preprocess -i <input_file> -o <output_dir>
+   deeprm inference -i <output_dir> -o <predictions_dir>
+   deeprm pileup -i <predictions_dir> -o results.npz
 
-   demo_npz = "tests/demo_prediction.npz"
-   pm6a, dom = run_pileup(demo_npz)
-   print(pm6a[:4], dom[:4])
+The demo POD5 file can be found at:
+
+.. code-block:: text
+    <deeprm_dir>/example_data/example.pod5
+
+The full demo POD5 files from the human cell lines can be downloaded from ENA (European Nucleotide Archive) using the following accession:
+.. code-block:: text
+    ERRXXXXXX
