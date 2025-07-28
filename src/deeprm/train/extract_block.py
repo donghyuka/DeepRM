@@ -10,7 +10,11 @@ import pandas as pd
 import polyleven as pl
 import pysam
 from tqdm import tqdm
-from deeprm.utils.utils import mean_phred, printmessage, oom_killer
+
+from deeprm.utils.memory import start_mem_watchdog
+from deeprm.utils.utils import mean_phred
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 ## Step 1: Index all k-mers from the read.
 ## Step 2: Connect the spacers using the k-mer index.
@@ -371,6 +375,8 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
         None
     """
 
+    start_mem_watchdog()
+
     len_record = len(record_list)
     block_df_list = []
     flush_file_list = []
@@ -384,12 +390,11 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
             last_flush_idx = max(flush_idx)
             record_list = record_list[last_flush_idx:]
             gc.collect()
-            printmessage(f"[Process-{pid}] Resuming from {last_flush_idx}th read. {len(record_list)} reads remaining.")
+            log.info(f"[Process-{pid}] Resuming from {last_flush_idx}th read. {len(record_list)} reads remaining.")
         else:
-            printmessage(f"[Process-{pid}] No flush file found. Starting from the beginning.")
+            log.info(f"[Process-{pid}] No flush file found. Starting from the beginning.")
 
     for read_idx, record in tqdm(enumerate(record_list), total=len(record_list)):
-        oom_killer()
         read_idx += last_flush_idx
         read_id = record[0]
         seq = record[1].replace("T", "U")
@@ -570,32 +575,29 @@ def extract_block(input, output, indel_tolerance, indel_penalty, cb_size_toleran
             block_df = pd.read_pickle(f"{flush_path}df_{pid}.pkl")
             block_df_list.append(block_df)
         except:
-            printmessage(f"ERROR! PID {pid} did not return any result.")
+            log.warning(f"PID {pid} did not return any result.")
     block_df = pd.concat(block_df_list, axis=0).reset_index(drop=True)
     del block_df_list
     gc.collect()
 
-    print(block_df)
-
     block_df.to_pickle(f"{output}/block.pkl")
 
-    log = []
-    log.append(f"Total number of passed reads: {record_cnt:,}")
-    log.append(f"Total number of context blocks: {len(block_df):,}")
-    log.append(f"Context blocks per read: {len(block_df) / record_cnt:.2f}")
-    log.append(block_df["score"].describe())
-    log.append(block_df["penalty"].describe())
+    dag_log = []
+    dag_log.append(f"Total number of passed reads: {record_cnt:,}")
+    dag_log.append(f"Total number of context blocks: {len(block_df):,}")
+    dag_log.append(f"Context blocks per read: {len(block_df) / record_cnt:.2f}")
+    dag_log.append(block_df["score"].describe())
+    dag_log.append(block_df["penalty"].describe())
 
     log_path = f"{output}/dag_log.txt"
     with open(log_path, "w") as log_file:
-        for line in log:
+        for line in dag_log:
             log_file.write(f"{line}\n")
 
     print("=============================================")
-    for line in log:
-        printmessage(line)
+    for line in dag_log:
+        log.info(line)
     print("=============================================")
 
-    printmessage(f"Saved context blocks to {output}/block.pkl.")
-
+    log.info(f"Saved context blocks to {output}/block.pkl.")
     return block_df

@@ -2,35 +2,55 @@ import math
 import torch
 from torch import nn, Tensor
 from deeprm.utils.activations import get_activation_fn
-from typing import Tuple
+
+
+class ResNetBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = None, kernel_size: int = 3, stride: int = 1,
+                 activation: str = 'gelu', dropout: float = 0.1, groups: int = 1) -> None:
+        super(ResNetBlock, self).__init__()
+        if hidden_channels is None:
+            hidden_channels = out_channels
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.activation = get_activation_fn(activation)
+        self.conv1 = nn.Conv1d(in_channels, hidden_channels, kernel_size = 1, stride = stride, padding = "same")
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        self.conv2 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size, stride, padding = "same", groups = groups)
+        self.bn3 = nn.BatchNorm1d(out_channels)
+        self.dropout = nn.Dropout(dropout)
+        self.conv3 = nn.Conv1d(hidden_channels, out_channels, kernel_size = 1, stride = stride, padding = "same")
+
+        if in_channels != out_channels or stride != 1:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm1d(out_channels)
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:
+        residual = self.shortcut(x)
+        out = self.bn1(x)
+        out = self.activation(out)
+        out = self.conv1(out)
+        out = self.bn2(out)
+        out = self.activation(out)
+        out = self.conv2(out)
+        out = self.bn3(out)
+        out = self.activation(out)
+        out = self.dropout(out)
+        out = self.conv3(out)
+        out += residual
+        return out
+
 
 class TransformerModel(nn.Module):
-    """
-    Transformer model for processing k-mer and signal data.
 
-    Args:
-        d_model (int): Dimension of the model.
-        n_heads (int): Number of attention heads.
-        d_ff (int): Dimension of the feedforward network.
-        n_layers (int): Number of encoder layers.
-        encoder_dropout (float): Dropout rate for the encoder.
-        lin_dropout (float): Dropout rate for the linear layers.
-        kmer_size (int): Size of the k-mer.
-        signal_size (int): Size of the signal.
-        max_bq (int): Maximum base quality.
-        block_len (int): Length of the block.
-        seq_len (int): Length of the sequence.
-        t_act (str): Activation function for the transformer.
-        lin_act (str): Activation function for the linear layers.
-        lin_depth (int): Depth of the linear layers.
-        signal_stride (int): Stride for the signal.
-        **kwargs: Additional arguments.
-    """
     def __init__(self, d_model: int, n_heads: int, d_ff: int, n_layers: int,
                  encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
                  kmer_size: int = 5, signal_size: int = 25, max_bq: int = 40, block_len = 17, seq_len: int = 200,
                  t_act : str = 'gelu', lin_act : str = 'relu',
                  lin_depth: int = 1, signal_stride = 6, **kwargs) -> None:
+
         super().__init__()
 
         ## Embedding Initialization
@@ -43,6 +63,19 @@ class TransformerModel(nn.Module):
         self.model_type = 'Transformer'
         encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout,
                                                    activation = t_act,batch_first=True)
+
+        self.cnn_encoder = nn.Sequential()
+        self.cnn_encoder.add_module('resnet_1', ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups = 8,
+                                                            activation=t_act, dropout=encoder_dropout))
+        self.cnn_encoder.add_module('resnet_2', ResNetBlock(d_model, d_model, kernel_size=15, stride=1, groups = 8,
+                                                            activation=t_act, dropout=encoder_dropout))
+        self.cnn_encoder.add_module('resnet_3', ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups = 8,
+                                                            activation=t_act, dropout=encoder_dropout))
+        self.cnn_encoder.add_module('resnet_4', ResNetBlock(d_model, d_model, kernel_size=15, stride=1, groups = 8,
+                                                            activation=t_act, dropout=encoder_dropout))
+
+        self.cnn_encoder = nn.SyncBatchNorm.convert_sync_batchnorm(self.cnn_encoder)
+
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
 
         ## Regression Head Initialization
@@ -62,28 +95,12 @@ class TransformerModel(nn.Module):
         self.block_len = block_len
 
     def init_weights(self, initrange = 0.1):
-        """
-        Initializes the weights of the model.
-
-        Args:
-            initrange (float): Range for initializing the weights.
-        """
         self.kmer_embedding.weight.data.uniform_(-initrange, initrange)
         self.signal_embedding.weight.data.uniform_(-initrange, initrange)
         self.regression_head.init_weights(initrange)
         return None
 
     def process_kmer(self, src_kmer: Tensor, src_seg_len_flat: Tensor) -> Tensor:
-        """
-        Processes the k-mer data.
-
-        Args:
-            src_kmer (Tensor): Input k-mer tensor.
-            src_seg_len_flat (Tensor): Flattened segment length tensor.
-
-        Returns:
-            Tensor: Processed k-mer tensor.
-        """
         batch = src_kmer.shape[0]
         src_kmer = (src_kmer - 65).clip(None,8)%5 ## Convert ACGTU to 01233.
         src_kmer = src_kmer.unfold(1, self.kmer_size, 1)
@@ -97,91 +114,51 @@ class TransformerModel(nn.Module):
         return src_kmer
 
     def process_signal(self, src_signal: Tensor) -> Tensor:
-        """
-        Processes the signal data.
-
-        Args:
-            src_signal (Tensor): Input signal tensor.
-
-        Returns:
-            Tensor: Processed signal tensor.
-        """
         src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
         return src_signal
 
     def flatten_seg_len(self, src_seg_len: Tensor) -> Tensor:
-        """
-        Flattens the segment length tensor.
-
-        Args:
-            src_seg_len (Tensor): Input segment length tensor.
-
-        Returns:
-            Tensor: Flattened segment length tensor.
-        """
         src_seg_len_flat = torch.cat([src_seg_len, self.seq_len - src_seg_len.sum(dim = 1, keepdims=True)], dim = 1)
         src_seg_len_flat = src_seg_len_flat.flatten()
         return src_seg_len_flat
 
+    def create_src_pad_mask(self, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
+        batch = src_signal.shape[0]
+        src_pad_mask = torch.arange(self.seq_len, device=src_signal.device)
+        src_pad_mask = src_pad_mask.repeat(batch, 1)
+        src_pad_mask = src_pad_mask >= src_seg_len.sum(dim=1, keepdim=True)
+        return src_pad_mask
 
-    def create_mask(self, src_seg_len: Tensor, src_seg_len_flat: Tensor) -> Tuple[Tensor, Tensor]:
-        """
-        Creates a target mask and a padding mask for the source signal.
-
-        Args:
-            src_seg_len (Tensor): Segment length tensor.
-            src_seg_len_flat (Tensor): Flattened segment length tensor.
-
-        Returns:
-            Tuple[Tensor, Tensor]: Target mask tensor, padding mask tensor.
-        """
+    def create_target_mask(self, src_seg_len: Tensor, src_seg_len_flat: Tensor) -> Tensor:
         batch = src_seg_len.shape[0]
         width = src_seg_len.shape[1]
-        cb_size = width - (src_seg_len == 0).sum(dim = 1, keepdim=True)
-        base_index = torch.arange(width+1,device=src_seg_len.device, dtype = torch.int)
-        base_index = base_index.unsqueeze(0).expand(batch,-1).flatten().repeat_interleave(src_seg_len_flat).reshape(batch, self.seq_len)
-        target_mask = (base_index == (cb_size // 2)).float() ## dtype = float
-        pad_mask = base_index < cb_size ## dtype = bool
-        return target_mask, pad_mask
-
+        target_mask = torch.arange(width+1,device=src_seg_len.device, dtype = torch.int)
+        target_mask = target_mask == self.block_len//2
+        target_mask = target_mask.repeat(batch)
+        target_mask = target_mask.repeat_interleave(src_seg_len_flat)
+        target_mask = target_mask.reshape(batch, self.seq_len)
+        target_mask = target_mask.int()
+        return target_mask
 
     def process_dwell_bq(self, src_dwell_bq: Tensor, src_seg_len_flat: Tensor) -> Tensor:
-        """
-        Processes the dwell and base quality data.
-
-        Args:
-            src_dwell_bq (Tensor): Input dwell and base quality tensor.
-            src_seg_len_flat (Tensor): Flattened segment length tensor.
-
-        Returns:
-            Tensor: Processed dwell and base quality tensor.
-        """
         batch = src_dwell_bq.shape[0]
         channel = src_dwell_bq.shape[2]
         src_dwell_bq = torch.cat([src_dwell_bq, torch.zeros(batch, 1, channel, device = src_dwell_bq.device, dtype = torch.float32)], dim = 1)
-        src_dwell_bq = src_dwell_bq.flatten(end_dim=1).repeat_interleave(src_seg_len_flat,dim=0).reshape(batch, self.seq_len, channel)
+        src_dwell_bq = src_dwell_bq.flatten(end_dim=1)
+        src_dwell_bq = src_dwell_bq.repeat_interleave(src_seg_len_flat,dim=0)
+        src_dwell_bq = src_dwell_bq.reshape(batch, self.seq_len, channel)
         return src_dwell_bq
 
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor, src_dwell_bq: Tensor) -> Tensor:
-        """
-        Forward pass of the model.
 
-        Args:
-            src_kmer (Tensor): Input k-mer tensor.
-            src_signal (Tensor): Input signal tensor.
-            src_seg_len (Tensor): Segment length tensor.
-            src_dwell_bq (Tensor): Dwell and base quality tensor.
-
-        Returns:
-            Tensor: Output tensor.
-        """
         with torch.no_grad():
             src_seg_len_flat = self.flatten_seg_len(src_seg_len)
             src_kmer = self.process_kmer(src_kmer, src_seg_len_flat)
             src_signal = self.process_signal(src_signal)
             src_dwell_bq = self.process_dwell_bq(src_dwell_bq, src_seg_len_flat)
-            target_mask, src_pad_mask = self.create_mask(src_seg_len, src_seg_len_flat)
+            src_pad_mask = self.create_src_pad_mask(src_signal, src_seg_len)
+            target_mask = self.create_target_mask(src_seg_len, src_seg_len_flat)
 
         src_signal = torch.cat([src_signal, src_dwell_bq], dim = -1)
         kmer_embedding = self.kmer_embedding(src_kmer)
@@ -189,8 +166,11 @@ class TransformerModel(nn.Module):
         pos_encoding = self.pos_encoding(src_kmer.shape[0])
 
         ## add all embeddings and dropout
-        final_embedding = kmer_embedding + signal_embedding + pos_encoding
-        output = self.transformer_encoder(src=final_embedding, mask = None, src_key_padding_mask = src_pad_mask)
+        final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
+        final_embedding = final_embedding.permute(0, 2, 1)  # Change to (batch, feature, time)
+        output = self.cnn_encoder(final_embedding)
+        output = output.permute(0, 2, 1)  # Change back to (batch, time, feature)
+        output = self.transformer_encoder(src=output, mask = None, src_key_padding_mask = src_pad_mask)
 
         ## apply regression head to each token:
         output = self.regression_head(output)
@@ -208,13 +188,7 @@ class TransformerModel(nn.Module):
     ## END OF TransformerModel
 
 class PositionalEncoding(nn.Module):
-    """
-    Positional encoding for the transformer model.
 
-    Args:
-        d_model (int): Dimension of the model.
-        seq_len (int): Length of the sequence.
-    """
     def __init__(self, d_model: int, seq_len: int) -> None:
         super().__init__()
 
@@ -227,30 +201,16 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, batch_size) -> Tensor:
         """
-        Forward pass of the positional encoding.
-
-        Args:
-            batch_size (int): Batch size.
-
-        Returns:
-            Tensor: Positional encoding tensor.
+        Arguments:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
         pe = self.pe.repeat(batch_size, 1, 1)
         return pe
 
     ## END OF PositionalEncoding
 
-class RegressionHead(nn.Module):
-    """
-    Regression head for the transformer model.
 
-    Args:
-        d_model (int): Dimension of the model.
-        lin_act (str): Activation function for the linear layers.
-        lin_depth (int): Depth of the linear layers.
-        lin_dropout (float): Dropout rate for the linear layers.
-        seq_length (int): Length of the sequence.
-    """
+class RegressionHead(nn.Module):
     def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
         super().__init__()
         layer_list=  []
@@ -268,24 +228,9 @@ class RegressionHead(nn.Module):
         self.lin_layers = nn.Sequential(*layer_list)
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Forward pass of the regression head.
-
-        Args:
-            x (Tensor): Input tensor.
-
-        Returns:
-            Tensor: Output tensor.
-        """
         return self.lin_layers(x)
 
     def init_weights(self, initrange = 0.1):
-        """
-        Initializes the weights of the regression head.
-
-        Args:
-            initrange (float): Range for initializing the weights.
-        """
         for layer in self.lin_layers:
             if isinstance(layer, nn.Linear):
                 layer.weight.data.uniform_(-initrange, initrange)

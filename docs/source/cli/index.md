@@ -4,9 +4,10 @@
 :maxdepth: 1
 :caption: Packages
 
+preprocess
 inference
+pileup
 train
-qc
-model
-utils
+evaluate
+convert
 ```

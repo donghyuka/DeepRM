@@ -5,7 +5,9 @@ import glob
 import gc
 import numpy as np
 from torch.utils.data import DataLoader, IterableDataset
-from deeprm.utils.utils import printmessage
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
+
 
 ## Partially based on https://discuss.pytorch.org/t/an-iterabledataset-implementation-for-chunked-data/124437
 
@@ -220,8 +222,8 @@ class NanoporeDataset(IterableDataset):
     Iterable dataset for loading Nanopore data from NPZ files.
 
     Args:
-        pos_data_path (str): Path to the directory containing positive samples.
-        neg_data_path (str): Path to the directory containing negative samples.
+        pos_data_path (list[str]): Paths to the directory containing positive samples.
+        neg_data_path (list[str]): Paths to the directory containing negative samples.
         batch_size (int): Batch size for loading data.
         disk_shard_size (int): Size of the disk shard.
         rank (int): Rank of the current process.
@@ -485,18 +487,20 @@ def load_dataset(pos_data_path, neg_data_path, batch_size,
     if class_ratio is None:
         class_ratio = len(neg_data_paths) / len(pos_data_paths)
         if rank == 0:
-            printmessage(f"Neg:Pos = {class_ratio:.3f}:1", msg_type="info")
+            log.info(f"Neg:Pos = {class_ratio:.3f}:1")
 
     if yield_period is None:
         yield_period = batch_size * 25
 
     min_len = min(len(pos_data_paths), len(neg_data_paths))
     if min_len < num_replicas:
-        raise printmessage(f"The number of datapoints is smaller than the number of GPUs: {min_len} < {num_replicas}", msg_type="error", error=ValueError)
+        log.error(f"The number of datapoints is smaller than the number of GPUs: {min_len} < {num_replicas}")
+
+        raise ValueError(f"The number of datapoints is smaller than the number of GPUs: {min_len} < {num_replicas}")
     if min_len < num_workers * num_replicas:
         new_max_workers = min_len // num_replicas
-        printmessage(f"The number of datapoints is smaller than the number of workers: {min_len} < {num_workers * num_replicas}", msg_type="warning")
-        printmessage(f"Setting number of workers to {new_max_workers * num_replicas}", msg_type="warning")
+        log.warning(f"The number of datapoints is smaller than the number of workers: {min_len} < {num_workers * num_replicas}")
+        log.warning(f"Setting number of workers to {new_max_workers * num_replicas}")
         num_workers = new_max_workers
 
     dataset = NanoporeDataset(pos_data_paths, neg_data_paths, batch_size, disk_shard_size, rank, num_replicas, shuffle_buffer_size,

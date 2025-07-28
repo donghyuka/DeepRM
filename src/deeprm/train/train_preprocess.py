@@ -16,7 +16,10 @@ import pysam
 from tqdm import tqdm
 import shutil
 from deeprm.train.extract_block import extract_block
-from deeprm.utils.utils import printmessage, oom_killer
+from deeprm.utils.logging import get_logger
+from deeprm.utils.memory import start_mem_watchdog
+
+log = get_logger(__name__)
 
 
 def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):
@@ -80,7 +83,7 @@ def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate
 
                 pbar.update(1)
 
-    printmessage(f"Valid read count: {count}", msg_type="info")
+    log.info(f"Valid read count: {count}")
 
     for signal_path, data in tqdm.tqdm(data_dict.items(), total=len(data_dict), desc="Saving Move Data"):
         move_df = pd.DataFrame.from_dict(data, orient="columns")
@@ -156,9 +159,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
     index_dict_local = {}
     chunk_buffer = []
     pod5_idx = 0
+    start_mem_watchdog()
 
     for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list), desc=f"Parsing POD5 Files"):
-        oom_killer()
         signal_list = []
         offset_list = []
         scale_list = []
@@ -182,11 +185,11 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
                     id_list.append(id)
 
             if skipped > 0:
-                printmessage(f"Skipped {skipped} faulty records in: {pod5_path}", msg_type="warning")
+                log.warning(f"Skipped {skipped} faulty records in: {pod5_path}")
 
         except:
             ## Pod5 file is corrupted
-            printmessage(f"Corrupted POD5 file: {pod5_path} - Skipping", msg_type="warning")
+            log.warning(f"Corrupted POD5 file: {pod5_path} - Skipping")
             continue
 
         df = pd.DataFrame({"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list})
@@ -489,6 +492,8 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
         None
     """
 
+    start_mem_watchdog()
+
     trim = kmer//2
 
     quantile_a = norm_factor["quantile_a"]
@@ -497,7 +502,6 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
     scale_mult = norm_factor["scale_mult"]
 
     for signal_path in tqdm.tqdm(signal_path_arr, total=len(signal_path_arr), desc="Segmenting and Tokenizing Signals"):
-        oom_killer()
         file_id = signal_path.split('/')[-1]
 
         if not os.path.exists(signal_path):
@@ -553,7 +557,7 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
             signal_df["signal"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal"], x["segment_len_arr"],
                                                                                       kmer, sampling, sig_window, max_token_len), axis=1)
         except:
-            print(f"Signal Tokenization Error in: {signal_path} - Skipping")
+            log.warning(f"Signal Tokenization Error in: {signal_path} - Skipping")
             continue
 
         signal_df = signal_df[signal_df["signal"].notnull()]
@@ -647,7 +651,7 @@ def split_block_df(signal_path_dict, signal_path_arr, intermediate_path, block_d
     Returns:
         None
     """
-    printmessage("Reading Block Dataframe. It may take a while.", msg_type="info")
+    log.info("Reading Block Dataframe. It may take a while.")
     block_df = assign_block_id(block_df)
     block_df["signal_path"] = block_df["read_id"].map(signal_path_dict)
 
@@ -735,9 +739,8 @@ def parse_args():
             config_dict = json.load(config_file)
             for key, value in config_dict.items():
                 setattr(args, key, value)
-            printmessage(f"Loaded configuration from: {args.config}")
-
-    assert len(args.anchor_list) == args.cb_per_bb
+            log.info(f"Loaded configuration from: {args.config}")
+            assert len(args.anchor_list) == args.cb_per_bb
     assert len(args.spacer_list) == args.cb_per_bb + 1
     assert args.skip_size_tolerance >= args.cb_size_tolerance
 
@@ -790,8 +793,8 @@ def main():
     gc.collect()
 
     if len(signal_path_arr) == 0:
-        printmessage("No valid signal files found. Exiting.", msg_type="error")
-        return None
+        log.error("No valid signal files found. Exiting.")
+        raise FileNotFoundError("No valid signal files found in the provided POD5 directory.")
 
     with open(signal_index_path, "wb") as outfile:
         pickle.dump(index_dict, outfile)
@@ -843,8 +846,8 @@ def main():
     for proc in proc_list:
         proc.join()
 
-    printmessage("Signal Segmentation and Tokenization Complete", msg_type="success")
-    printmessage("Saved to: " + args.output, msg_type="success")
+    log.info("Signal Segmentation and Tokenization Complete")
+    log.info("Saved to: " + args.output)
     return None
 
 

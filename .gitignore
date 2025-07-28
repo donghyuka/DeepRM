@@ -1,9 +1,4 @@
-## Notebooks
-# *.ipynb
-# *.ipynb_checkpoints
-
-## Large Files
-/notebooks/scatter_041124.ipynb
-
 ## idea
-.idea
+.idea/
+## docs build
+docs/_build

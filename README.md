@@ -48,7 +48,7 @@ samtools index -@ {args.cpu} {bam_path}
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
-deeprm preprocess --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
+deeprm inference prep --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
 ```
 * This will create:
   * Inference dataset: /block
@@ -58,12 +58,12 @@ deeprm preprocess --input <input_POD5_dir> --output <output_file> --dorado <dora
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
-deeprm inference --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
+deeprm inference run --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
 ```
 * This will create a directory with single-molecule level result files.
 * To get a site-level result, run the following command:
 ```bash
-deeprm pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
+deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
 ```
 * This will create a directory with site-level result files.
 
@@ -77,20 +77,20 @@ samtools index -@ {args.cpu} {bam_path}
 ```
 * To preprocess the training data (synthetic oligonucleotide), run the following command:
 ```bash
-python -m train_preprocess --input <input_POD5_dir> --output <output_file>
+deeprm train prep --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
   * Training dataset: /block
 * To compile the training dataset, run the following command:
 ```bash
-deeprm compile_dataset --input <input_POD5_dir> --output <output_file>
+deeprm train compile --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
   * Training dataset: /block
 #### Run Training
 * To train the model, run the following command:
 ```bash
-deeprm train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
+deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
 
@@ -107,7 +107,7 @@ deeprm train --model deeprm_model --data <data_dir> --output <output_dir> --gpu_
 1. Install via PIP (recommended)
 
 ```bash
-python -m pip install -e deeprm
+python -m pip install deeprm
 ```
 
 2. Install via Conda

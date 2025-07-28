@@ -5,10 +5,12 @@ import numpy as np
 import multiprocessing as mp
 import pandas as pd
 from tqdm import tqdm
-from deeprm.utils.utils import mean_phred, printmessage
+from deeprm.utils.utils import mean_phred
 from matplotlib import pyplot as plt
 import seaborn as sns
 from collections import deque
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 plt.style.use('default')
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -23,7 +25,7 @@ def parse_args():
     parser.add_argument("--thread","-t", type=int, dest="thread", help="Number of threads per process", default=4)
     parser.add_argument("--mapq","-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
     parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
-    parser.add_argument("--len ", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
+    parser.add_argument("--len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
     args = parser.parse_args()
     return args
 
@@ -157,7 +159,7 @@ def main():
     run_flag = True
 
     if os.path.exists(args.output):
-        printmessage("Output directory already exists. Attempting to load pickle")
+        log.info("Output directory already exists. Attempting to load pickle")
         try:
             error_df = pd.read_pickle(f"{args.output}/error_rate.pkl")
             run_flag = False
@@ -168,14 +170,14 @@ def main():
     if run_flag:
         os.makedirs(args.output, exist_ok=True)
 
-        printmessage("Extracting CIGAR string")
+        log.info("Extracting CIGAR string")
         error_df = extract_cigar_master(args)
         error_df.to_pickle(f"{args.output}/error_rate.pkl")
 
 
     assert len(error_df) > 0, "Error rate dataframe is empty. Check input BAM file"
 
-    printmessage("Plotting error rate")
+    log.info("Plotting error rate")
     plot_kde(error_df, args)
     plot_boxplot(error_df, args)
 

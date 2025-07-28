@@ -4,13 +4,14 @@ import os, glob
 import argparse
 import numpy as np
 from deeprm.inference.inference_dataloader import load_dataset
-from deeprm.utils.utils import printmessage
 import torch.multiprocessing as mp
 import tqdm
 import importlib
 from collections import deque
 from torch.amp import autocast
 from concurrent.futures import ProcessPoolExecutor
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 ## 1. Load Eval Data and Model
 ## 2. Run Inference.
@@ -33,7 +34,7 @@ def parse_args():
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
-    parser.add_argument("--gpu", "-g", type=int, default=4, help="GPU device", dest="num_gpu")
+    parser.add_argument("--gpu", "-g", type=int, default=4, help="Num. of GPU devices", dest="num_gpu")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
@@ -80,12 +81,11 @@ def run_inference(args):
     """
     torch.multiprocessing.set_sharing_strategy('file_system')
     args_dict = vars(args)
-    printmessage("Inference Program Started.")
-    if args_dict["gpu"] > 0:
-        printmessage(f"Using {args.gpu} GPUs.")
+    log.info("Inference Program Started.")
+    if args_dict["num_gpu"] > 0:
+        log.info(f"Using {args.num_gpu} GPUs.")
     else:
-        printmessage("Using CPU.")
-
+        log.info("Using CPU.")
     model_list = []
     for model_path in args_dict["model"]:
         if model_path.endswith(".pt"):
@@ -101,20 +101,16 @@ def run_inference(args):
         raise ValueError("Invalid data path. It should be a directory containing data files.")
     for model in model_list:
         ## make tensorboard directory
-        profile_dir = os.path.join(args.profile_path,os.path.basename(model)+args_dict['postfix']+".profile"+f".{time.strftime('%Y%m%d%H%M%S')}")
-        if not os.path.exists(profile_dir):
-            os.makedirs(profile_dir, exist_ok=True)
-        printmessage(f"Running inference: {model}")
+        log.info(f"Running inference: {model}")
         args_dict_model = args_dict.copy()
         args_dict_model["model"] = model
-        args_dict_model["profile_dir"] = profile_dir
         out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1][:-3]}-{args_dict['data'].split('/')[-1]}"
         if len(args_dict["postfix"]) > 0:
             out_dir = f"{out_dir}-{args_dict['postfix']}"
-        print(out_dir)
+        log.info(f"Output directory: {out_dir}")
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
-        mp.spawn(inference_worker, nprocs=max(1,args.gpu), args=(args_dict_model,))
+        mp.spawn(inference_worker, nprocs=max(1,args.num_gpu), args=(args_dict_model,), join=True)
     return None
 
 
@@ -130,7 +126,7 @@ def inference_worker(rank, args_dict):
         None
     """
     gpu_id = args_dict["gpu_pool"][rank]
-    if args_dict["gpu"] > 0:
+    if args_dict["num_gpu"] > 0:
         save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
     else:
         save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
@@ -143,8 +139,10 @@ def inference_worker(rank, args_dict):
         model_config["spectrogram_size"] = 21
 
     dwell_bq_dim = 3
+    TransformerModel = importlib.import_module(f"deeprm.model.deeprm_model").TransformerModel
 
-    TransformerModel = importlib.import_module(f"model.{model_config['model']}").TransformerModel
+    ## TODO: Fix this to be more flexible
+    # TransformerModel = importlib.import_module(f"deeprm.model.{model_config['model']}").TransformerModel
     model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
                              n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
                              t_act = model_config["t_act"], lin_act = model_config["lin_act"],
@@ -159,10 +157,10 @@ def inference_worker(rank, args_dict):
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
-        printmessage(f"Total Params: {total_params:,}")
-    if args_dict["gpu"] > 0:
+        log.info(f"Total Params: {total_params:,}")
+    if args_dict["num_gpu"] > 0:
         model.to(gpu_id)
-    model.load_state_dict(state_dict=save_dict["model_state_dict"])
+    model.load_state_dict(state_dict=save_dict["model_state_dict"], strict = False)
     save_dict.clear()
     model.eval()
 
@@ -176,7 +174,7 @@ def inference_worker(rank, args_dict):
     else:
         saved = 0
 
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1,args_dict["gpu"]),
+    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1,args_dict["num_gpu"]),
                                prefetch_factor = args_dict["prefetch"],
                                worker = args_dict["worker"],
                                cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
@@ -190,11 +188,11 @@ def inference_worker(rank, args_dict):
     return None
 
 
-def to_gpu(data, rank):
-    src_signal = data["signal_token"].to(rank)
-    src_seg_len = data["segment_len"].to(rank)
-    src_kmer = data["kmer_token"].to(rank)
-    src_dwell_bq = data["dwell_bq_token"].to(rank)
+def to_gpu(data, gpu_id):
+    src_signal = data["signal_token"].to(gpu_id)
+    src_seg_len = data["segment_len"].to(gpu_id)
+    src_kmer = data["kmer_token"].to(gpu_id)
+    src_dwell_bq = data["dwell_bq_token"].to(gpu_id)
     return [src_kmer, src_signal, src_seg_len, src_dwell_bq]
 
 def pred_step(data, model):
@@ -221,7 +219,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     flush_idx += 1
                     continue
 
-                next_data_proc = executor.submit(to_gpu, next_data, rank)
+                next_data_proc = executor.submit(to_gpu, next_data, gpu_id)
                 this_pred = model(*this_data)
 
                 if args_dict["output_id"] is not None:
@@ -266,6 +264,5 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
 
 if __name__ == "__main__":
     main()
-
 
 

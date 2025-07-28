@@ -4,9 +4,9 @@ To run DeepRM Inference on a demo file:
 
 ```bash
 
-deeprm preprocess -i <input_file> -o <output_dir>
-deeprm inference -i <output_dir> -o <predictions_dir>
-deeprm pileup -i <predictions_dir> -o results.npz
+deeprm inference prep -i <input_file> -o <output_dir>
+deeprm inference run -i <output_dir> -o <predictions_dir>
+deeprm inference pileup -i <predictions_dir> -o results.npz
 
 ```
 The demo POD5 file can be found at:

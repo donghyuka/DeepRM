@@ -6,8 +6,9 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 import pickle
 import argparse
-from deeprm.utils.utils import printmessage
 import itertools as it
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 plt.style.use('default')
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -187,7 +188,7 @@ def parse_args():
             else:
                 raise ValueError("Unable to detect name from block file. Supply --name manually.")
         args.name = name
-        printmessage("Names detected:",args.name)
+        log.info("Names detected:",args.name)
     return args
 
 def plot_violin(block_df_dict, color_dict, cb_len, output):
@@ -205,13 +206,11 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
         df["bq_idx"] = df["bq_idx"].astype(int)
         df = df.dropna()
         df_list.append(df)
-        print(df)
         color_list.append(color_dict[name])
 
     palette = sns.color_palette(color_list)
 
     df = pd.concat(df_list).reset_index(drop=True)
-    print(df)
 
     fig, ax = plt.subplots(1, 1, figsize=(30,10))
     sns.violinplot(x="bq_idx", y="bq", hue="name", data=df, ax=ax, palette=palette, linewidth=0.5,
@@ -236,7 +235,6 @@ def plot_motif(perfect_block_df_dict, color_dict, args, motif_list = ["AGACU","C
         for block_name, block_df in perfect_block_df_dict.items():
             motif_block_df = block_df[block_df["motif"] == motif].copy()
             motif_block_df_dict[block_name] = motif_block_df
-        print(motif_block_df_dict)
         bq_plot(motif_block_df_dict, color_dict, args.output, sample=None, comment=f"-{motif}")
         plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
 
@@ -270,22 +268,22 @@ def main():
     output_file_exists = False
 
     if os.path.exists(args.output):
-        printmessage("Output directory already exists. Attempting to load pickle.")
+        log.info("Output directory already exists. Attempting to load pickle.")
         try:
             block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
             perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
             load_success = True
             output_file_exists = True
-            printmessage("Pickle loading successful.")
+            log.info("Pickle loading successful.")
         except:
-            printmessage("Pickle loading from output directory failed.")
             load_success = False
             output_file_exists = False
             block_df_dict = {}
             perfect_block_df_dict = {}
+            log.info("Pickle loading from output directory failed.")
 
     if not load_success:
-        printmessage("Attempting to load intermediate files.")
+        log.info("Attempting to load intermediate files.")
         try:
             for intermediate in args.intermediate:
                 block_df_dict_run = pickle.load(open(intermediate, "rb"))
@@ -294,15 +292,16 @@ def main():
                 perfect_block_df_dict.update(perfect_block_df_dict_run)
             load_success = True
             output_file_exists = False
-            printmessage("Pickle loading successful.")
+            log.info("Pickle loading from intermediate files successful.")
         except:
-            printmessage("Pickle loading failed.")
             load_success = False
             output_file_exists = False
             block_df_dict = {}
             perfect_block_df_dict = {}
+            log.info("Pickle loading from intermediate files failed.")
 
     if not load_success:
+        log.info("Loading block files.")
         for block, name, block_type in zip(args.block, args.name, args.type):
             block_name = f"{name} ({block_type})"
             block_df = pd.read_pickle(block)

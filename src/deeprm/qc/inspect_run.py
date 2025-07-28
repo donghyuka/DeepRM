@@ -11,9 +11,11 @@ import pysam
 from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-from deeprm.utils.utils import mean_phred, printmessage
+from deeprm.utils.utils import mean_phred
 import multiprocessing as mp
 from collections import deque
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 plt.style.use('default')
 plt.style.use('seaborn-v0_8-whitegrid')
@@ -208,14 +210,13 @@ def main():
     args = parse_args()
     ## Check if BAM is indexed
     if not os.path.exists(args.bam_path + ".bai"):
-        printmessage("BAM file is not indexed. Indexing BAM file...")
+        log.info("BAM file is not indexed. Indexing BAM file...")
         pysam.index(args.bam_path, nthreads=args.threads * args.process)
-        printmessage("BAM file indexed.")
+        log.info("BAM file indexed.")
 
     load_success = False
 
     if os.path.exists(args.out_path):
-        printmessage("Output directory already exists. Attempting to load pickle")
         try:
             with open(f"{args.out_path}/read_len.pkl", "rb") as f:
                 read_len_arr = pickle.load(f)
@@ -224,9 +225,10 @@ def main():
             with open(f"{args.out_path}/polya_len.pkl", "rb") as f:
                 polya_len_arr = pickle.load(f)
             load_success = True
+            log.info("Output directory already exists. Pickle files loaded successfully.")
         except:
-            printmessage("Pickle loading failed. Re-run with a different output directory")
             load_success = False
+            log.warning("Output directory exists but pickle files are not found or corrupted. Recalculating.")
 
     if not load_success:
         os.makedirs(args.out_path, exist_ok=True)
@@ -236,7 +238,7 @@ def main():
         collect_dict["qual_arr"] = manager.list()
         collect_dict["polya_len_arr"] = manager.list()
 
-        printmessage("Reading BAM file")
+        log.info("Reading BAM file")
         processes = []
         for pid in range(args.process):
             p = mp.Process(target=read_bam_worker, args=(args, pid, collect_dict))
@@ -245,15 +247,14 @@ def main():
         for p in processes:
             p.join()
 
-        printmessage("Collecting results")
+        log.info("Collecting results")
         read_len_arr = np.concatenate(collect_dict["read_len_arr"])
         mean_qual_arr = np.concatenate(collect_dict["qual_arr"])
         polya_len_arr = np.concatenate(collect_dict["polya_len_arr"])
 
         manager.shutdown()
 
-        printmessage("Saving pickle")
-        ## save pickle
+        log.info("Saving pickle")## save pickle
         with open(f"{args.out_path}/read_len.pkl", "wb") as f:
             pickle.dump(read_len_arr, f)
         with open(f"{args.out_path}/mean_qual.pkl", "wb") as f:
@@ -261,7 +262,8 @@ def main():
         with open(f"{args.out_path}/polya_len.pkl", "wb") as f:
             pickle.dump(polya_len_arr, f)
 
-    printmessage("Plotting")
+    log.info("Plotting")
+
     if not args.mrna:
         plot_read_len_oligo(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
     else:

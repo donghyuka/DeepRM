@@ -19,14 +19,12 @@ Requires:
     - tqdm
 """
 
-## suppress pandas deprecation warnings
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
 import argparse, gc, os, pod5, pysam, tqdm, glob
 import multiprocessing as mp
 import numpy as np
 import pandas as pd
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 def mean_phred(phred):
     """
@@ -309,7 +307,7 @@ def segment_normalize_signal(bam_df, pod5_paths, norm_factor, pid, token_output_
         try:
             pod5_df = parse_pod5(pod5_path)
         except:
-            print(f"Corrupted POD5 file: {pod5_path}")
+            log.info(f"Corrupted POD5 file: {pod5_path}")
             continue
         if len(pod5_df) == 0:
             continue
@@ -319,8 +317,8 @@ def segment_normalize_signal(bam_df, pod5_paths, norm_factor, pid, token_output_
         pod5_df = pd.merge(pod5_df, bam_df.loc[valid_index], left_index=True, right_index=True, how="inner")
         if len(pod5_df) == 0:
             continue
-
-        for signal_df in np.array_split(pod5_df, max(1,np.ceil(len(pod5_df)//process_once))):
+        split_points = np.array_split(np.arange(len(pod5_df)), max(1,np.ceil(len(pod5_df)//process_once)))
+        for signal_df in [pod5_df.iloc[s[0]:s[-1]+1] for s in split_points]:
             if len(signal_df) == 0:
                 continue
             output_index += 1
@@ -363,7 +361,7 @@ def segment_normalize_signal(bam_df, pod5_paths, norm_factor, pid, token_output_
                 signal_df["signal"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal"], x["segment_len_arr"],
                                                                                           kmer_len, sampling, sig_window, max_token_len), axis=1)
             except:
-                print(f"Signal Tokenization Error: - Skipping")
+                log.warning(f"Signal Tokenization Error: - Skipping")
                 continue
             signal_df = signal_df[signal_df["signal"].notnull()]
             if len(signal_df) == 0:
@@ -499,7 +497,7 @@ def main():
     Returns:
         None
     """
-    print("Started DeepRM Preprocessing")
+    log.info("Started DeepRM Preprocessing")
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
     norm_factor = get_norm_factor()
@@ -537,7 +535,7 @@ def main():
     for proc in proc_list:
         proc.join()
 
-    print("Finished DeepRM Preprocessing")
+    log.info("Finished DeepRM Preprocessing")
     return None
 
 

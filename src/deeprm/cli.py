@@ -3,7 +3,6 @@
 This file installs a `deeprm` shell command (via the entry‑point in
 `pyproject.toml`) that exposes four high‑level sub‑commands:
 
-  • train_preprocess – data preparation utilities
   • train      – model training pipeline
   • inference  – run the trained model and post‑processing (pileup)
   • qc         – quality‑control helpers
@@ -21,20 +20,30 @@ import runpy
 import sys
 from types import ModuleType
 from typing import List
+from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PkgNotFound
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 _SUBMODULES: dict[str, str] = {
-    "train_preprocess": "deeprm.train.train_preprocess",
-    "train_compile": "deeprm.train.train_compile",
-    "train": "deeprm.train.train",
-    "preprocess": "deeprm.inference.inference_preprocess",
-    "inference": "deeprm.inference.inference",
+    "inference": "deeprm.inference.cli",
     "qc": "deeprm.qc.cli",
+    "train": "deeprm.train.cli",
 }
 
+def _resolved_version() -> str:
+    """Return the installed deeprm version, with graceful fallbacks."""
+    try:
+        return _pkg_version("deeprm")
+    except _PkgNotFound:
+        try:
+            # fall back to package attribute if available (e.g., editable install)
+            from . import __version__  # type: ignore
+            return __version__
+        except Exception:
+            return "unknown"
 
 def _load_submodule(path: str) -> ModuleType:
     """Import *path* and return the module object."""
@@ -62,14 +71,15 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="deeprm",
         description="DeepRM unified command‑line interface",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_resolved_version()}")
 
     for cmd, help_text in (
-            ("train_preprocess", "Prepare raw data for training / inference"),
             ("train", "Train a DeepRM model"),
             ("inference", "Run model prediction + pileup aggregation"),
             ("qc", "Run quality‑control routines"),
     ):
+        # Add a subparser for each command
+        subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
         # Each parser captures *all* remaining args to forward unchanged
         sp = subparsers.add_parser(cmd, help=help_text, add_help=False)
         sp.add_argument(

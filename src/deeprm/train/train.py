@@ -12,8 +12,9 @@ import os
 import time
 import tqdm
 import numpy as np
-from deeprm.utils.utils import printmessage
 import importlib
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 
 def parse_args():
@@ -435,7 +436,7 @@ class Trainer:
             self.current_epoch = epoch
             self._run_epoch()
             if self.continue_training == 0:
-                printmessage(f"Early Stopping at Epoch {self.current_epoch}")
+                log.error(f"Early Stopping at Epoch {self.current_epoch}")
                 break
         if self.rank == 0:
             self.tb_writer.flush()
@@ -478,8 +479,7 @@ def prepare_dataloader(data_path, rank, num_gpu, num_workers, **kwargs):
         tuple: A tuple containing the training and validation DataLoaders.
     """
     if rank == 0:
-        printmessage(f"Total number of dataloader workers: {num_workers * num_gpu}")
-
+        log.info(f"Total number of dataloader workers: {num_workers * num_gpu}")
     train_pos_data_path = f"{data_path}/train/pos"
     train_neg_data_path = f"{data_path}/train/neg"
     val_pos_data_path = f"{data_path}/val/pos"
@@ -518,7 +518,7 @@ def main_worker(rank, args_dict):
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
-        printmessage(f"Total Params: {total_params:,}")
+        log.info(f"Total Params: {total_params:,}")
 
     model = model.to(gpu_id)
 
@@ -581,9 +581,9 @@ def main_worker(rank, args_dict):
                       optimizer=optimizer, scheduler=scheduler, loss_func=loss_func, metric_func_dict=metric_func_dict,
                       model_config=args_dict, **args_dict)
 
-    printmessage(f"[GPU {gpu_id}] Trainer Setup Complete.")
+    log.info(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
-    printmessage(f"[GPU {gpu_id}] Training Loop Complete.")
+    log.info(f"[GPU {gpu_id}] Training Loop Complete.")
     dist.destroy_process_group()
     return None
 
@@ -605,16 +605,16 @@ def main_master():
     args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
     if args_dict["seed"] is None:
         args_dict["seed"] = np.random.randint(0, 10000000)
-    printmessage("Training Program Started.")
-    printmessage(f"Seed: {args_dict['seed']}")
-    printmessage(f"Using {args_dict['num_gpu']} GPUs.")
-    mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
+    log.info("Training Program Started.")
+    log.info(f"Seed: {args_dict['seed']}")
+    log.info(f"Using {args_dict['num_gpu']} GPUs.")
     try:
         mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
     except Exception as e:
-        printmessage("Training Program Failed.", msg_type="error", error=e)
-    finally:
-        printmessage("Training Program Complete.")
+        log.error("Training Program Failed.")
+        raise e
+    log.info("Training Program Complete.")
+
     return None
 
 

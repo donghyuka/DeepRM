@@ -1,27 +1,9 @@
-##
-## Output structure:
-##  |
-##  |---/score-1.0
-##  |   |---/train
-##  |   |   |---/pos
-##  |   |   |---/neg
-##  |   |---/val
-##  |   |   |---/pos
-##  |   |   |---/neg
-##  ...
-##  |---/score-0.0
-##      |---/train
-##      |   |---/pos
-##      |   |---/neg
-##      |---/val
-##      |   |---/pos
-##      |   |---/neg
-##
-
 import numpy as np
 import multiprocessing as mp
 import os, argparse, tqdm, gc, glob
-from deeprm.utils.utils import printmessage, oom_killer
+from deeprm.utils.memory import start_mem_watchdog
+from deeprm.utils.logging import get_logger
+log = get_logger(__name__)
 
 def parse_args():
     """
@@ -41,23 +23,26 @@ def parse_args():
     args = args.parse_args()
 
     if os.path.exists(args.out_path):
-        printmessage(f"Output directory {args.out_path} already exists", msg_type="error", error=FileExistsError)
+        log.error(f"Output directory {args.out_path} already exists")
+        raise FileExistsError(f"{args.out_path} already exists")
     else:
         os.makedirs(args.out_path)
 
     if args.pos_path is None:
-        printmessage("No positive token files specified", msg_type="warning")
+        log.warning("No positive token files specified")
     else:
         for pos_path in args.pos_path:
             if not os.path.exists(pos_path):
-                printmessage(f"Positive token file {pos_path} does not exist", msg_type="error", error=FileNotFoundError)
+                log.error(f"Positive token file {pos_path} does not exist")
+                raise FileNotFoundError(f"Positive token file {pos_path} does not exist")
 
     if args.neg_path is None:
-        printmessage("No negative token files specified", msg_type="warning")
+        log.warning("No negative token files specified")
     else:
         for neg_path in args.neg_path:
             if not os.path.exists(neg_path):
-                printmessage(f"Negative token file {neg_path} does not exist", msg_type="error", error=FileNotFoundError)
+                log.error(f"Negative token file {neg_path} does not exist")
+                raise FileNotFoundError(f"Negative token file {neg_path} does not exist")
 
     return args
 
@@ -169,12 +154,13 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
     Returns:
         None
     """
+    start_mem_watchdog()
+
     file_id = [-1]
     data_buffer = {x:[] for x in column_keys}
     buffer_dict = {key:None for key in remainder_dict.keys()}
 
     for df_idx, df_path in tqdm.tqdm(enumerate(in_file_list), desc=f"Saving {label_str} data", total=len(in_file_list)):
-        oom_killer()
         with np.load(df_path) as data:
             for key in column_keys:
                 data_buffer[key].append(data[key])
@@ -281,7 +267,7 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
         if len(chunk_data[column_keys[0]]) == chunk:
             save_path = f"{out_path}/score-{score_name}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
             if os.path.exists(save_path):
-                printmessage(f"File {save_path} already exists - overwriting.", msg_type="warning")
+                log.warning(f"File {save_path} already exists - overwriting.")
             chunk_data.pop("block_score")
             np.savez_compressed(save_path, **chunk_data)
             del chunk_data

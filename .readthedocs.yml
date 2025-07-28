@@ -5,10 +5,7 @@ build:
     python: "3.11"
 python:
   install:
-    - requirements: requirements.txt          # project runtime deps
     - method: pip
-      path: .
-    - method: pip                             # doc‑only deps
-      requirements: docs/requirements-doc.txt
+      path: .[docs]      # use docs extras only
 sphinx:
-  configuration: docs/source/conf.py          # relative path to conf.py
+  configuration: docs/source/conf.py
