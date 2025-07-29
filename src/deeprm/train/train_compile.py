@@ -21,28 +21,41 @@ from deeprm.utils.memory import start_mem_watchdog
 log = get_logger(__name__)
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parses command-line arguments.
-
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed command-line arguments.
+        None
     """
-    args = argparse.ArgumentParser()
-    args.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
-    args.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
-    args.add_argument("--output", dest="out_path", type=str, required=True, help="Output directory")
-    args.add_argument(
+
+    parser.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
+    parser.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
+    parser.add_argument("--output", dest="out_path", type=str, required=True, help="Output directory")
+    parser.add_argument(
         "--thread",
         dest="cpu",
         type=int,
         default=int(os.cpu_count() * 0.9),
         help="Number of threads to use",
     )
-    args.add_argument("--chunk", dest="chunk", type=int, default=4000, help="Chunk size")
-    args.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
-    args.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
-    args = args.parse_args()
+    parser.add_argument("--chunk", dest="chunk", type=int, default=4000, help="Chunk size")
+    parser.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to run the data compilation process.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
 
     if os.path.exists(args.out_path):
         log.error(f"Output directory {args.out_path} already exists")
@@ -66,7 +79,37 @@ def parse_args():
                 log.error(f"Negative token file {neg_path} does not exist")
                 raise FileNotFoundError(f"Negative token file {neg_path} does not exist")
 
-    return args
+    if args.seed is None:
+        args.seed = np.random.randint(0, 1000000)
+
+    os.makedirs(args.out_path, exist_ok=True)
+
+    for set_name in ["train", "val"]:
+        for score_name in args.score:
+            for label in ["pos", "neg"]:
+                os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
+
+    if args.pos_path is not None:
+        sample_and_save(
+            args.pos_path,
+            args.out_path,
+            args.cpu,
+            label=1,
+            chunk=args.chunk,
+            score_name_list=args.score,
+        )
+
+    if args.neg_path is not None:
+        sample_and_save(
+            args.neg_path,
+            args.out_path,
+            args.cpu,
+            label=0,
+            chunk=args.chunk,
+            score_name_list=args.score,
+        )
+
+    return None
 
 
 def sample_and_save(
@@ -421,48 +464,3 @@ def chunk_save_data(
                 buffer_dict[(set_name, score_name)] = chunk_data.copy()
 
     return None
-
-
-def main():
-    """
-    Main function to run the data compilation process.
-
-    Returns:
-        None
-    """
-    args = parse_args()
-    if args.seed is None:
-        args.seed = np.random.randint(0, 1000000)
-
-    os.makedirs(args.out_path, exist_ok=True)
-
-    for set_name in ["train", "val"]:
-        for score_name in args.score:
-            for label in ["pos", "neg"]:
-                os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
-
-    if args.pos_path is not None:
-        sample_and_save(
-            args.pos_path,
-            args.out_path,
-            args.cpu,
-            label=1,
-            chunk=args.chunk,
-            score_name_list=args.score,
-        )
-
-    if args.neg_path is not None:
-        sample_and_save(
-            args.neg_path,
-            args.out_path,
-            args.cpu,
-            label=0,
-            chunk=args.chunk,
-            score_name_list=args.score,
-        )
-
-    return None
-
-
-if __name__ == "__main__":
-    main()

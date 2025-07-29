@@ -31,6 +31,195 @@ from deeprm.utils.memory import start_mem_watchdog
 log = get_logger(__name__)
 
 
+def add_arguments(parser: argparse.ArgumentParser):
+    """
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+    Returns:
+        None
+    """
+    num_cpu = os.cpu_count()
+    parser.add_argument("--input", dest="input BAM file", type=str, required=True)
+    parser.add_argument("--output", dest="output directory", type=str, required=True)
+    parser.add_argument("--cpu", dest="ncpu", type=int, default=int(num_cpu * 0.9))
+
+    ## DAG extraction parameters
+    parser.add_argument("--it", dest="indel_tolerance", type=int, default=3)
+    parser.add_argument("--ip", dest="indel_penalty", type=int, default=3)
+    parser.add_argument("--cst", dest="cb_size_tolerance", type=int, default=3)
+    parser.add_argument("--kst", dest="skip_size_tolerance", type=int, default=4)
+    parser.add_argument("--amp", dest="anchor_mismatch_penalty", type=int, default=6)
+    parser.add_argument("--smt", dest="spacer_mismatch_tolerance", type=int, default=3)
+    parser.add_argument("--smp", dest="spacer_mismatch_penalty", type=int, default=2)
+    parser.add_argument("--sst", dest="spacer_size_tolerance", type=int, default=1)
+    parser.add_argument("--ac", dest="anchor_list", type=str, nargs="+", default=["A", "A", "A"])
+    parser.add_argument(
+        "--sp",
+        dest="spacer_list",
+        type=str,
+        nargs="+",
+        default=["CGACAU", "CCAUUG", "AAGCGU", "GUAGUC"],
+    )
+    parser.add_argument("--ss", dest="spacer_size", type=int, default=6)
+    parser.add_argument("--cp", dest="cb_pad", type=int, default=10)
+    parser.add_argument("--cb", dest="cb_per_bb", type=int, default=3)
+    parser.add_argument("--rbq", dest="read_bq_cutoff", type=int, default=7)
+    parser.add_argument("--cbq", dest="cb_bq_cutoff", type=int, default=0)
+    parser.add_argument("--fi", dest="flush_interval", type=int, default=1000)
+    parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
+    parser.add_argument("--min", dest="min_read_length", type=int, default=0)
+    parser.add_argument("--sample", dest="sample", type=int, default=None)
+    parser.add_argument("--keep", dest="keep_intermediate", type=bool, default=False)
+    parser.add_argument("--cfg", dest="config", type=str, default=None)
+    parser.add_argument(
+        "--resume",
+        dest="resume",
+        type=str,
+        default=None,
+        help="Continue from previous run. Provide the path to the previous output.",
+    )
+
+    ## Signal preprocessing parameters
+    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
+    parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
+    parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
+    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
+    parser.add_argument(
+        "--keep_intermediate",
+        "-ki",
+        action="store_true",
+        help="Keep intermediate files",
+        default=True,
+    )
+    parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to extract context blocks from a basecalled BAM file
+    using a directed acyclic graph (DAG).
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
+
+    if args.config is not None:
+        with open(args.config) as config_file:
+            config_dict = json.load(config_file)
+            for key, value in config_dict.items():
+                setattr(args, key, value)
+            log.info(f"Loaded configuration from: {args.config}")
+            assert len(args.anchor_list) == args.cb_per_bb
+    assert len(args.spacer_list) == args.cb_per_bb + 1
+    assert args.skip_size_tolerance >= args.cb_size_tolerance
+
+    if args.resume is not None:
+        if not os.path.exists(args.resume):
+            raise FileNotFoundError(f"ERROR! {args.resume} does not exist.")
+
+    if not os.path.exists(args.pod5):
+        raise FileNotFoundError(f"Input POD5 directory {args.pod5} does not exist")
+    if not os.path.exists(args.input):
+        raise FileNotFoundError(f"Input BAM file {args.input} does not exist")
+    if not os.path.exists(args.block):
+        raise FileNotFoundError(f"Context Block file {args.block} does not exist")
+    if os.path.exists(args.output):
+        raise FileExistsError(
+            f"Output directory {args.output} already exists. \
+            Please choose a different output directory or remove the existing one."
+        )
+    os.makedirs(args.output, exist_ok=True)
+
+    norm_factor = get_norm_factor()
+
+    token_output_path = f"{args.output}/{args.postfix}/"
+    intermediate_path = f"{args.output}/intermediates/"
+    signal_raw_path = f"{intermediate_path}/signal_raw/"
+    signal_index_path = f"{intermediate_path}/signal_index.pkl"
+
+    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(token_output_path, exist_ok=True)
+    os.makedirs(intermediate_path, exist_ok=True)
+    os.makedirs(signal_raw_path, exist_ok=True)
+    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
+    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
+
+    if not args.keep_intermediate:
+        atexit.register(lambda: os.system(f"rm -r {intermediate_path}"))
+
+    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.ncpu, args.chunk, args.max_size, args.min_size)
+    signal_path_arr = list(index_dict.keys())
+    signal_name_arr = [x.split("/")[-1] for x in signal_path_arr]
+    gc.collect()
+
+    if len(signal_path_arr) == 0:
+        log.error("No valid signal files found. Exiting.")
+        raise FileNotFoundError("No valid signal files found in the provided POD5 directory.")
+
+    with open(signal_index_path, "wb") as outfile:
+        pickle.dump(index_dict, outfile)
+
+    signal_path_dict = {}
+    for signal_path, id_list in tqdm.tqdm(
+        index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"
+    ):
+        for read_id in id_list:
+            signal_path_dict[read_id] = signal_path.split("/")[-1]
+
+    del index_dict
+    gc.collect()
+
+    if args.resume is not None:
+        flush_path = args.resume
+
+    else:
+        flush_path = f"{args.output}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
+        os.makedirs(flush_path, exist_ok=True)
+        if not args.keep_intermediate:
+            atexit.register(os.system, f"rm -r {flush_path}")
+
+    args_dict = vars(args)
+    block_df = extract_block(**args_dict, flush_path=flush_path)
+
+    shutil.rmtree(flush_path, ignore_errors=True)
+
+    split_block_df(signal_path_dict, signal_name_arr, intermediate_path, block_df)
+    del block_df
+    gc.collect()
+
+    extract_move(args.input, args.ncpu, signal_path_dict, signal_name_arr, intermediate_path)
+
+    del signal_path_dict, signal_name_arr
+    gc.collect()
+
+    np.random.shuffle(signal_path_arr)
+    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.ncpu))
+
+    proc_list = []
+    for signal_paths in signal_path_arr_split:
+        proc = mp.Process(
+            target=segment_normalize_signal,
+            args=(args.output, args.postfix, signal_paths, norm_factor),
+        )
+        proc_list.append(proc)
+        proc.start()
+
+    del signal_path_arr_split
+    gc.collect()
+
+    for proc in proc_list:
+        proc.join()
+
+    log.info("Signal Segmentation and Tokenization Complete")
+    log.info("Saved to: " + args.output)
+    return None
+
+
 def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate_path):
     """
     Extracts the 'mv' tag from a BAM file and saves it to separate files.
@@ -755,197 +944,3 @@ def get_norm_factor():
     norm_factor_default["scale_mult"] = 0.59
 
     return norm_factor_default
-
-
-def parse_args():
-    """
-    Parses command-line arguments.
-
-    Returns:
-        argparse.Namespace: Parsed command-line arguments.
-    """
-    parser = argparse.ArgumentParser(description="Extract context blocks from basecalled BAM file using DAG.")
-    num_cpu = os.cpu_count()
-    parser.add_argument("--input", dest="input BAM file", type=str, required=True)
-    parser.add_argument("--output", dest="output directory", type=str, required=True)
-    parser.add_argument("--cpu", dest="ncpu", type=int, default=int(num_cpu * 0.9))
-
-    ## DAG extraction parameters
-    parser.add_argument("--it", dest="indel_tolerance", type=int, default=3)
-    parser.add_argument("--ip", dest="indel_penalty", type=int, default=3)
-    parser.add_argument("--cst", dest="cb_size_tolerance", type=int, default=3)
-    parser.add_argument("--kst", dest="skip_size_tolerance", type=int, default=4)
-    parser.add_argument("--amp", dest="anchor_mismatch_penalty", type=int, default=6)
-    parser.add_argument("--smt", dest="spacer_mismatch_tolerance", type=int, default=3)
-    parser.add_argument("--smp", dest="spacer_mismatch_penalty", type=int, default=2)
-    parser.add_argument("--sst", dest="spacer_size_tolerance", type=int, default=1)
-    parser.add_argument("--ac", dest="anchor_list", type=str, nargs="+", default=["A", "A", "A"])
-    parser.add_argument(
-        "--sp",
-        dest="spacer_list",
-        type=str,
-        nargs="+",
-        default=["CGACAU", "CCAUUG", "AAGCGU", "GUAGUC"],
-    )
-    parser.add_argument("--ss", dest="spacer_size", type=int, default=6)
-    parser.add_argument("--cp", dest="cb_pad", type=int, default=10)
-    parser.add_argument("--cb", dest="cb_per_bb", type=int, default=3)
-    parser.add_argument("--rbq", dest="read_bq_cutoff", type=int, default=7)
-    parser.add_argument("--cbq", dest="cb_bq_cutoff", type=int, default=0)
-    parser.add_argument("--fi", dest="flush_interval", type=int, default=1000)
-    parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
-    parser.add_argument("--min", dest="min_read_length", type=int, default=0)
-    parser.add_argument("--sample", dest="sample", type=int, default=None)
-    parser.add_argument("--keep", dest="keep_intermediate", type=bool, default=False)
-    parser.add_argument("--cfg", dest="config", type=str, default=None)
-    parser.add_argument(
-        "--resume",
-        dest="resume",
-        type=str,
-        default=None,
-        help="Continue from previous run. Provide the path to the previous output.",
-    )
-
-    ## Signal preprocessing parameters
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
-    parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
-    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
-    parser.add_argument(
-        "--keep_intermediate",
-        "-ki",
-        action="store_true",
-        help="Keep intermediate files",
-        default=True,
-    )
-    parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
-
-    args = parser.parse_args()
-
-    if args.config is not None:
-        with open(args.config) as config_file:
-            config_dict = json.load(config_file)
-            for key, value in config_dict.items():
-                setattr(args, key, value)
-            log.info(f"Loaded configuration from: {args.config}")
-            assert len(args.anchor_list) == args.cb_per_bb
-    assert len(args.spacer_list) == args.cb_per_bb + 1
-    assert args.skip_size_tolerance >= args.cb_size_tolerance
-
-    if args.resume is not None:
-        if not os.path.exists(args.resume):
-            raise FileNotFoundError(f"ERROR! {args.resume} does not exist.")
-
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input POD5 directory {args.pod5} does not exist")
-    if not os.path.exists(args.input):
-        raise FileNotFoundError(f"Input BAM file {args.input} does not exist")
-    if not os.path.exists(args.block):
-        raise FileNotFoundError(f"Context Block file {args.block} does not exist")
-    if os.path.exists(args.output):
-        raise FileExistsError(
-            f"Output directory {args.output} already exists. \
-            Please choose a different output directory or remove the existing one."
-        )
-    os.makedirs(args.output, exist_ok=True)
-
-    return args
-
-
-def main():
-    """
-    Main function to extract context blocks from a basecalled BAM file
-    using a directed acyclic graph (DAG).
-
-    Returns:
-        None
-    """
-    args = parse_args()
-
-    norm_factor = get_norm_factor()
-
-    token_output_path = f"{args.output}/{args.postfix}/"
-    intermediate_path = f"{args.output}/intermediates/"
-    signal_raw_path = f"{intermediate_path}/signal_raw/"
-    signal_index_path = f"{intermediate_path}/signal_index.pkl"
-
-    os.makedirs(args.output, exist_ok=True)
-    os.makedirs(token_output_path, exist_ok=True)
-    os.makedirs(intermediate_path, exist_ok=True)
-    os.makedirs(signal_raw_path, exist_ok=True)
-    os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
-    os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
-
-    if not args.keep_intermediate:
-        atexit.register(lambda: os.system(f"rm -r {intermediate_path}"))
-
-    index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.ncpu, args.chunk, args.max_size, args.min_size)
-    signal_path_arr = list(index_dict.keys())
-    signal_name_arr = [x.split("/")[-1] for x in signal_path_arr]
-    gc.collect()
-
-    if len(signal_path_arr) == 0:
-        log.error("No valid signal files found. Exiting.")
-        raise FileNotFoundError("No valid signal files found in the provided POD5 directory.")
-
-    with open(signal_index_path, "wb") as outfile:
-        pickle.dump(index_dict, outfile)
-
-    signal_path_dict = {}
-    for signal_path, id_list in tqdm.tqdm(
-        index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"
-    ):
-        for read_id in id_list:
-            signal_path_dict[read_id] = signal_path.split("/")[-1]
-
-    del index_dict
-    gc.collect()
-
-    if args.resume is not None:
-        flush_path = args.resume
-
-    else:
-        flush_path = f"{args.output}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
-        os.makedirs(flush_path, exist_ok=True)
-        if not args.keep_intermediate:
-            atexit.register(os.system, f"rm -r {flush_path}")
-
-    args_dict = vars(args)
-    block_df = extract_block(**args_dict, flush_path=flush_path)
-
-    shutil.rmtree(flush_path, ignore_errors=True)
-
-    split_block_df(signal_path_dict, signal_name_arr, intermediate_path, block_df)
-    del block_df
-    gc.collect()
-
-    extract_move(args.input, args.ncpu, signal_path_dict, signal_name_arr, intermediate_path)
-
-    del signal_path_dict, signal_name_arr
-    gc.collect()
-
-    np.random.shuffle(signal_path_arr)
-    signal_path_arr_split = np.array_split(signal_path_arr, max(1, args.ncpu))
-
-    proc_list = []
-    for signal_paths in signal_path_arr_split:
-        proc = mp.Process(
-            target=segment_normalize_signal,
-            args=(args.output, args.postfix, signal_paths, norm_factor),
-        )
-        proc_list.append(proc)
-        proc.start()
-
-    del signal_path_arr_split
-    gc.collect()
-
-    for proc in proc_list:
-        proc.join()
-
-    log.info("Signal Segmentation and Tokenization Complete")
-    log.info("Saved to: " + args.output)
-    return None
-
-
-if __name__ == "__main__":
-    main()

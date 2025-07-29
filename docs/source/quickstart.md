@@ -2,15 +2,6 @@
 
 Welcome to **DeepRM**! This short guide shows the fastest path from zero to results.
 
-```{toctree}
-:maxdepth: 1
-:hidden:
-
-cli/inference
-cli/train
-cli/qc
-```
-
 ## 1. Installation
 
 Follow the instructions in the project **README** or on the documentation's *Installation* page.
@@ -33,11 +24,6 @@ The script will:
 
 Outputs land in `./work/pileup/` by default.
 
-## 3. Keep a run log
-
-Copy **RUN.md** to your experiment folder and fill in environment details, command line, and data provenance. This will make your results fully reproducible.
-
-## Next Steps
+## 3. Next Steps
 
 - **CLI reference** → Use the sidebar or run `deeprm <group> --help`.
-- **Examples** → See `examples/README.md` for more scripts.

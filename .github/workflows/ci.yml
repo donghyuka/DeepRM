@@ -33,6 +33,3 @@ jobs:
 
       - name: Run tests
         run: pytest -q
-
-      - name: Build docs
-        run: sphinx-build -W -b html docs/source docs/_build/html

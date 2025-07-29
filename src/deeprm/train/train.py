@@ -26,14 +26,14 @@ from deeprm.utils.logging import get_logger
 log = get_logger(__name__)
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parses command-line arguments for training the Transformer model.
-
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed command-line arguments.
+        None
     """
-    parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
     parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
     parser.add_argument(
@@ -91,10 +91,21 @@ def parse_args():
     parser.add_argument("--load_weight_only", action="store_true", default=False, help="Load weights only flag")
     parser.add_argument("--override_lr", action="store_true", default=False, help="Override learning rate flag")
     parser.add_argument("--comment", type=str, default="None", help="Comment for the run")
-
-    strfttime = time.strftime("%Y%m%d-%H%M%S")
     parser.add_argument("--model_name", type=str, default=None, help="Model name")
-    args = parser.parse_args()
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to start the training process.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
+    strfttime = time.strftime("%Y%m%d-%H%M%S")
     if args.num_gpu is None:
         if args.gpu_pool is None:
             args.num_gpu = torch.cuda.device_count()
@@ -114,7 +125,26 @@ def parse_args():
         if len(args.gpu_pool) < args.num_gpu:
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
 
-    return args
+    args_dict = vars(args)
+
+    torch.multiprocessing.set_sharing_strategy("file_system")
+    os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
+    os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
+    args_dict["output"] = os.path.join(args_dict["output"], args_dict["model_name"])
+    args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
+    if args_dict["seed"] is None:
+        args_dict["seed"] = np.random.randint(0, 10000000)
+    log.info("Training Program Started.")
+    log.info(f"Seed: {args_dict['seed']}")
+    log.info(f"Using {args_dict['num_gpu']} GPUs.")
+    try:
+        mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
+    except Exception as e:
+        log.error("Training Program Failed.")
+        raise e
+    log.info("Training Program Complete.")
+
+    return None
 
 
 class Trainer:
@@ -656,37 +686,3 @@ def main_worker(rank, args_dict):
     log.info(f"[GPU {gpu_id}] Training Loop Complete.")
     dist.destroy_process_group()
     return None
-
-
-def main():
-    """
-    Main function to start the training process.
-
-    Returns:
-        None
-    """
-    args = parse_args()
-    args_dict = vars(args)
-
-    torch.multiprocessing.set_sharing_strategy("file_system")
-    os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
-    os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
-    args_dict["output"] = os.path.join(args_dict["output"], args_dict["model_name"])
-    args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
-    if args_dict["seed"] is None:
-        args_dict["seed"] = np.random.randint(0, 10000000)
-    log.info("Training Program Started.")
-    log.info(f"Seed: {args_dict['seed']}")
-    log.info(f"Using {args_dict['num_gpu']} GPUs.")
-    try:
-        mp.spawn(main_worker, nprocs=args_dict["num_gpu"], args=(args_dict,))
-    except Exception as e:
-        log.error("Training Program Failed.")
-        raise e
-    log.info("Training Program Complete.")
-
-    return None
-
-
-if __name__ == "__main__":
-    main()
