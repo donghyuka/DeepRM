@@ -23,8 +23,8 @@ plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.frame
 
 def parse_args():
     args = argparse.ArgumentParser()
-    args.add_argument("--in", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
-    args.add_argument("--out","-o", dest="out_path", type=str, required=True, help="Output directory")
+    args.add_argument("--input", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
+    args.add_argument("--output","-o", dest="out_path", type=str, required=True, help="Output directory")
     args.add_argument("--process", "-p", dest="process", type=int, default=int(mp.cpu_count()*0.95//4), help="Number of processes")
     args.add_argument("--threads", "-t", dest="threads", type=int, default=4, help="Number of threads")
     args.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")

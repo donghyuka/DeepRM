@@ -19,13 +19,13 @@ plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.frame
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--in", "-i", type=str, dest="input", help="Input BAM file path", required=True)
-    parser.add_argument("--out","-o", type=str, dest="output", help="Output Directory", required=True)
+    parser.add_argument("--input", "-i", type=str, dest="input", help="Input BAM file path", required=True)
+    parser.add_argument("--output","-o", type=str, dest="output", help="Output Directory", required=True)
     parser.add_argument("--process","-p", type=int, dest="process", help="Number of processes",  default=int(mp.cpu_count()*0.95//4))
     parser.add_argument("--thread","-t", type=int, dest="thread", help="Number of threads per process", default=4)
     parser.add_argument("--mapq","-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
     parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
-    parser.add_argument("--len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
+    parser.add_argument("--min_len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
     args = parser.parse_args()
     return args
 

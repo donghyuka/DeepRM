@@ -4,9 +4,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+license = {text = "MIT"}
 name = "deeprm"
 version = "0.1.0"
 description = "DeepRM – post‑processing & QC for Nanopore m6A detection"
+keywords = ["RNA", "RNA modification", "m6A", "nanopore", "bioinformatics", "deep learning"]
 authors = [{name = "Laboratory of Computational Biology, Seoul National University"}]
 readme = "README.md"
 requires-python = ">=3.9"

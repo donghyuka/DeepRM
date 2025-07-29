@@ -1,4 +1,12 @@
-# src/deeprm/inference/cli.py
+"""
+Module: deeprm.inference.cli
+
+CLI for DeepRM inference modules.
+This module provides a command-line interface for running inference tasks
+such as running inference, preprocessing data, and generating pileups.
+"""
+
+
 import argparse, sys
 from importlib import import_module
 

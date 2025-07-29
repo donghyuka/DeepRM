@@ -1,3 +1,8 @@
+"""
+Module: deeprm.utils.utils
+Utility functions for DeepRM.
+"""
+
 import numpy as np
 
 def mean_phred(phred):

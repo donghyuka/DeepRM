@@ -4,10 +4,7 @@
 :maxdepth: 1
 :caption: Packages
 
-preprocess
 inference
-pileup
 train
-evaluate
-convert
+qc
 ```

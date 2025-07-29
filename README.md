@@ -16,6 +16,7 @@
 
 ## Table of Contents
 * [Introduction](#introduction)
+* [Quickstart](#quickstart)
 * [Usage](#usage)
   * [Training](#training)
   * [Inference](#inference)
@@ -31,6 +32,18 @@
 DeepRM is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
 This repository contains the source code for training and running DeepRM.
 
+## Quickstart
+```bash
+# Install
+python -m pip install deeprm
+# Prepare data
+deeprm inference prep -i <raw_dir> -o <prep_dir>
+# Run inference
+deeprm inference run -m <weights.pt> -d <prep_dir> -o <pred_dir>
+# Generate site-level results
+deeprm inference pileup -i <pred_dir> -o <pileup_dir>
+```
+
 ## Usage
 ### Inference
 ![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
@@ -38,13 +51,13 @@ This repository contains the source code for training and running DeepRM.
 #### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
-dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}"
+dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > <raw_bam_path>"
 ```
 * Filter, sort, and index the BAM files:
 ```bash
-samtools view -@ {args.cpu} -bh -F 276 -o {bam_path} {raw_bam_path}
-samtools sort -@ {args.cpu} -o {bam_path} {bam_path}
-samtools index -@ {args.cpu} {bam_path}
+samtools view -@ <threads> -bh -F 276 -o <bam_path> <raw_bam_path>
+samtools sort -@ <threads> -o <bam_path> <bam_path>
+samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
@@ -72,8 +85,8 @@ deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --mpileup
 #### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
-dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > {raw_bam_path}
-samtools index -@ {args.cpu} {bam_path}
+dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > <bam_path>
+samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the training data (synthetic oligonucleotide), run the following command:
 ```bash

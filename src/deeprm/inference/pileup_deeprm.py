@@ -1,10 +1,13 @@
 """
-pileup_deeprm.py
+Module: deeprm.inference.pileup_deeprm
+
 This script performs post-processing on DeepRM prediction files to generate a pileup.
 It reads .npz prediction arrays, groups statistics by label IDs, and computes metrics.
+
 The two metrics calculated are:
 1. PM6A: A score reflecting the site-level modification probability. (arbitrary units)
 2. DOM: Estimated modification stoichiometry of the site. (0-1 range)
+
 Finally, it writes a .npz file containing the results.
 """
 
@@ -37,9 +40,9 @@ def parse_args():
             label_div (int): Divisor for label_id to separate transcript and position.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input (predictions) path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output (pileup) path")
+    parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use")
     parser.add_argument("--bam", "-b", type=str, required=True, help="BAM file path")
     parser.add_argument("--pos", "-p", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-e", type=float, default=1e-30, help="Epsilon value")

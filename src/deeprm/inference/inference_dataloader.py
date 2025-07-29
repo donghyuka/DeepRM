@@ -1,3 +1,11 @@
+"""
+Module: deeprm.inference.inference_dataloader
+This module provides an iterator and dataset class for loading
+Nanopore data from NPZ files. It supports parallel reading of files
+and batching of data for efficient processing in PyTorch.
+"""
+
+
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import torch

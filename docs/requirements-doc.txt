@@ -1,6 +1,0 @@
-myst-parser
-sphinx-autosummary-accessors
-sphinx-copybutton
-sphinx==7.*
-sphinx_rtd_theme
-sphinxcontrib-mermaid

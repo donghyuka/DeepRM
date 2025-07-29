@@ -1,5 +1,5 @@
 """
-Module: DeepRM Preprocessing
+Module: deeprm.inference.inference_preprocess
 
 This script segments and normalizes raw signal data from POD5 files and corresponding
 BAM alignments. It extracts dwell times, context blocks, and signal windows,
@@ -10,13 +10,6 @@ Key steps:
 2. Compute dwell-time and normalize signal windows.
 3. Segment signals based on move, and then format into fixed-length blocks.
 4. Save processed tokens in chunks for model input.
-
-Requires:
-    - pod5
-    - pysam
-    - pandas
-    - numpy
-    - tqdm
 """
 
 import argparse, gc, os, pod5, pysam, tqdm, glob
@@ -209,14 +202,14 @@ def parse_pod5(pod5_path):
     return signal_df
 
 
-def parse_bam(pid, n_procs, n_threads, bam_data, bam_path, bq_cutoff, boi):
+def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
     """
     Extract move tags and alignment information from a BAM file in parallel.
 
     Args:
         pid (int): process ID for sharding.
         n_procs (int): total number of processes.
-        n_threads (int): threads for BAM reading.
+        n_thread (int): thread for BAM reading.
         bam_data (list): multiprocessing.Manager list to collect DataFrames.
         bam_path (str): path to the BAM file.
         bq_cutoff (int): minimum average base quality threshold.
@@ -226,7 +219,7 @@ def parse_bam(pid, n_procs, n_threads, bam_data, bam_path, bq_cutoff, boi):
         None (appends DataFrame to bam_data).
     """
     bam_df = {k:[] for k in ["read_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap"]}
-    input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=n_threads)
+    input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, thread=n_thread)
     ref_index_dict = {ref:i for i, ref in enumerate(input_bam.references)}
 
     for read_idx, read in tqdm.tqdm(enumerate(input_bam), total=input_bam.mapped+input_bam.unmapped):
@@ -447,7 +440,7 @@ def parse_args():
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--cpu", "-c", type=int, default=max(1,int(num_cpu * 0.95)), help="Number of threads to use")
+    parser.add_argument("--thread", "-t", type=int, default=max(1,int(num_cpu * 0.95)), help="Number of thread to use")
     parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
     parser.add_argument("--chunk", "-k", type=int, default=16000, help="Chunk size")
     parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
@@ -455,7 +448,7 @@ def parse_args():
     parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
     parser.add_argument("--kmer_len", "-e", type=int, default=5, help="k-mer length")
     parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
-    parser.add_argument("--bam_threads", "-t", type=int, default=4, help="BAM decompression threads per process")
+    parser.add_argument("--bam_thread", "-t", type=int, default=4, help="BAM decompression thread per process")
     parser.add_argument("--process_once", "-n", type=int, default=1000, help="Reads per processing batch")
     parser.add_argument("--dwell_shift", "-d", type=int, default=10, help="Distance between motor and pore")
     parser.add_argument("--sig_window", "-w", type=int, default=5, help="Signal window size")
@@ -504,10 +497,10 @@ def main():
 
     manager = mp.Manager()
     bam_df = manager.list()
-    n_bam_procs = args.cpu // args.bam_threads
+    n_bam_procs = args.thread // args.bam_thread
     proc_list = []
     for pid in range(n_bam_procs):
-        proc = mp.Process(target=parse_bam, args=(pid, n_bam_procs, args.bam_threads, bam_df,
+        proc = mp.Process(target=parse_bam, args=(pid, n_bam_procs, args.bam_thread, bam_df,
                                                   args.bam, args.qcut, args.boi))
         proc_list.append(proc)
         proc.start()
@@ -520,7 +513,7 @@ def main():
     gc.collect()
 
     mp.set_start_method("fork", force=True)
-    pod5_paths_split = np.array_split(glob.glob(f"{args.pod5}/*.pod5"), args.cpu)
+    pod5_paths_split = np.array_split(glob.glob(f"{args.pod5}/*.pod5"), args.thread)
 
     proc_list = []
     for pid, pod5_paths in enumerate(pod5_paths_split):

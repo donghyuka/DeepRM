@@ -1,3 +1,8 @@
+"""
+Module: deeprm.utils.activations
+Activation function utilities for DeepRM.
+"""
+
 import torch
 import torch.nn as nn
 
@@ -6,7 +11,7 @@ def get_activation_fn(activation: str):
     Returns the activation function module based on the given activation name.
 
     Args:
-        activation (str): Name of the activation function. Supported values are "relu", "gelu", "swish", "swiglu", "silu", and "elu".
+        activation (str): Name of the activation function. Supported values are "relu", "gelu", "silu", and "elu".
 
     Returns:
         torch.nn.Module: Activation function module.

@@ -157,31 +157,31 @@ def block_score_distribution(block_df_dict, color_dict, output):
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input", "-k", type=str, required=True, nargs="+", help="Input block file")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
-    parser.add_argument("--intermediate", "-i", type=str, nargs="+", default = None,  help="Intermediate files prefix")
+    parser.add_argument("--intermediate", "-m", type=str, nargs="+", default = None,  help="Intermediate files prefix")
     parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
-    parser.add_argument("--block", "-k", type=str, required=True, nargs="+", help="Block file")
     parser.add_argument("--name", "-n", type=str, default = None, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
     parser.add_argument("--sample", "-s", type=int, default=int(1e+6), help="Sampling fraction")
     parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
     args = parser.parse_args()
-    assert len(args.block) == len(args.type)
-    assert all([os.path.exists(b) for b in args.block])
+    assert len(input) == len(args.type)
+    assert all([os.path.exists(b) for b in input])
     if args.intermediate is not None:
-        assert len(args.intermediate) == len(args.block)
+        assert len(args.intermediate) == len(input)
         assert all([os.path.exists(i) for i in args.intermediate])
     else:
         intermediate = []
-        for path in args.block:
+        for path in input:
             parent_dir = os.path.dirname(os.path.dirname(path))
             intermediate.append(f"{parent_dir}/qc/block_df_dict.pkl")
         args.intermediate = intermediate
     if args.name is not None:
-        assert len(args.name) == len(args.block)
+        assert len(args.name) == len(input)
     else:
         name = []
-        for path in args.block:
+        for path in input:
             name_candidate = set([x for x in path.split("/") if (x.startswith("ON") and x[2:].isdigit())])
             if len(name_candidate) == 1:
                 name.append(name_candidate.pop())
@@ -256,7 +256,7 @@ def main():
     perfect_block_df_dict = {}
     color_dict = {}
 
-    for block, name, block_type in zip(args.block, args.name, args.type):
+    for block, name, block_type in zip(input, args.name, args.type):
         block_name = f"{name} ({block_type})"
         if block_type in modified_name_list:
             color = next(warm_color_list)
@@ -302,7 +302,7 @@ def main():
 
     if not load_success:
         log.info("Loading block files.")
-        for block, name, block_type in zip(args.block, args.name, args.type):
+        for block, name, block_type in zip(input, args.name, args.type):
             block_name = f"{name} ({block_type})"
             block_df = pd.read_pickle(block)
             perfect_block_df = block_df[block_df["score"] >= args.score]

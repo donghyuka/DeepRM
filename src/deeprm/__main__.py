@@ -1,4 +1,7 @@
-# src/deeprm/__main__.py
+"""
+deeprm package main.
+"""
+
 from .cli import main
 if __name__ == "__main__":
     main()

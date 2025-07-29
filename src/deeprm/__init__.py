@@ -1,4 +1,6 @@
-"""deeprm package init."""
+"""
+deeprm package init.
+"""
 
 from importlib.metadata import version, PackageNotFoundError
 
