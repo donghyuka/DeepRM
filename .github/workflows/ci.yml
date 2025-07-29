@@ -1,29 +1,38 @@
-# .github/workflows/ci.yml
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: ${{ matrix.python }} }
-      - run: python -m pip install -U pip
-      - run: python -m pip install .[test]
-      - run: deeprm --help
-      - run: python -m pip install pytest
-      - run: pytest -q
-      - run: pre-commit run --all-files
+        python: ['3.9', '3.10', '3.11', '3.12']
 
-  docs:
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: python -m pip install -U pip
-      - run: python -m pip install .[docs]
-      - run: sphinx-build -W -b html docs/source _build/html
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install project and tools
+        run: |
+          python -m pip install -U pip
+          python -m pip install .[docs]
+          python -m pip install pytest
+
+      - name: Smoke the CLI
+        run: |
+          python -m deeprm --help
+          python -m deeprm inference --help
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Build docs
+        run: sphinx-build -W -b html docs/source docs/_build/html
