@@ -1,5 +1,6 @@
 """
-Module: deeprm.qc.inspect_run
+DeepRM QC Module: Inspect Basecalled Run
+
 Open a bam file and get the stats of read, then plot.
 1. Read length distribution
 2. Quality score distribution
@@ -29,26 +30,103 @@ plt.rcParams.update(
 )
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parse command line arguments.
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed arguments.
+        None
     """
-
-    args = argparse.ArgumentParser()
-    args.add_argument("--input", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
-    args.add_argument("--output", "-o", dest="out_path", type=str, required=True, help="Output directory")
-    args.add_argument(
+    parser.add_argument("--input", "-i", dest="bam_path", type=str, required=True, help="Input bam file")
+    parser.add_argument("--output", "-o", dest="out_path", type=str, required=True, help="Output directory")
+    parser.add_argument(
         "--process", "-p", dest="process", type=int, default=int(mp.cpu_count() * 0.95 // 4), help="Number of processes"
     )
-    args.add_argument("--threads", "-t", dest="threads", type=int, default=4, help="Number of threads")
-    args.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
-    args.add_argument("--bb", "-b", dest="bb_length", type=int, default=71, help="BB length")
-    args.add_argument("--mrna", "-m", action="store_true", help="mRNA mode")
-    args.add_argument("--len", "-l", dest="len_cutoff", type=int, default=200, help="Length cutoff")
-    args = args.parse_args()
-    return args
+    parser.add_argument("--threads", "-t", dest="threads", type=int, default=4, help="Number of threads")
+    parser.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
+    parser.add_argument("--bb", "-b", dest="bb_length", type=int, default=71, help="BB length")
+    parser.add_argument("--mrna", "-m", action="store_true", help="mRNA mode")
+    parser.add_argument("--len", "-l", dest="len_cutoff", type=int, default=200, help="Length cutoff")
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to run the script.
+    It reads a BAM file, collects statistics on read lengths,
+    mean quality scores, and poly(A) lengths,
+    and generates plots for these statistics.
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+    Returns:
+        None
+    """
+
+    ## Check if BAM is indexed
+    if not os.path.exists(args.bam_path + ".bai"):
+        log.info("BAM file is not indexed. Indexing BAM file...")
+        pysam.index(args.bam_path, nthreads=args.threads * args.process)
+        log.info("BAM file indexed.")
+
+    load_success = False
+
+    if os.path.exists(args.out_path):
+        try:
+            with open(f"{args.out_path}/read_len.pkl", "rb") as f:
+                read_len_arr = pickle.load(f)
+            with open(f"{args.out_path}/mean_qual.pkl", "rb") as f:
+                mean_qual_arr = pickle.load(f)
+            with open(f"{args.out_path}/polya_len.pkl", "rb") as f:
+                polya_len_arr = pickle.load(f)
+            load_success = True
+            log.info("Output directory already exists. Pickle files loaded successfully.")
+        except Exception:
+            load_success = False
+            log.warning("Output directory exists but pickle files are not found or corrupted. Recalculating.")
+
+    if not load_success:
+        os.makedirs(args.out_path, exist_ok=True)
+        manager = mp.Manager()
+        collect_dict = manager.dict()
+        collect_dict["read_len_arr"] = manager.list()
+        collect_dict["qual_arr"] = manager.list()
+        collect_dict["polya_len_arr"] = manager.list()
+
+        log.info("Reading BAM file")
+        processes = []
+        for pid in range(args.process):
+            p = mp.Process(target=read_bam_worker, args=(args, pid, collect_dict))
+            processes.append(p)
+            p.start()
+        for p in processes:
+            p.join()
+
+        log.info("Collecting results")
+        read_len_arr = np.concatenate(collect_dict["read_len_arr"])
+        mean_qual_arr = np.concatenate(collect_dict["qual_arr"])
+        polya_len_arr = np.concatenate(collect_dict["polya_len_arr"])
+
+        manager.shutdown()
+
+        log.info("Saving pickle")  ## save pickle
+        with open(f"{args.out_path}/read_len.pkl", "wb") as f:
+            pickle.dump(read_len_arr, f)
+        with open(f"{args.out_path}/mean_qual.pkl", "wb") as f:
+            pickle.dump(mean_qual_arr, f)
+        with open(f"{args.out_path}/polya_len.pkl", "wb") as f:
+            pickle.dump(polya_len_arr, f)
+
+    log.info("Plotting")
+
+    if not args.mrna:
+        plot_read_len_oligo(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
+    else:
+        plot_read_len_mrna(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
+    plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
+    plot_polya_len(polya_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
+
+    return None
 
 
 def plot_read_len_oligo(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length):
@@ -381,84 +459,3 @@ def read_bam_worker(args, pid, collect_dict):
     collect_dict["qual_arr"].append(np.array(qual_arr))
     collect_dict["polya_len_arr"].append(np.array(polya_len_arr))
     return None
-
-
-def main():
-    """
-    Main function to run the script.
-    It reads a BAM file, collects statistics on read lengths,
-    mean quality scores, and poly(A) lengths,
-    and generates plots for these statistics.
-    Returns:
-        None
-    """
-
-    args = parse_args()
-    ## Check if BAM is indexed
-    if not os.path.exists(args.bam_path + ".bai"):
-        log.info("BAM file is not indexed. Indexing BAM file...")
-        pysam.index(args.bam_path, nthreads=args.threads * args.process)
-        log.info("BAM file indexed.")
-
-    load_success = False
-
-    if os.path.exists(args.out_path):
-        try:
-            with open(f"{args.out_path}/read_len.pkl", "rb") as f:
-                read_len_arr = pickle.load(f)
-            with open(f"{args.out_path}/mean_qual.pkl", "rb") as f:
-                mean_qual_arr = pickle.load(f)
-            with open(f"{args.out_path}/polya_len.pkl", "rb") as f:
-                polya_len_arr = pickle.load(f)
-            load_success = True
-            log.info("Output directory already exists. Pickle files loaded successfully.")
-        except Exception:
-            load_success = False
-            log.warning("Output directory exists but pickle files are not found or corrupted. Recalculating.")
-
-    if not load_success:
-        os.makedirs(args.out_path, exist_ok=True)
-        manager = mp.Manager()
-        collect_dict = manager.dict()
-        collect_dict["read_len_arr"] = manager.list()
-        collect_dict["qual_arr"] = manager.list()
-        collect_dict["polya_len_arr"] = manager.list()
-
-        log.info("Reading BAM file")
-        processes = []
-        for pid in range(args.process):
-            p = mp.Process(target=read_bam_worker, args=(args, pid, collect_dict))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-
-        log.info("Collecting results")
-        read_len_arr = np.concatenate(collect_dict["read_len_arr"])
-        mean_qual_arr = np.concatenate(collect_dict["qual_arr"])
-        polya_len_arr = np.concatenate(collect_dict["polya_len_arr"])
-
-        manager.shutdown()
-
-        log.info("Saving pickle")  ## save pickle
-        with open(f"{args.out_path}/read_len.pkl", "wb") as f:
-            pickle.dump(read_len_arr, f)
-        with open(f"{args.out_path}/mean_qual.pkl", "wb") as f:
-            pickle.dump(mean_qual_arr, f)
-        with open(f"{args.out_path}/polya_len.pkl", "wb") as f:
-            pickle.dump(polya_len_arr, f)
-
-    log.info("Plotting")
-
-    if not args.mrna:
-        plot_read_len_oligo(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path, args.bb_length)
-    else:
-        plot_read_len_mrna(read_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
-    plot_qual(mean_qual_arr, args.out_path, bq_thres=args.bq_thres)
-    plot_polya_len(polya_len_arr, mean_qual_arr, args.bq_thres, args.out_path)
-
-    return None
-
-
-if __name__ == "__main__":
-    main()

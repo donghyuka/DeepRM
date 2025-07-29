@@ -1,5 +1,6 @@
 """
-Module: deeprm.train.train_dataloader
+DeepRM Train DataLoader
+
 This module provides an IterableDataset implementation for loading
 chunked binary classification datasets from NPZ files.
 It randomly selects positive and negative samples based on a specified class ratio.

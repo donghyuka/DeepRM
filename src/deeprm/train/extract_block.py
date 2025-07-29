@@ -1,5 +1,4 @@
 """
-Module: deeprm.train.extract_block
 Extract context blocks from reads.
 
 Key steps to extract context blocks from reads:

@@ -1,10 +1,17 @@
 """
-Module: deeprm.utils.memory
 Memory management utilities for DeepRM.
 """
 
-import time, os, psutil, threading, logging, signal
+import logging
+import os
+import signal
+import threading
+import time
+
+import psutil
+
 from deeprm.utils.logging import get_logger
+
 
 def _check_once(limit_gb: float, logger: logging.Logger) -> bool:
     """
@@ -21,6 +28,7 @@ def _check_once(limit_gb: float, logger: logging.Logger) -> bool:
         return True
     return False
 
+
 def start_mem_watchdog(limit_gb: float = None, interval_s: int = 10) -> threading.Thread:
     """
     Start a daemon thread that exits the *current process* if RSS exceeds limit.
@@ -32,12 +40,14 @@ def start_mem_watchdog(limit_gb: float = None, interval_s: int = 10) -> threadin
     """
     if limit_gb is None:
         limit_gb = psutil.virtual_memory().total / (1024**3) * 0.95  # Default to 95% of total RAM
+
     def _run():
         log = get_logger(__name__)
         while True:
             if _check_once(limit_gb, log):
                 os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(interval_s)
+
     t = threading.Thread(target=_run, daemon=True)
     t.start()
     return t

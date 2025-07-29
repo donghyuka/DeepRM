@@ -1,5 +1,5 @@
 """
-Module: deeprm.inference.pileup_deeprm
+DeepRM Pileup (Post-Processing) Module
 
 This script performs post-processing on DeepRM prediction files to generate a pileup.
 It reads .npz prediction arrays, groups statistics by label IDs, and computes metrics.
@@ -24,24 +24,14 @@ import tqdm
 mp.set_start_method("fork", force=True)
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parse command-line arguments and prepare input/output paths.
-
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed arguments with attributes:
-            thread (int): Number of worker processes.
-            input (str): Directory containing prediction files.
-            output (str): Base output directory for pileup results.
-            bam (str): Path to input BAM file for reference names.
-            pos (float): Probability threshold for positive predictions.
-            epsilon (float): Small constant for numerical stability.
-            postfix (str): Suffix added to output directory name.
-            slice (int or None): Column index for slicing 2D predictions.
-            flip (bool): Whether to invert prediction probabilities (1 - p).
-            label_div (int): Divisor for label_id to separate transcript and position.
+        None
     """
-    parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-i", type=str, required=True, help="Input (predictions) path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output (pileup) path")
     parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use")
@@ -55,7 +45,21 @@ def parse_args():
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
 
-    args = parser.parse_args()
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function: spawns worker processes, aggregates results, computes final metrics,
+    and writes output .npz file.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None: Results are saved to a .npz file in the specified output directory.
+    """
+
     if args.thread is None:
         args.thread = max(1, int(0.95 * mp.cpu_count()))
 
@@ -66,7 +70,96 @@ def parse_args():
 
     args.output = os.path.join(args.output, os.path.basename(args.input) + args.postfix)
     os.makedirs(args.output, exist_ok=True)
-    return args
+
+    ## Define keys for shared data storage
+    keys = ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos", "count_all", "count_pos", "label_id"]
+
+    ## Gather all prediction files and split them for multiprocessing
+    file_paths = glob.glob(f"{args.input}/*.pkl") + glob.glob(f"{args.input}/*.tsv") + glob.glob(f"{args.input}/*.npz")
+    file_paths_split = np.array_split(file_paths, min(args.thread, len(file_paths)))
+
+    ## Create a shared dictionary to store results from all processes
+    manager = mp.Manager()
+    shared_dict = manager.dict()
+    for key in keys:
+        shared_dict[key] = manager.dict()
+
+    ## Start worker processes to process each chunk of files
+    proc_list = []
+    for pid, file_paths in enumerate(file_paths_split):
+        proc = mp.Process(
+            target=worker, args=(pid, file_paths, keys, shared_dict, args.slice, args.pos, args.epsilon, args.flip)
+        )
+        proc.start()
+        proc_list.append(proc)
+    for proc in proc_list:
+        proc.join()
+    gc.collect()
+
+    ## find unique label across all chunks
+    all_ids = np.concatenate([shared_dict["label_id"][pid] for pid in range(len(file_paths_split))])
+    global_ids = np.unique(all_ids)
+    n_label_id = len(global_ids)
+
+    ## pre-allocate accumulators
+    final_count_all = np.zeros(n_label_id, dtype=np.int32)
+    final_count_pos = np.zeros(n_label_id, dtype=np.int32)
+    final_logsum = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_neg = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_pos = np.zeros(n_label_id, dtype=np.float32)
+
+    ## vectorized accumulation (because the label_id is already unique for each chunk)
+    for pid in tqdm.tqdm(range(len(file_paths_split)), desc="Accumulating data", leave=False):
+        label_idx = np.searchsorted(global_ids, shared_dict["label_id"][pid])
+        final_count_all[label_idx] += shared_dict["count_all"][pid]
+        final_count_pos[label_idx] += shared_dict["count_pos"][pid]
+        final_logsum[label_idx] += shared_dict["logsum_1_p_pos"][pid]
+        final_kl_neg[label_idx] += shared_dict["kl_div_neg"][pid]
+        final_kl_pos[label_idx] += shared_dict["kl_div_pos"][pid]
+
+    ## extract only the IDs that were seen
+    unique_id = np.nonzero(final_count_all > 0)[0]
+
+    ## slice to compact arrays
+    label_id = np.ascontiguousarray(global_ids[unique_id])
+    count_all = np.ascontiguousarray(final_count_all[unique_id])
+    count_pos = np.ascontiguousarray(final_count_pos[unique_id])
+    logsum_1_p_pos = np.ascontiguousarray(final_logsum[unique_id])
+    kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
+    kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
+
+    ## Calculate PM6A and DOM metrics
+    dom = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
+    pm6a = -(2 - dom) * logsum_1_p_pos / count_all + (
+        (1 - dom) * np.log10(np.clip(1 - dom, 1e-30, 1)) + dom * np.log10(np.clip(dom, 1e-30, 1))
+    ) * (count_pos / count_all)
+
+    ## Read BAM Header to get reference names
+    input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)
+    ref_arr = np.array(input_bam.references)
+    input_bam.close()
+
+    ## Convert label_id to ref_names and ref_pos
+    transcript_id = label_id // args.label_div
+    ref_pos = label_id % args.label_div
+    ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
+
+    ## Save results to compressed .npz
+    path = f"{args.output}/pileup.npz"
+    np.savez_compressed(
+        path,
+        ref_names=ref_names,
+        ref_pos=ref_pos,
+        pm6a=pm6a,
+        dom=dom,
+        count_all=count_all,
+        ## Below are not really necessary, but kept for debugging and reprocessing.
+        count_pos=count_pos,
+        kl_div_neg=kl_div_neg,
+        kl_div_pos=kl_div_pos,
+        logsum_1_p_pos=logsum_1_p_pos,
+    )
+    return None
 
 
 def grouped_sum(n_unique, idx, vals):
@@ -204,106 +297,3 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
     shared_dict["kl_div_neg"][pid] = kl_div_neg
     shared_dict["kl_div_pos"][pid] = kl_div_pos
     return None
-
-
-def main():
-    """
-    Main function: spawns worker processes, aggregates results, computes final metrics,
-    and writes output .npz file.
-    """
-
-    args = parse_args()
-
-    ## Define keys for shared data storage
-    keys = ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos", "count_all", "count_pos", "label_id"]
-
-    ## Gather all prediction files and split them for multiprocessing
-    file_paths = glob.glob(f"{args.input}/*.pkl") + glob.glob(f"{args.input}/*.tsv") + glob.glob(f"{args.input}/*.npz")
-    file_paths_split = np.array_split(file_paths, min(args.thread, len(file_paths)))
-
-    ## Create a shared dictionary to store results from all processes
-    manager = mp.Manager()
-    shared_dict = manager.dict()
-    for key in keys:
-        shared_dict[key] = manager.dict()
-
-    ## Start worker processes to process each chunk of files
-    proc_list = []
-    for pid, file_paths in enumerate(file_paths_split):
-        proc = mp.Process(
-            target=worker, args=(pid, file_paths, keys, shared_dict, args.slice, args.pos, args.epsilon, args.flip)
-        )
-        proc.start()
-        proc_list.append(proc)
-    for proc in proc_list:
-        proc.join()
-    gc.collect()
-
-    ## find unique label across all chunks
-    all_ids = np.concatenate([shared_dict["label_id"][pid] for pid in range(len(file_paths_split))])
-    global_ids = np.unique(all_ids)
-    n_label_id = len(global_ids)
-
-    ## pre-allocate accumulators
-    final_count_all = np.zeros(n_label_id, dtype=np.int32)
-    final_count_pos = np.zeros(n_label_id, dtype=np.int32)
-    final_logsum = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_neg = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_pos = np.zeros(n_label_id, dtype=np.float32)
-
-    ## vectorized accumulation (because the label_id is already unique for each chunk)
-    for pid in tqdm.tqdm(range(len(file_paths_split)), desc="Accumulating data", leave=False):
-        label_idx = np.searchsorted(global_ids, shared_dict["label_id"][pid])
-        final_count_all[label_idx] += shared_dict["count_all"][pid]
-        final_count_pos[label_idx] += shared_dict["count_pos"][pid]
-        final_logsum[label_idx] += shared_dict["logsum_1_p_pos"][pid]
-        final_kl_neg[label_idx] += shared_dict["kl_div_neg"][pid]
-        final_kl_pos[label_idx] += shared_dict["kl_div_pos"][pid]
-
-    ## extract only the IDs that were seen
-    unique_id = np.nonzero(final_count_all > 0)[0]
-
-    ## slice to compact arrays
-    label_id = np.ascontiguousarray(global_ids[unique_id])
-    count_all = np.ascontiguousarray(final_count_all[unique_id])
-    count_pos = np.ascontiguousarray(final_count_pos[unique_id])
-    logsum_1_p_pos = np.ascontiguousarray(final_logsum[unique_id])
-    kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
-    kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
-
-    ## Calculate PM6A and DOM metrics
-    dom = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
-    pm6a = -(2 - dom) * logsum_1_p_pos / count_all + (
-        (1 - dom) * np.log10(np.clip(1 - dom, 1e-30, 1)) + dom * np.log10(np.clip(dom, 1e-30, 1))
-    ) * (count_pos / count_all)
-
-    ## Read BAM Header to get reference names
-    input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)
-    ref_arr = np.array(input_bam.references)
-    input_bam.close()
-
-    ## Convert label_id to ref_names and ref_pos
-    transcript_id = label_id // args.label_div
-    ref_pos = label_id % args.label_div
-    ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
-
-    ## Save results to compressed .npz
-    path = f"{args.output}/pileup.npz"
-    np.savez_compressed(
-        path,
-        ref_names=ref_names,
-        ref_pos=ref_pos,
-        pm6a=pm6a,
-        dom=dom,
-        count_all=count_all,
-        ## Below are not really necessary, but kept for debugging and reprocessing.
-        count_pos=count_pos,
-        kl_div_neg=kl_div_neg,
-        kl_div_pos=kl_div_pos,
-        logsum_1_p_pos=logsum_1_p_pos,
-    )
-    return None
-
-
-if __name__ == "__main__":
-    main()

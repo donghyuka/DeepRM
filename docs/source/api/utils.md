@@ -25,4 +25,3 @@
 :undoc-members:
 :show-inheritance:
 ```
-

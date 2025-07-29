@@ -1,7 +1,7 @@
 """
-Module: deeprm.inference.inference
-Inference script for DeepRM models.
-This script handles the inference process for DeepRM models, including loading the model,
+DeeepRM Inference Module
+
+This program handles the inference process for DeepRM models, including loading the model,
 processing input data, and saving the output predictions.
 """
 
@@ -24,14 +24,14 @@ from deeprm.utils.logging import get_logger
 log = get_logger(__name__)
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parses command-line arguments.
-
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed command-line arguments.
+        None
     """
-    parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
@@ -46,18 +46,10 @@ def parse_args():
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
     parser.add_argument("--gpu_pool", "-gp", type=int, nargs="+", help="GPU pool")
     parser.add_argument("--output_id", "-id", type=int, default=None, help="Output ID for Multi-output models.")
-    args = parser.parse_args()
-    if args.num_gpu is None:
-        if args.gpu_pool is None:
-            args.num_gpu = torch.cuda.device_count()
-        else:
-            args.num_gpu = len(args.gpu_pool)
-    if args.gpu_pool is None:
-        args.gpu_pool = list(range(args.num_gpu))
-    return args
+    return None
 
 
-def main():
+def main(args: argparse.Namespace):
     """
     Main function to run the evaluation pipeline.
 
@@ -65,8 +57,18 @@ def main():
         1. Parse command-line arguments.
         2. Create necessary directories.
         3. Run inference.
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+    Returns:
+        None
     """
-    args = parse_args()
+    if args.num_gpu is None:
+        if args.gpu_pool is None:
+            args.num_gpu = torch.cuda.device_count()
+        else:
+            args.num_gpu = len(args.gpu_pool)
+    if args.gpu_pool is None:
+        args.gpu_pool = list(range(args.num_gpu))
     inference_path = f"{args.output}/inference"
     os.makedirs(inference_path, exist_ok=True)
     run_inference(args)
@@ -296,7 +298,3 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             executor.shutdown(wait=True)
 
     return None
-
-
-if __name__ == "__main__":
-    main()

@@ -1,131 +1,147 @@
-"""
-Command‑line interface for DeepRM.
-
-Usage:
-
-    deeprm <group> <subcommand> [args]
-
-    Groups: inference | train | qc
-
-    See: deeprm <group> --help
-
-This file installs a `deeprm` shell command (via the entry‑point in
-`pyproject.toml`) that exposes the following high‑level sub‑commands:
-
- • inference  – general use for RM detection (preprocessing, inference, and postprocessing)
- • train      – model training pipeline
- • qc         – quality‑control helpers
-
-Each sub‑command delegates to a corresponding module (`deeprm.train_preprocess.cli`,
-`deeprm.train.cli`, etc.) if it exists.  If the target module defines a
-``main(argv: list[str])`` function, we call it; otherwise we execute the
-module as ``python -m`` so users can keep their existing scripts unchanged.
-"""
-
+# src/deeprm/cli.py
 from __future__ import annotations
 
 import argparse
-import importlib
-import runpy
 import sys
-from importlib.metadata import PackageNotFoundError as _PkgNotFound
-from importlib.metadata import version as _pkg_version
-from types import ModuleType
-from typing import list
+from argparse import RawTextHelpFormatter
+from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
+from typing import Dict, List
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-_SUBMODULES: dict[str, str] = {
-    "inference": "deeprm.inference.cli",
-    "qc": "deeprm.qc.cli",
-    "train": "deeprm.train.cli",
+# -------------------------------------------------------------------
+# Static registry used ONLY to render a rich top-level help page.
+# This keeps top-level help detailed without importing heavy modules.
+# -------------------------------------------------------------------
+_HELP_REGISTRY: Dict[str, dict] = {
+    "inference": {
+        "desc": "Inference helpers",
+        "module": "deeprm.inference.cli",
+        "subcommands": [
+            ("prep", "Preprocess raw inputs for inference"),
+            ("run", "Run model inference on preprocessed data"),
+            ("pileup", "Aggregate predictions into site-level metrics"),
+        ],
+    },
+    "train": {
+        "desc": "Training utilities",
+        "module": "deeprm.train.cli",
+        "subcommands": [
+            ("prep", "Prepare training data"),
+            ("compile", "Compile training dataset"),
+            ("run", "Launch training (DDP supported)"),
+        ],
+    },
+    "qc": {
+        "desc": "Quality-control tools",
+        "module": "deeprm.qc.cli",
+        "subcommands": [
+            ("run", "Basic QC summaries"),
+            ("alignment", "Inspect alignments and metrics"),
+            ("block", "Inspect block-level signals"),
+        ],
+    },
 }
 
 
 def _resolved_version() -> str:
-    """Return the installed deeprm version, with graceful fallbacks."""
     try:
-        return _pkg_version("deeprm")
-    except _PkgNotFound:
+        return version("deeprm")
+    except PackageNotFoundError:
+        # Editable/uninstalled checkouts
         try:
-            # fall back to package attribute if available (e.g., editable install)
             from . import __version__  # type: ignore
 
             return __version__
         except Exception:
-            return "unknown"
+            return "0+unknown"
 
 
-def _load_submodule(path: str) -> ModuleType:
-    """Import *path* and return the module object."""
-    try:
-        return importlib.import_module(path)
-    except ModuleNotFoundError as exc:
-        raise SystemExit(f"✖ Submodule '{path}' not found: {exc}") from exc
-
-
-def _delegate(module: ModuleType, argv: list[str]) -> None:  # pragma: no cover
-    """Run ``module.main`` if present; else emulate ``python -m module``."""
-    if hasattr(module, "main"):
-        module.main(argv)  # type: ignore[arg-type]
-    else:
-        # Fallback: run as script so existing __main__.py still works
-        runpy.run_module(module.__name__, run_name="__main__")
-
-
-# ---------------------------------------------------------------------------
-# Top‑level argument parser
-# ---------------------------------------------------------------------------
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="deeprm",
-        description="DeepRM unified command‑line interface",
+def _format_top_description() -> str:
+    return (
+        "[DeepRM unified command-line interface]\n\n"
+        "Usage:\n"
+        "  deeprm <group> [--help]\n"
+        "  deeprm <group> <subcommand> [args]\n"
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {_resolved_version()}")
-
-    for cmd, help_text in (
-        ("train", "Train a DeepRM model"),
-        ("inference", "Run model prediction + pileup aggregation"),
-        ("qc", "Run quality‑control routines"),
-    ):
-        # Add a subparser for each command
-        subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-        # Each parser captures *all* remaining args to forward unchanged
-        sp = subparsers.add_parser(cmd, help=help_text, add_help=False)
-        sp.add_argument(
-            "args",
-            nargs=argparse.REMAINDER,
-            help=f"Arguments passed through to 'deeprm {cmd}'",
-        )
-
-    return parser
 
 
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
+def _format_groups_block() -> str:
+    lines: List[str] = []
+    lines.append("Groups & subcommands:\n")
+    for g, info in _HELP_REGISTRY.items():
+        lines.append(f"  {g:<10} {info['desc']}")
+        for name, desc in info["subcommands"]:
+            lines.append(f"    {name:<10} {desc}")
+        lines.append("")  # blank line between groups
+    return "\n".join(lines).rstrip() + "\n"
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Entry point for the ``deeprm`` console script."""
+def _format_tips() -> str:
+    return (
+        "Tips:\n"
+        "  • Use '--help' after any command to see its flags.\n"
+        "  • See docs: https://deeprm.readthedocs.io/\n"
+    )
+
+
+def _build_top_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="deeprm",
+        description=_format_top_description(),
+        formatter_class=RawTextHelpFormatter,
+        add_help=False,  # we add -h/--help manually to control placement
+        epilog="\n".join(
+            [
+                _format_groups_block(),
+                _format_tips(),
+            ]
+        ),
+    )
+    p.register("action", "parsers", argparse._SubParsersAction)  # for typing clarity
+
+    # Top-level flags
+    p.add_argument("--version", "-v", action="version", version=f"DeepRM {_resolved_version()}")
+    p.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help="Show this help message and exit.",
+    )
+
+    # Skeleton subparsers: we *do not* import group modules here.
+    sub = p.add_subparsers(dest="group", metavar="{inference,train,qc}")
+    for g, info in _HELP_REGISTRY.items():
+        # 'help' here enriches the default subcommand listing in argparse,
+        # but we still print a custom epilog with more details.
+        sub.add_parser(g, help=info["desc"], add_help=False)
+
+    return p
+
+
+def main(argv: List[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    parser = _build_top_parser()
 
-    parser = _build_parser()
-    ns = parser.parse_args(argv)
+    # No args or explicit help -> print the rich top-level page
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        parser.print_help()
+        return 0
 
-    if ns.command is None:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+    # Parse only enough to know the selected group (still no imports)
+    ns, rest = parser.parse_known_args(argv)
+    if ns.group is None:
+        parser.print_help()
+        return 2
 
-    # Dispatch to the appropriate sub‑module
-    mod_path = _SUBMODULES[ns.command]
-    module = _load_submodule(mod_path)
-    _delegate(module, ns.args)
+    # Lazy-import just the chosen group CLI; it will handle its own argparse
+    group_info = _HELP_REGISTRY.get(ns.group)
+    if not group_info:
+        parser.error(f"Unknown group '{ns.group}'")
+
+    mod = import_module(group_info["module"])
+    # Delegate the remaining argv to the group's entry() function
+    return int(mod.entry(rest) or 0)
 
 
-if __name__ == "__main__":  # pragma: no cover
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

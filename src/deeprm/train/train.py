@@ -1,5 +1,6 @@
 """
-Module: deeprm.train.train
+DeepRM Training Module
+
 This module provides the training functionality for the DeepRM Transformer model.
 It includes the Trainer class, which handles the training loop, evaluation, and checkpointing.
 """
@@ -657,7 +658,7 @@ def main_worker(rank, args_dict):
     return None
 
 
-def main_master():
+def main():
     """
     Main function to start the training process.
 
@@ -688,4 +689,4 @@ def main_master():
 
 
 if __name__ == "__main__":
-    main_master()
+    main()

@@ -10,32 +10,22 @@
 1. Install via PIP (recommended)
 
 ```bash
-
 python -m pip install -e deeprm
-
-
 ```
 2. Install via Conda
 
 ```bash
-
 conda -c conda-forge install -e deeprm
-
-
 ```
 3. Install from GitHub
 
 ```bash
-
 git clone https://github.com/vadanamu/deeprm
 cd deeprm
 python -m pip install -e .
-
-
 ```
 ## Verify Installation
 
 ```bash
-
 deeprm --version
 ```

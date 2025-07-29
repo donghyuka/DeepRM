@@ -3,49 +3,40 @@
 ![GitHub](https://img.shields.io/github/license/vadanamu/deeprm)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vadanamu/deeprm?style=social)
 ![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/deeprm)
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/vadanamu/deeprm/CI?label=CI%20Status)
-![GitHub issues](https://img.shields.io/github/issues/vadanamu/deeprm)
-![GitHub pull requests](https://img.shields.io/github/issues-pr/vadanamu/deeprm)
-![GitHub contributors](https://img.shields.io/github/contributors/vadanamu/deeprm)
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/vadanamu/deeprm)
+![GitHub contributors](https://img.shields.io/github/contributors/vadanamu/deeprm)
 ![GitHub language count](https://img.shields.io/github/languages/count/vadanamu/deeprm)
-![GitHub top language](https://img.shields.io/github/languages/top/vadanamu/deeprm)
-![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/deeprm)
 
 ![deeprm.png](docs/images/deeprm.png)
 
 ## Table of Contents
-* [Introduction](#introduction)
-* [Quickstart](#quickstart)
-* [Usage](#usage)
-  * [Training](#training)
-  * [Inference](#inference)
-* [Installation](#installation)
+* [✨ Introduction](#introduction)
+* [🎯 Key Features](#key-features)
+* [📦 Installation](#installation)
   * [Prerequisites](#prerequisites)
   * [Installation options](#installation-options)
-* [Architecture](#architecture)
-* [License](#license)
-* [Citation](#citation)
-* [Contributors](#contributors)
-* [Acknowledgements](#acknowledgements)
+* [🚀 Quickstart](#quickstart)
+* [💻 Usage](#usage)
+  * [Inference](#inference)
+  * [Training](#training)
+* [📐 Architecture](#architecture)
+* [📝 Citation](#citation)
+* [📝 License](#license)
+* [🏛️ Contributors](#contributors)
+* [🏛️ Acknowledgements](#acknowledgements)
 
 
-## Introduction
-DeepRM is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
+## ✨ Introduction
+DeepRM is a deep learning-based framework for RNA modification detection using Nanopore direct RNA sequencing.
 This repository contains the source code for training and running DeepRM.
 
+## 🎯 Key Features
+* **High accuracy**: Achieves state-of-the-art accuracy in RNA modification detection and stoichiometry measurement.
+* **Single-molecule resolution**: Provides single-molecule level predictions for RNA modifications.
+* **End-to-end pipeline**: Easy-to-use pipeline from raw reads to site-level predictions.
+* **Flexible**: Supports training of custom models.
 
-## Quickstart
-```bash
-# Prepare data
-deeprm inference prep -i <raw_dir> -o <prep_dir>
-# Run inference
-deeprm inference run -m <weights.pt> -d <prep_dir> -o <pred_dir>
-# Generate site-level results
-deeprm inference pileup -i <pred_dir> -o <pileup_dir>
-```
-
-## Installation
+## 📦 Installation
 
 ### Prerequisites
 * Linux
@@ -81,7 +72,18 @@ python -m pip install -U pip
 python -m pip install -e .
 ```
 
-## Usage
+
+## 🚀 Quickstart
+```bash
+# Prepare data
+deeprm inference prep -i <raw_dir> -o <prep_dir>
+# Run inference
+deeprm inference run -m <weights.pt> -d <prep_dir> -o <pred_dir>
+# Generate site-level results
+deeprm inference pileup -i <pred_dir> -o <pileup_dir>
+```
+
+## 💻 Usage
 ### Inference
 ![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
 
@@ -108,7 +110,7 @@ deeprm inference prep --input <input_POD5_dir> --output <output_file> --dorado <
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
-deeprm inference run --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool> 
+deeprm inference run --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with single-molecule level result files.
 * To get a site-level result, run the following command:
@@ -144,16 +146,10 @@ deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --
 ```
 * This will create a directory with the trained model file.
 
-
-## Architecture
+## 📐 Architecture
 ![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
-
-## License
-see [LICENSE](LICENSE) file for details.
-
-
-## Citation
+## 📝 Citation
 If you use DeepRM in your research, please cite the following paper:
 ```bibtex
 @article{
@@ -165,14 +161,17 @@ If you use DeepRM in your research, please cite the following paper:
 }
 ```
 
-## Contributors
+## 📝 License
+see [LICENSE](LICENSE) file for details.
+
+## 🏛️ Contributors
 This repositoratory is developed by the following organization:
 * **Laboratory of Computational Biology, School of Biological Sciences, Seoul National University**
   * Principal Investigator: Prof. Daehyun Baek
-  
+
 This repository is maintained by the following authors:
 * **Hyeonseo Hwang**
 
 
-## Acknowledgements
+## 🏛️ Acknowledgements
 This work was supported by the National Research Foundation of Korea (NRF) funded by the Ministry of Science and ICT, Republic of Korea (MSIT) (NRF-2019M3E5D3073104, NRF-2020R1A2C3007032, NRF-2020R1A5A1018081, and NRF-2022M3A9I2082294), by Artificial Intelligence Industrial Convergence Cluster Development Project funded by MSIT and Gwangju Metropolitan City, by National IT Industry Promotion Agency (NIPA) funded by MSIT, and by Korea Research Environment Open Network (KREONET) managed and operated by Korea Institute of Science and Technology Information (KISTI).

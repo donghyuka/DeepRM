@@ -1,8 +1,10 @@
-import subprocess, sys
+import subprocess
+import sys
+
 
 def test_cli_top_level_help():
     # Ensure the console script is installed and responds to --help
-    proc = subprocess.run([sys.executable, "-m", "deeprm", "--help"],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    assert proc.returncode == 0
-    assert "DeepRM" in proc.stdout or "DeepRM" in proc.stderr
+    result = subprocess.run([sys.executable, "-m", "deeprm", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "DeepRM" in result.stdout or "DeepRM" in result.stderr
+    assert "usage" in result.stdout.lower()

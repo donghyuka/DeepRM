@@ -1,5 +1,6 @@
 """
-Module: deeprm.qc.inspect_alignment
+DeepRM QC Module: Inspect Alignment
+
 Inspect alignment quality by extracting CIGAR string and calculating error rates.
 This module reads a BAM file, extracts the CIGAR strings, and computes the error rates for each read.
 """
@@ -29,15 +30,14 @@ plt.rcParams.update(
 )
 
 
-def parse_args():
+def add_arguments(parser: argparse.ArgumentParser):
     """
-    Parse command line arguments for the alignment inspection script.
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
     Returns:
-        argparse.Namespace: Parsed command line arguments.
-    Raises:
-        argparse.ArgumentError: If required arguments are not provided.
+        None
     """
-    parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-i", type=str, dest="input", help="Input BAM file path", required=True)
     parser.add_argument("--output", "-o", type=str, dest="output", help="Output Directory", required=True)
     parser.add_argument(
@@ -47,8 +47,47 @@ def parse_args():
     parser.add_argument("--mapq", "-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
     parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
     parser.add_argument("--min_len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
-    args = parser.parse_args()
-    return args
+
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to run the alignment inspection pipeline.
+    This function parses command line arguments, checks for existing output,
+    and runs the CIGAR extraction and error rate calculation.
+    It also plots the error rates using KDE and boxplot.
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+    Returns:
+        None
+    """
+
+    run_flag = True
+
+    if os.path.exists(args.output):
+        log.info("Output directory already exists. Attempting to load pickle")
+        try:
+            error_df = pd.read_pickle(f"{args.output}/error_rate.pkl")
+            run_flag = False
+        except Exception:
+            log.warning("Error rate pickle does not exist. Re-running alignment and error rate calculation")
+            run_flag = True
+
+    if run_flag:
+        os.makedirs(args.output, exist_ok=True)
+
+        log.info("Extracting CIGAR string")
+        error_df = extract_cigar_master(args)
+        error_df.to_pickle(f"{args.output}/error_rate.pkl")
+
+    assert len(error_df) > 0, "Error rate dataframe is empty. Check input BAM file"
+
+    log.info("Plotting error rate")
+    plot_kde(error_df, args)
+    plot_boxplot(error_df, args)
+
+    return None
 
 
 def extract_cigar_worker(pid, args, error_dict):
@@ -223,44 +262,3 @@ def plot_boxplot(df_error, args):
     plt.savefig(f"{args.output}/per_read_error_boxplot.png", dpi=300)
     plt.close()
     return None
-
-
-def main():
-    """
-    Main function to run the alignment inspection pipeline.
-    This function parses command line arguments, checks for existing output,
-    and runs the CIGAR extraction and error rate calculation.
-    It also plots the error rates using KDE and boxplot.
-    Returns:
-        None
-    """
-    args = parse_args()
-    run_flag = True
-
-    if os.path.exists(args.output):
-        log.info("Output directory already exists. Attempting to load pickle")
-        try:
-            error_df = pd.read_pickle(f"{args.output}/error_rate.pkl")
-            run_flag = False
-        except Exception:
-            log.warning("Error rate pickle does not exist. Re-running alignment and error rate calculation")
-            run_flag = True
-
-    if run_flag:
-        os.makedirs(args.output, exist_ok=True)
-
-        log.info("Extracting CIGAR string")
-        error_df = extract_cigar_master(args)
-        error_df.to_pickle(f"{args.output}/error_rate.pkl")
-
-    assert len(error_df) > 0, "Error rate dataframe is empty. Check input BAM file"
-
-    log.info("Plotting error rate")
-    plot_kde(error_df, args)
-    plot_boxplot(error_df, args)
-
-    return None
-
-
-if __name__ == "__main__":
-    main()

@@ -1,5 +1,6 @@
 """
-Module: deeprm.train.train_preprocess
+DeepRM Training Data Preprocessing Module
+
 This module provides functions for preprocessing training data for DeepRM.
 It includes functions for extracting move tags from BAM files, preprocessing POD5 files,
 and segmenting and normalizing signal data.

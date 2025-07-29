@@ -43,4 +43,3 @@
 :undoc-members:
 :show-inheritance:
 ```
-

@@ -1,10 +1,9 @@
 """
-Module: deeprm.utils.activations
 Activation function utilities for DeepRM.
 """
 
-import torch
 import torch.nn as nn
+
 
 def get_activation_fn(activation: str):
     """

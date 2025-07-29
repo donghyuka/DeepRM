@@ -1,5 +1,5 @@
 """
-Module: deeprm.inference.inference_preprocess
+DeepRM Inference Preprocessing Module
 
 This script segments and normalizes raw signal data from POD5 files and corresponding
 BAM alignments. It extracts dwell times, context blocks, and signal windows,
@@ -27,6 +27,129 @@ import tqdm
 from deeprm.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def add_arguments(parser: argparse.ArgumentParser):
+    """
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+    Returns:
+        None
+    """
+    num_cpu = os.cpu_count()
+    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
+    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
+    parser.add_argument("--thread", "-t", type=int, default=max(1, int(num_cpu * 0.95)), help="Number of thread to use")
+    parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
+    parser.add_argument("--chunk", "-k", type=int, default=16000, help="Chunk size")
+    parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
+    parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
+    parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
+    parser.add_argument("--kmer_len", "-e", type=int, default=5, help="k-mer length")
+    parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
+    parser.add_argument("--bam_thread", "-t", type=int, default=4, help="BAM decompression thread per process")
+    parser.add_argument("--process_once", "-n", type=int, default=1000, help="Reads per processing batch")
+    parser.add_argument("--dwell_shift", "-d", type=int, default=10, help="Distance between motor and pore")
+    parser.add_argument("--sig_window", "-w", type=int, default=5, help="Signal window size")
+
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Run the full preprocessing pipeline with multiprocessing.
+
+    Steps:
+    1. Parse arguments and prepare output.
+    2. Spawn processes to parse BAM data.
+    3. Consolidate BAM DataFrame.
+    4. Spawn processes to segment and normalize POD5 signals.
+    5. Finalize and exit.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
+
+    if not os.path.exists(args.pod5):
+        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
+    if not os.path.exists(args.bam):
+        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    os.makedirs(args.output, exist_ok=True)
+
+    log.info("Started DeepRM Preprocessing")
+    os.makedirs(args.output, exist_ok=True)
+    norm_factor = get_norm_factor()
+
+    manager = mp.Manager()
+    bam_df = manager.list()
+    n_bam_procs = args.thread // args.bam_thread
+    proc_list = []
+    for pid in range(n_bam_procs):
+        proc = mp.Process(
+            target=parse_bam, args=(pid, n_bam_procs, args.bam_thread, bam_df, args.bam, args.qcut, args.boi)
+        )
+        proc_list.append(proc)
+        proc.start()
+    for proc in proc_list:
+        proc.join()
+
+    bam_df = pd.concat(list(bam_df), ignore_index=True)
+    bam_df.set_index("read_id", inplace=True)
+    manager.shutdown()
+    gc.collect()
+
+    mp.set_start_method("fork", force=True)
+    pod5_paths_split = np.array_split(glob.glob(f"{args.pod5}/*.pod5"), args.thread)
+
+    proc_list = []
+    for pid, pod5_paths in enumerate(pod5_paths_split):
+        proc = mp.Process(
+            target=segment_normalize_signal,
+            args=(
+                bam_df,
+                pod5_paths,
+                norm_factor,
+                pid,
+                args.output,
+                args.cb_len,
+                args.kmer_len,
+                args.chunk,
+                args.max_token_len,
+                args.sampling,
+                args.dwell_shift,
+                args.sig_window,
+                args.process_once,
+            ),
+        )
+        proc_list.append(proc)
+        proc.start()
+
+    gc.collect()
+    for proc in proc_list:
+        proc.join()
+
+    log.info("Finished DeepRM Preprocessing")
+    return None
+
+
+def get_norm_factor():
+    """
+    Return default normalization factors for signal and dwell scaling.
+
+    Returns:
+        dict: Keys 'quantile_a','quantile_b','shift_mult','scale_mult'.
+    """
+    norm_factor_default = {}
+    norm_factor_default["quantile_a"] = 0.2
+    norm_factor_default["quantile_b"] = 0.8
+    norm_factor_default["shift_mult"] = 0.48
+    norm_factor_default["scale_mult"] = 0.59
+    return norm_factor_default
 
 
 def mean_phred(phred):
@@ -479,126 +602,3 @@ def save_npz(save_path, df):
         label_id=label_id,
     )
     return None
-
-
-def parse_args():
-    """
-    Parse CLI arguments for preprocessing pipeline.
-
-    Returns:
-        argparse.Namespace: Parsed arguments.
-    """
-    parser = argparse.ArgumentParser(description="Segment and Normalize Signal")
-    num_cpu = os.cpu_count()
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--bam", "-b", type=str, required=True, help="Dorado BAM file")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
-    parser.add_argument("--thread", "-t", type=int, default=max(1, int(num_cpu * 0.95)), help="Number of thread to use")
-    parser.add_argument("--qcut", "-q", type=int, default=0, help="BQ cutoff")
-    parser.add_argument("--chunk", "-k", type=int, default=16000, help="Chunk size")
-    parser.add_argument("--max_token_len", "-z", type=int, default=200, help="Maximum token length")
-    parser.add_argument("--sampling", "-s", type=int, default=6, help="Sampling rate")
-    parser.add_argument("--boi", "-y", type=str, default="A", help="Base of interest")
-    parser.add_argument("--kmer_len", "-e", type=int, default=5, help="k-mer length")
-    parser.add_argument("--cb_len", "-a", type=int, default=21, help="Context block length")
-    parser.add_argument("--bam_thread", "-t", type=int, default=4, help="BAM decompression thread per process")
-    parser.add_argument("--process_once", "-n", type=int, default=1000, help="Reads per processing batch")
-    parser.add_argument("--dwell_shift", "-d", type=int, default=10, help="Distance between motor and pore")
-    parser.add_argument("--sig_window", "-w", type=int, default=5, help="Signal window size")
-    args = parser.parse_args()
-    if not os.path.exists(args.pod5):
-        raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
-    if not os.path.exists(args.bam):
-        raise FileNotFoundError(f"BAM file {args.bam} does not exist")
-    os.makedirs(args.output, exist_ok=True)
-    return args
-
-
-def get_norm_factor():
-    """
-    Return default normalization factors for signal and dwell scaling.
-
-    Returns:
-        dict: Keys 'quantile_a','quantile_b','shift_mult','scale_mult'.
-    """
-    norm_factor_default = {}
-    norm_factor_default["quantile_a"] = 0.2
-    norm_factor_default["quantile_b"] = 0.8
-    norm_factor_default["shift_mult"] = 0.48
-    norm_factor_default["scale_mult"] = 0.59
-    return norm_factor_default
-
-
-def main():
-    """
-    Run the full preprocessing pipeline with multiprocessing.
-
-    Steps:
-    1. Parse arguments and prepare output.
-    2. Spawn processes to parse BAM data.
-    3. Consolidate BAM DataFrame.
-    4. Spawn processes to segment and normalize POD5 signals.
-    5. Finalize and exit.
-
-    Returns:
-        None
-    """
-    log.info("Started DeepRM Preprocessing")
-    args = parse_args()
-    os.makedirs(args.output, exist_ok=True)
-    norm_factor = get_norm_factor()
-
-    manager = mp.Manager()
-    bam_df = manager.list()
-    n_bam_procs = args.thread // args.bam_thread
-    proc_list = []
-    for pid in range(n_bam_procs):
-        proc = mp.Process(
-            target=parse_bam, args=(pid, n_bam_procs, args.bam_thread, bam_df, args.bam, args.qcut, args.boi)
-        )
-        proc_list.append(proc)
-        proc.start()
-    for proc in proc_list:
-        proc.join()
-
-    bam_df = pd.concat(list(bam_df), ignore_index=True)
-    bam_df.set_index("read_id", inplace=True)
-    manager.shutdown()
-    gc.collect()
-
-    mp.set_start_method("fork", force=True)
-    pod5_paths_split = np.array_split(glob.glob(f"{args.pod5}/*.pod5"), args.thread)
-
-    proc_list = []
-    for pid, pod5_paths in enumerate(pod5_paths_split):
-        proc = mp.Process(
-            target=segment_normalize_signal,
-            args=(
-                bam_df,
-                pod5_paths,
-                norm_factor,
-                pid,
-                args.output,
-                args.cb_len,
-                args.kmer_len,
-                args.chunk,
-                args.max_token_len,
-                args.sampling,
-                args.dwell_shift,
-                args.sig_window,
-                args.process_once,
-            ),
-        )
-        proc_list.append(proc)
-        proc.start()
-
-    gc.collect()
-    for proc in proc_list:
-        proc.join()
-
-    log.info("Finished DeepRM Preprocessing")
-    return None
-
-
-if __name__ == "__main__":
-    main()

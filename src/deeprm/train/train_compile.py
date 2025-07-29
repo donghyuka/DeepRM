@@ -1,5 +1,6 @@
 """
-Module: deeprm.train.train_compile
+DeepRM Training Dataset Compilation Module
+
 This module compiles training data from positive and negative token files into a structured format.
 This script reads NPZ files containing tokenized data, samples it based on specified criteria,
 and saves it in a structured directory format.

@@ -52,4 +52,3 @@
 :undoc-members:
 :show-inheritance:
 ```
-

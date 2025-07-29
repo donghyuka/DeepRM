@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/modformer.iml" filepath="$PROJECT_DIR$/.idea/modformer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/DeepRM.iml" filepath="$PROJECT_DIR$/.idea/DeepRM.iml" />
     </modules>
   </component>
 </project>

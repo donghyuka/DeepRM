@@ -1,5 +1,6 @@
 """
-Module: deeprm.qc.inspect_block
+DeepRM QC Module: Inspect Block Files
+
 Inspect block files for quality control.
 Plot distribution of base quality, motif composition, nucleotide composition, and block score distribution.
 """
@@ -23,6 +24,140 @@ plt.style.use("seaborn-v0_8-whitegrid")
 plt.rcParams.update(
     {"font.size": 22, "legend.facecolor": "white", "legend.framealpha": 1, "legend.frameon": 1, "lines.linewidth": 2}
 )
+
+
+def add_arguments(parser: argparse.ArgumentParser):
+    """
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+    Returns:
+        None
+    """
+    parser.add_argument("--input", "-k", type=str, required=True, nargs="+", help="Input block file")
+    parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
+    parser.add_argument("--intermediate", "-m", type=str, nargs="+", default=None, help="Intermediate files prefix")
+    parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
+    parser.add_argument("--name", "-n", type=str, default=None, nargs="+", help="Block name")
+    parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
+    parser.add_argument("--sample", "-s", type=int, default=int(1e6), help="Sampling fraction")
+    parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
+    return None
+
+
+def main(args: argparse.Namespace):
+    """
+    Main function to inspect block files.
+    Args:
+        args (argparse.Namespace): Command-line arguments.
+    Returns:
+        None
+    """
+
+    assert len(args.input) == len(args.type)
+    assert all([os.path.exists(b) for b in args.input])
+    if args.intermediate is not None:
+        assert len(args.intermediate) == len(args.input)
+        assert all([os.path.exists(i) for i in args.intermediate])
+    else:
+        intermediate = []
+        for path in args.input:
+            parent_dir = os.path.dirname(os.path.dirname(path))
+            intermediate.append(f"{parent_dir}/qc/block_df_dict.pkl")
+        args.intermediate = intermediate
+    if args.name is not None:
+        assert len(args.name) == len(args.input)
+    else:
+        name = []
+        for path in args.input:
+            name_candidate = set([x for x in path.split("/") if (x.startswith("ON") and x[2:].isdigit())])
+            if len(name_candidate) == 1:
+                name.append(name_candidate.pop())
+            else:
+                raise ValueError("Unable to detect name from block file. Supply --name manually.")
+        args.name = name
+        log.info("Names detected:", args.name)
+
+    warm_color_list = it.cycle(["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"])
+    cool_color_list = it.cycle(["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"])
+    modified_name_list = ["m6A", "m1A", "Am", "I", "m5C", "hm5C", "Cm", "m7G", "m1G", "Gm", "m5U", "Um", "pseU"]
+
+    block_df_dict = {}
+    perfect_block_df_dict = {}
+    color_dict = {}
+
+    for block, name, block_type in zip(args.input, args.name, args.type):
+        block_name = f"{name} ({block_type})"
+        if block_type in modified_name_list:
+            color = next(warm_color_list)
+        else:
+            color = next(cool_color_list)
+        color_dict[block_name] = color
+
+    load_success = False
+    output_file_exists = False
+
+    if os.path.exists(args.output):
+        log.info("Output directory already exists. Attempting to load pickle.")
+        try:
+            block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
+            perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
+            load_success = True
+            output_file_exists = True
+            log.info("Pickle loading successful.")
+        except Exception:
+            load_success = False
+            output_file_exists = False
+            block_df_dict = {}
+            perfect_block_df_dict = {}
+            log.info("Pickle loading from output directory failed.")
+
+    if not load_success:
+        log.info("Attempting to load intermediate files.")
+        try:
+            for intermediate in args.intermediate:
+                block_df_dict_run = pickle.load(open(intermediate, "rb"))
+                perfect_block_df_dict_run = pickle.load(
+                    open(intermediate.replace("block_df_dict", "perfect_block_df_dict"), "rb")
+                )
+                block_df_dict.update(block_df_dict_run)
+                perfect_block_df_dict.update(perfect_block_df_dict_run)
+            load_success = True
+            output_file_exists = False
+            log.info("Pickle loading from intermediate files successful.")
+        except Exception:
+            load_success = False
+            output_file_exists = False
+            block_df_dict = {}
+            perfect_block_df_dict = {}
+            log.info("Pickle loading from intermediate files failed.")
+
+    if not load_success:
+        log.info("Loading block files.")
+        for block, name, block_type in zip(args.input, args.name, args.type):
+            block_name = f"{name} ({block_type})"
+            block_df = pd.read_pickle(block)
+            perfect_block_df = block_df[block_df["score"] >= args.score]
+            perfect_block_df = perfect_block_df.sample(min(args.sample, len(perfect_block_df))).copy()
+            perfect_block_df_dict[block_name] = perfect_block_df
+            block_df = block_df.sample(min(args.sample, len(block_df))).copy()
+            block_df_dict[block_name] = block_df
+
+    if not output_file_exists:
+        with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
+            pickle.dump(block_df_dict, f)
+
+        with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
+            pickle.dump(perfect_block_df_dict, f)
+
+    nucleotide_composition(perfect_block_df_dict, args.output)
+    motif_composition(perfect_block_df_dict, args.output)
+    bq_plot(perfect_block_df_dict, color_dict, args.output)
+    plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
+    motif_cdf(perfect_block_df_dict, color_dict, args.output)
+    block_score_distribution(block_df_dict, color_dict, args.output)
+
+    return None
 
 
 def seq_to_onehot(seq: str):
@@ -142,7 +277,17 @@ def nucleotide_composition(block_df_dict, output):
 
 
 def bq_plot(block_df_dict, color_dict, output, sample=int(1e4), comment=""):
-    ## Plot the distribution of base quality. Plot position-wise mean with CI95.
+    """
+    Plot the distribution of base quality. Plot position-wise mean with CI95.
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        output (str): Output directory to save the base quality plot and data.
+        sample (int): Number of samples to use for plotting. If None, use all data.
+        comment (str): Comment to append to the output file name.
+    Returns:
+        None
+    """
 
     stat_dict = {}
     for block_name, block_df in block_df_dict.items():
@@ -178,7 +323,15 @@ def bq_plot(block_df_dict, color_dict, output, sample=int(1e4), comment=""):
 
 
 def block_score_distribution(block_df_dict, color_dict, output):
-    ## Plot the distribution of block score
+    """Plot the distribution of block score
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        output (str): Output directory to save the block score distribution plot.
+    Returns:
+        None
+    """
+
     plt.rcParams.update({"font.size": 24})
     fig, ax = plt.subplots(figsize=(20, 20))
     for block_name, block_df in block_df_dict.items():
@@ -203,44 +356,17 @@ def block_score_distribution(block_df_dict, color_dict, output):
     return None
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", "-k", type=str, required=True, nargs="+", help="Input block file")
-    parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
-    parser.add_argument("--intermediate", "-m", type=str, nargs="+", default=None, help="Intermediate files prefix")
-    parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
-    parser.add_argument("--name", "-n", type=str, default=None, nargs="+", help="Block name")
-    parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
-    parser.add_argument("--sample", "-s", type=int, default=int(1e6), help="Sampling fraction")
-    parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
-    args = parser.parse_args()
-    assert len(input) == len(args.type)
-    assert all([os.path.exists(b) for b in input])
-    if args.intermediate is not None:
-        assert len(args.intermediate) == len(input)
-        assert all([os.path.exists(i) for i in args.intermediate])
-    else:
-        intermediate = []
-        for path in input:
-            parent_dir = os.path.dirname(os.path.dirname(path))
-            intermediate.append(f"{parent_dir}/qc/block_df_dict.pkl")
-        args.intermediate = intermediate
-    if args.name is not None:
-        assert len(args.name) == len(input)
-    else:
-        name = []
-        for path in input:
-            name_candidate = set([x for x in path.split("/") if (x.startswith("ON") and x[2:].isdigit())])
-            if len(name_candidate) == 1:
-                name.append(name_candidate.pop())
-            else:
-                raise ValueError("Unable to detect name from block file. Supply --name manually.")
-        args.name = name
-        log.info("Names detected:", args.name)
-    return args
-
-
 def plot_violin(block_df_dict, color_dict, cb_len, output):
+    """
+    Plot the distribution of base quality as a violin plot.
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        cb_len (int): Length of the context block.
+        output (str): Output directory to save the violin plot.
+    Returns:
+        None
+    """
     ## merge df
     df_list = []
     color_list = []
@@ -283,7 +409,16 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
 
 
 def plot_motif(perfect_block_df_dict, color_dict, args, motif_list=["AGACU", "CGACA", "UGAUC", "GAAGC", "UCAAG"]):
-
+    """
+    Plot the distribution of motifs in the perfect blocks.
+    Args:
+        perfect_block_df_dict (dict): Dictionary of DataFrames, each containing perfect block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        args: Command-line arguments containing output directory and context block length.
+        motif_list (list): List of motifs to plot. Default is a predefined list of motifs.
+    Returns:
+        None
+    """
     for block_name, block_df in perfect_block_df_dict.items():
         block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
         perfect_block_df_dict[block_name] = block_df
@@ -297,93 +432,3 @@ def plot_motif(perfect_block_df_dict, color_dict, args, motif_list=["AGACU", "CG
         plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
 
     return None
-
-
-def main():
-    args = parse_args()
-    os.makedirs(args.output, exist_ok=True)
-
-    warm_color_list = it.cycle(["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"])
-    cool_color_list = it.cycle(["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"])
-    modified_name_list = ["m6A", "m1A", "Am", "I", "m5C", "hm5C", "Cm", "m7G", "m1G", "Gm", "m5U", "Um", "pseU"]
-
-    block_df_dict = {}
-    perfect_block_df_dict = {}
-    color_dict = {}
-
-    for block, name, block_type in zip(input, args.name, args.type):
-        block_name = f"{name} ({block_type})"
-        if block_type in modified_name_list:
-            color = next(warm_color_list)
-        else:
-            color = next(cool_color_list)
-        color_dict[block_name] = color
-
-    load_success = False
-    output_file_exists = False
-
-    if os.path.exists(args.output):
-        log.info("Output directory already exists. Attempting to load pickle.")
-        try:
-            block_df_dict = pickle.load(open(f"{args.output}/block_df_dict.pkl", "rb"))
-            perfect_block_df_dict = pickle.load(open(f"{args.output}/perfect_block_df_dict.pkl", "rb"))
-            load_success = True
-            output_file_exists = True
-            log.info("Pickle loading successful.")
-        except Exception:
-            load_success = False
-            output_file_exists = False
-            block_df_dict = {}
-            perfect_block_df_dict = {}
-            log.info("Pickle loading from output directory failed.")
-
-    if not load_success:
-        log.info("Attempting to load intermediate files.")
-        try:
-            for intermediate in args.intermediate:
-                block_df_dict_run = pickle.load(open(intermediate, "rb"))
-                perfect_block_df_dict_run = pickle.load(
-                    open(intermediate.replace("block_df_dict", "perfect_block_df_dict"), "rb")
-                )
-                block_df_dict.update(block_df_dict_run)
-                perfect_block_df_dict.update(perfect_block_df_dict_run)
-            load_success = True
-            output_file_exists = False
-            log.info("Pickle loading from intermediate files successful.")
-        except Exception:
-            load_success = False
-            output_file_exists = False
-            block_df_dict = {}
-            perfect_block_df_dict = {}
-            log.info("Pickle loading from intermediate files failed.")
-
-    if not load_success:
-        log.info("Loading block files.")
-        for block, name, block_type in zip(input, args.name, args.type):
-            block_name = f"{name} ({block_type})"
-            block_df = pd.read_pickle(block)
-            perfect_block_df = block_df[block_df["score"] >= args.score]
-            perfect_block_df = perfect_block_df.sample(min(args.sample, len(perfect_block_df))).copy()
-            perfect_block_df_dict[block_name] = perfect_block_df
-            block_df = block_df.sample(min(args.sample, len(block_df))).copy()
-            block_df_dict[block_name] = block_df
-
-    if not output_file_exists:
-        with open(f"{args.output}/block_df_dict.pkl", "wb") as f:
-            pickle.dump(block_df_dict, f)
-
-        with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
-            pickle.dump(perfect_block_df_dict, f)
-
-    nucleotide_composition(perfect_block_df_dict, args.output)
-    motif_composition(perfect_block_df_dict, args.output)
-    bq_plot(perfect_block_df_dict, color_dict, args.output)
-    plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
-    motif_cdf(perfect_block_df_dict, color_dict, args.output)
-    block_score_distribution(block_df_dict, color_dict, args.output)
-
-    return None
-
-
-if __name__ == "__main__":
-    main()

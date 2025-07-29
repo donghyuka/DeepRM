@@ -11,8 +11,6 @@ description = "DeepRM – post‑processing & QC for Nanopore m6A detection"
 keywords = ["RNA", "RNA modification", "m6A", "nanopore", "bioinformatics", "deep learning"]
 authors = [{name = "Laboratory of Computational Biology, Seoul National University"}]
 readme = "README.md"
-documentation = "https://deeprm.readthedocs.io/"
-issues = "https://github.com/vadanamu/deeprm/issues"
 requires-python = ">=3.9"
 dependencies = [
     "colorama",
@@ -38,7 +36,7 @@ docs = [
     "sphinxcontrib-mermaid",
     "sphinx-autosummary-accessors",
 ]
-dev = [
+test = [
     "black>=23.7.0",
     "isort>=5.12.0",
     "ruff>=0.4.0",
@@ -46,7 +44,6 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.10.0",
     "pytest-xdist>=3.3.1",
-    "pre-commit>=3.2.0",
 ]
 
 # --- expose the CLI ---
@@ -74,7 +71,7 @@ line_length = 120
 [tool.ruff]
 line-length = 120
 select = ["E","F","I","UP"]
-ignore = []
+ignore = ["UP035","UP006"]
 fix = true
 
 [tool.pytest.ini_options]

@@ -1,21 +1,23 @@
 """
-Module: deeprm.utils.logging
 Logging utilities for DeepRM.
 """
 
 import logging
 import sys
-from colorama import init as _colorama_init, Fore, Style
+
+from colorama import Fore, Style
+from colorama import init as _colorama_init
 
 _colorama_init(autoreset=True)
 
 _LEVEL_COLOR = {
-    logging.DEBUG:    Fore.BLUE,
-    logging.INFO:     Fore.CYAN,
-    logging.WARNING:  Fore.YELLOW,
-    logging.ERROR:    Fore.RED,
+    logging.DEBUG: Fore.BLUE,
+    logging.INFO: Fore.CYAN,
+    logging.WARNING: Fore.YELLOW,
+    logging.ERROR: Fore.RED,
     logging.CRITICAL: Fore.MAGENTA,
 }
+
 
 class ColorFormatter(logging.Formatter):
     """
@@ -27,6 +29,7 @@ class ColorFormatter(logging.Formatter):
     Attributes:
         datefmt (str): Format string for the timestamp.
     """
+
     def __init__(self, datefmt: str = "%Y-%m-%d %H:%M:%S"):
         super().__init__()
         self.datefmt = datefmt
@@ -55,6 +58,7 @@ class ColorFormatter(logging.Formatter):
         reset = Style.RESET_ALL if color else ""
 
         return f"{prefix} {color}{message}{reset}"
+
 
 def get_logger(name: str = "deeprm", level: int = logging.INFO) -> logging.Logger:
     """
