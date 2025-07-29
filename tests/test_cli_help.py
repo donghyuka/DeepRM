@@ -8,3 +8,27 @@ def test_cli_top_level_help():
     assert result.returncode == 0
     assert "DeepRM" in result.stdout or "DeepRM" in result.stderr
     assert "usage" in result.stdout.lower()
+
+
+def test_cli_inference_help():
+    # Test the inference CLI help
+    result = subprocess.run([sys.executable, "-m", "deeprm", "inference", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "DeepRM Inference Module" in result.stdout or result.stderr
+    assert "usage" in result.stdout.lower()
+
+
+def test_cli_train_help():
+    # Test the training CLI help
+    result = subprocess.run([sys.executable, "-m", "deeprm", "train", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "DeepRM Training Module" in result.stdout or result.stderr
+    assert "usage" in result.stdout.lower()
+
+
+def test_cli_qc_help():
+    # Test the QC CLI help
+    result = subprocess.run([sys.executable, "-m", "deeprm", "qc", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "DeepRM QC Module" in result.stdout or result.stderr
+    assert "usage" in result.stdout.lower()

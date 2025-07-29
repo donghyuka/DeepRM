@@ -41,8 +41,6 @@ This repository contains the source code for training and running DeepRM.
 ### Prerequisites
 * Linux
 * Python 3.9+
-* PyTorch 2.0+ (recommended CUDA 11.8+)
-  * https://pytorch.org/get-started/locally/
 * Dorado 0.7.3+ (optional, for basecalling)
   * https://github.com/nanoporetech/dorado
 * SAMtools 1.16.1+ (optional, for BAM file processing)
