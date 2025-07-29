@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="Black">
-    <option name="sdkName" value="Deep1 Python 3.9.0 Torch" />
+    <option name="executionMode" value="BINARY" />
+    <option name="sdkName" value="Python 3.12 (AIRNA)" />
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.9.0 (sftp://sonic@147.47.218.58:7777/home/sonic/baeklab/Junhak/anaconda3/envs/Hyeonseo_torch/bin/python)" project-jdk-type="Python SDK" />
 </project>

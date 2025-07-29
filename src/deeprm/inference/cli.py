@@ -1,26 +1,25 @@
 """
 Module: deeprm.inference.cli
-
 CLI for DeepRM inference modules.
-This module provides a command-line interface for running inference tasks
-such as running inference, preprocessing data, and generating pileups.
 """
 
-
-import argparse, sys
+import argparse
+import sys
 from importlib import import_module
 
 _COMMANDS = {
-    "run":        "deeprm.inference.inference",
-    "prep":       "deeprm.inference.inference_preprocess",
-    "pileup":      "deeprm.inference.pileup_deeprm",
+    "run": "deeprm.inference.inference",
+    "prep": "deeprm.inference.inference_preprocess",
+    "pileup": "deeprm.inference.pileup_deeprm",
 }
+
 
 def _delegate(modname: str, argv):
     mod = import_module(modname)
     if hasattr(mod, "main"):
         return mod.main(argv)
     raise SystemExit(f"✖ {modname} has no main()")
+
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
@@ -30,6 +29,7 @@ def main(argv=None):
         sp.add_parser(name, help=f"{name} Inference task")
     ns, rest = p.parse_known_args(argv)
     _delegate(_COMMANDS[ns.cmd], rest)
+
 
 if __name__ == "__main__":
     main()

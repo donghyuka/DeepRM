@@ -1,27 +1,37 @@
-"""Command‑line interface for DeepRM.
+"""
+Command‑line interface for DeepRM.
+
+Usage:
+
+    deeprm <group> <subcommand> [args]
+
+    Groups: inference | train | qc
+
+    See: deeprm <group> --help
 
 This file installs a `deeprm` shell command (via the entry‑point in
-`pyproject.toml`) that exposes four high‑level sub‑commands:
+`pyproject.toml`) that exposes the following high‑level sub‑commands:
 
-  • train      – model training pipeline
-  • inference  – run the trained model and post‑processing (pileup)
-  • qc         – quality‑control helpers
+ • inference  – general use for RM detection (preprocessing, inference, and postprocessing)
+ • train      – model training pipeline
+ • qc         – quality‑control helpers
 
 Each sub‑command delegates to a corresponding module (`deeprm.train_preprocess.cli`,
 `deeprm.train.cli`, etc.) if it exists.  If the target module defines a
 ``main(argv: list[str])`` function, we call it; otherwise we execute the
 module as ``python -m`` so users can keep their existing scripts unchanged.
 """
+
 from __future__ import annotations
 
 import argparse
 import importlib
 import runpy
 import sys
+from importlib.metadata import PackageNotFoundError as _PkgNotFound
+from importlib.metadata import version as _pkg_version
 from types import ModuleType
-from typing import List
-from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PkgNotFound
-
+from typing import list
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -33,6 +43,7 @@ _SUBMODULES: dict[str, str] = {
     "train": "deeprm.train.cli",
 }
 
+
 def _resolved_version() -> str:
     """Return the installed deeprm version, with graceful fallbacks."""
     try:
@@ -41,9 +52,11 @@ def _resolved_version() -> str:
         try:
             # fall back to package attribute if available (e.g., editable install)
             from . import __version__  # type: ignore
+
             return __version__
         except Exception:
             return "unknown"
+
 
 def _load_submodule(path: str) -> ModuleType:
     """Import *path* and return the module object."""
@@ -53,7 +66,7 @@ def _load_submodule(path: str) -> ModuleType:
         raise SystemExit(f"✖ Submodule '{path}' not found: {exc}") from exc
 
 
-def _delegate(module: ModuleType, argv: List[str]) -> None:  # pragma: no cover
+def _delegate(module: ModuleType, argv: list[str]) -> None:  # pragma: no cover
     """Run ``module.main`` if present; else emulate ``python -m module``."""
     if hasattr(module, "main"):
         module.main(argv)  # type: ignore[arg-type]
@@ -66,6 +79,7 @@ def _delegate(module: ModuleType, argv: List[str]) -> None:  # pragma: no cover
 # Top‑level argument parser
 # ---------------------------------------------------------------------------
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deeprm",
@@ -74,9 +88,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {_resolved_version()}")
 
     for cmd, help_text in (
-            ("train", "Train a DeepRM model"),
-            ("inference", "Run model prediction + pileup aggregation"),
-            ("qc", "Run quality‑control routines"),
+        ("train", "Train a DeepRM model"),
+        ("inference", "Run model prediction + pileup aggregation"),
+        ("qc", "Run quality‑control routines"),
     ):
         # Add a subparser for each command
         subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
@@ -95,7 +109,8 @@ def _build_parser() -> argparse.ArgumentParser:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def main(argv: List[str] | None = None) -> None:  # noqa: D401 – imperative mood
+
+def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``deeprm`` console script."""
     argv = list(sys.argv[1:] if argv is None else argv)
 

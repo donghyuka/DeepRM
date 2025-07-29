@@ -5,14 +5,13 @@ Nanopore data from NPZ files. It supports parallel reading of files
 and batching of data for efficient processing in PyTorch.
 """
 
-
+import glob
+import math
 from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import torch
-import glob
-from torch.utils.data import IterableDataset
-from torch.utils.data import DataLoader
-import math
+from torch.utils.data import DataLoader, IterableDataset
 
 
 class NanoporeDatasetIterator:
@@ -26,9 +25,8 @@ class NanoporeDatasetIterator:
         sampling (int): Sampling rate.
         sig_window (int): Signal window size.
     """
-    def __init__(self, file_paths,
-                 cb_len=21, kmer_len=5, sampling=6, sig_window=5,
-                 max_workers=4):
+
+    def __init__(self, file_paths, cb_len=21, kmer_len=5, sampling=6, sig_window=5, max_workers=4):
 
         self.file_paths = file_paths
         self.cb_len = cb_len
@@ -51,7 +49,7 @@ class NanoporeDatasetIterator:
             dict: Dictionary containing the data from the NPZ file.
         """
         npz = np.load(path)
-        data =  {
+        data = {
             "label_id": npz["label_id"],
             "segment_len": npz["segment_len_arr"],
             "signal_token": npz["signal_token"],
@@ -84,7 +82,7 @@ class NanoporeDatasetIterator:
         """
         if not self._futures:
             end_index = min(self._file_index + self.max_workers, len(self.file_paths))
-            paths_batch = self.file_paths[self._file_index:end_index]
+            paths_batch = self.file_paths[self._file_index : end_index]
             self._futures = [self.executor.submit(self._read_df, p) for p in paths_batch]
             self._file_index = end_index
 
@@ -117,9 +115,23 @@ class NanoporeDataset(IterableDataset):
         num_workers (int): Number of worker processes.
         resume_from (int): Number of files to skip from the start.
     """
-    def __init__(self, data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 seed=0, num_files_read_once=1000, cb_len=21, kmer_len=5,
-                 sampling=6, sig_window=5, num_workers=1, resume_from=0):
+
+    def __init__(
+        self,
+        data_path,
+        batch_size,
+        disk_shard_size,
+        rank,
+        num_replicas,
+        seed=0,
+        num_files_read_once=1000,
+        cb_len=21,
+        kmer_len=5,
+        sampling=6,
+        sig_window=5,
+        num_workers=1,
+        resume_from=0,
+    ):
 
         super().__init__()
         self.data_path = data_path
@@ -130,7 +142,7 @@ class NanoporeDataset(IterableDataset):
         self.file_paths = sorted(glob.glob(f"{self.data_path}/*.npz"))
         self.epoch = 0
         self.seed = seed
-        self.num_shard = math.ceil(len(self.file_paths)/num_replicas)
+        self.num_shard = math.ceil(len(self.file_paths) / num_replicas)
         self.num_files_read_once = num_files_read_once
         self.cb_len = cb_len
         self.kmer_len = kmer_len
@@ -157,7 +169,7 @@ class NanoporeDataset(IterableDataset):
         # Shard file paths across workers
         file_paths = self.file_paths[id::nw]
         if self.resume_from:
-            file_paths = file_paths[self.resume_from:]
+            file_paths = file_paths[self.resume_from :]
 
         return NanoporeDatasetIterator(
             file_paths,
@@ -165,9 +177,8 @@ class NanoporeDataset(IterableDataset):
             kmer_len=self.kmer_len,
             sampling=self.sampling,
             sig_window=self.sig_window,
-            max_workers=16
+            max_workers=16,
         )
-
 
     def __len__(self):
         """
@@ -192,20 +203,45 @@ class NanoporeDataLoader(DataLoader):
         collate_fn (callable): Function to collate data into batches.
         prefetch_factor (int): Number of batches to prefetch.
     """
-    def __init__(self, dataset:NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
+
+    def __init__(
+        self, dataset: NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor
+    ):
         shuffle = False
         sampler = None
         batch_size = None
-        super().__init__(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory,
-                         drop_last=drop_last, shuffle=shuffle, sampler=sampler, collate_fn=collate_fn,
-                         prefetch_factor=prefetch_factor)
+        super().__init__(
+            dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=drop_last,
+            shuffle=shuffle,
+            sampler=sampler,
+            collate_fn=collate_fn,
+            prefetch_factor=prefetch_factor,
+        )
 
     ## END of NanoporeDataLoader
 
 
-def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
-                 pad_to = 200, bq_clip = 40, num_files_read_once = 1, prefetch_factor = 100000, worker = 16,
-                 cb_len = 21, kmer_len = 5, sampling = 6, sig_window = 5, resume_from = 0):
+def load_dataset(
+    data_path,
+    batch_size,
+    disk_shard_size,
+    rank,
+    num_replicas,
+    pad_to=200,
+    bq_clip=40,
+    num_files_read_once=1,
+    prefetch_factor=100000,
+    worker=16,
+    cb_len=21,
+    kmer_len=5,
+    sampling=6,
+    sig_window=5,
+    resume_from=0,
+):
     """
     Loads the Nanopore dataset using DataLoader.
 
@@ -231,13 +267,30 @@ def load_dataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
     """
 
     batch_size = None
-    dataset = NanoporeDataset(data_path, batch_size, disk_shard_size, rank, num_replicas,
-                              num_files_read_once = num_files_read_once, cb_len = cb_len, kmer_len = kmer_len,
-                              sampling = sampling, sig_window = sig_window, num_workers = worker, resume_from = resume_from)
-    dataloader = NanoporeDataLoader(dataset, batch_size=batch_size, num_workers=worker, pin_memory=True, drop_last=False,
-                                    collate_fn = collate_fn, prefetch_factor=prefetch_factor)
+    dataset = NanoporeDataset(
+        data_path,
+        batch_size,
+        disk_shard_size,
+        rank,
+        num_replicas,
+        num_files_read_once=num_files_read_once,
+        cb_len=cb_len,
+        kmer_len=kmer_len,
+        sampling=sampling,
+        sig_window=sig_window,
+        num_workers=worker,
+        resume_from=resume_from,
+    )
+    dataloader = NanoporeDataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=worker,
+        pin_memory=True,
+        drop_last=False,
+        collate_fn=collate_fn,
+        prefetch_factor=prefetch_factor,
+    )
     return dataloader
-
 
 
 def collate_fn(batch):
@@ -253,9 +306,15 @@ def collate_fn(batch):
     source["segment_len"] = torch.tensor(batch["segment_len"], dtype=torch.int32)
     source["signal_token"] = torch.tensor(batch["signal_token"], dtype=torch.float32)
     source["kmer_token"] = torch.tensor(batch["kmer_token"], dtype=torch.int32)
-    source["dwell_bq_token"] = torch.tensor(np.stack((batch["dwell_motor_token"],
-                                                      batch["dwell_pore_token"],
-                                                      batch["bq_token"],
-                                                      ),
-                                                     axis=-1), dtype=torch.float32)
+    source["dwell_bq_token"] = torch.tensor(
+        np.stack(
+            (
+                batch["dwell_motor_token"],
+                batch["dwell_pore_token"],
+                batch["bq_token"],
+            ),
+            axis=-1,
+        ),
+        dtype=torch.float32,
+    )
     return source

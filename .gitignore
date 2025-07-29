@@ -4,3 +4,5 @@
 docs/_build
 ## patch
 patch
+## venv
+venv/

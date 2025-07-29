@@ -1,20 +1,28 @@
-import pickle
-import sys
-import pod5
-import tqdm
+"""
+Module: deeprm.train.train_preprocess
+This module provides functions for preprocessing training data for DeepRM.
+It includes functions for extracting move tags from BAM files, preprocessing POD5 files,
+and segmenting and normalizing signal data.
+"""
+
 import argparse
 import atexit
 import gc
+import glob
 import json
 import multiprocessing as mp
 import os
-import glob
+import pickle
+import shutil
+import sys
 import time
+
 import numpy as np
 import pandas as pd
+import pod5
 import pysam
 from tqdm import tqdm
-import shutil
+
 from deeprm.train.extract_block import extract_block
 from deeprm.utils.logging import get_logger
 from deeprm.utils.memory import start_mem_watchdog
@@ -51,7 +59,7 @@ def extract_move(bam_path, ncpu, signal_path_dict, signal_path_arr, intermediate
                 try:
                     signal_path = signal_path_dict[read_id]
                     data = data_dict[signal_path]
-                except:
+                except Exception:
                     continue
 
                 if read.has_tag("mv"):
@@ -122,8 +130,10 @@ def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
     index_list = man.list()
 
     for pid in range(ncpu):
-        proc = mp.Process(target=extract_signal_proc, args=(pod5_path_list_split[pid], save_path, pid, index_list,
-                                                            chunk, max_mb, min_mb))
+        proc = mp.Process(
+            target=extract_signal_proc,
+            args=(pod5_path_list_split[pid], save_path, pid, index_list, chunk, max_mb, min_mb),
+        )
         proc_list.append(proc)
         proc.start()
 
@@ -161,7 +171,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
     pod5_idx = 0
     start_mem_watchdog()
 
-    for pod5_idx, pod5_path in tqdm.tqdm(enumerate(pod5_path_list), total=len(pod5_path_list), desc=f"Parsing POD5 Files"):
+    for pod5_idx, pod5_path in tqdm.tqdm(
+        enumerate(pod5_path_list), total=len(pod5_path_list), desc="Parsing POD5 Files"
+    ):
         signal_list = []
         offset_list = []
         scale_list = []
@@ -175,7 +187,7 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
                         offset = record.calibration.offset
                         scale = record.calibration.scale
                         id = str(record.read_id)
-                    except:
+                    except Exception:
                         skipped += 1
                         continue
 
@@ -187,8 +199,9 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
             if skipped > 0:
                 log.warning(f"Skipped {skipped} faulty records in: {pod5_path}")
 
-        except:
+        except Exception as e:
             ## Pod5 file is corrupted
+            log.warning(f"{e}")
             log.warning(f"Corrupted POD5 file: {pod5_path} - Skipping")
             continue
 
@@ -199,8 +212,8 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
         save_idx = 0
 
         for chunk_idx in range(0, len(df) // chunk + 1):
-            signal_df = df.iloc[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len(df))].copy()
-            df_size = sys.getsizeof(signal_df) / (1024 ** 2)
+            signal_df = df.iloc[chunk_idx * chunk : min((chunk_idx + 1) * chunk, len(df))].copy()
+            df_size = sys.getsizeof(signal_df) / (1024**2)
             if len(signal_df) == chunk and df_size > min_mb:
                 save_idx = write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
             else:
@@ -209,7 +222,7 @@ def extract_signal_proc(pod5_path_list, signal_df_path, pid, index_list, chunk, 
 
         if len(chunk_buffer) > 0:
             signal_df = pd.concat(chunk_buffer, ignore_index=True)
-            df_size = sys.getsizeof(signal_df) / (1024 ** 2)
+            df_size = sys.getsizeof(signal_df) / (1024**2)
             if df_size > min_mb:
                 chunk_buffer = []
                 write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict_local, max_mb)
@@ -246,13 +259,13 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
         int: Updated save index.
     """
     save_idx += 1
-    df_size = sys.getsizeof(signal_df) / (1024 ** 2)
+    df_size = sys.getsizeof(signal_df) / (1024**2)
     if df_size > max_mb and len(signal_df) > 1:
         ## Split the dataframe
-        split_num = min(int(df_size // max_mb) + 1 ,len(signal_df))
+        split_num = min(int(df_size // max_mb) + 1, len(signal_df))
         split_size = len(signal_df) // split_num
         for split_idx in range(split_num):
-            split_df = signal_df.iloc[split_idx * split_size:min((split_idx + 1) * split_size, len(signal_df))].copy()
+            split_df = signal_df.iloc[split_idx * split_size : min((split_idx + 1) * split_size, len(signal_df))].copy()
             save_idx = write_df(split_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max_mb)
     else:
         save_path = f"{signal_df_path}/{pid}-{pod5_idx}-{save_idx}.pkl"
@@ -277,18 +290,18 @@ def sequence_to_kmer_token(seq, kmer):
     """
     ## 1. change string to array of int - 0, 1, 2, 3
     seq = seq.upper()
-    seq = seq.replace('A', '0')
-    seq = seq.replace('C', '1')
-    seq = seq.replace('G', '2')
-    seq = seq.replace('T', '3')
-    seq = seq.replace('U', '3')
+    seq = seq.replace("A", "0")
+    seq = seq.replace("C", "1")
+    seq = seq.replace("G", "2")
+    seq = seq.replace("T", "3")
+    seq = seq.replace("U", "3")
     seq = np.array(list(seq), dtype=int)
 
     ## 2. convert to kmer token
-    seq = [seq[i:kmer+i] for i in range(len(seq)-kmer+1)]
+    seq = [seq[i : kmer + i] for i in range(len(seq) - kmer + 1)]
     seq = np.stack(seq, axis=1)
-    quaternary = 4**np.arange(kmer).reshape(-1,1)
-    seq = np.sum(seq * quaternary, axis=0) + 1 ## 0 is reserved for padding
+    quaternary = 4 ** np.arange(kmer).reshape(-1, 1)
+    seq = np.sum(seq * quaternary, axis=0) + 1  ## 0 is reserved for padding
     seq = seq.astype(np.int16)
     return seq
 
@@ -333,7 +346,7 @@ def create_move_token(segment_len_arr):
     Returns:
         np.ndarray: Array of move tokens.
     """
-    token = np.arange(1, len(segment_len_arr)+1, dtype=np.uint8)
+    token = np.arange(1, len(segment_len_arr) + 1, dtype=np.uint8)
     token = np.repeat(token, segment_len_arr)
     return token
 
@@ -349,7 +362,7 @@ def create_target_mask(segment_len_arr, lr_pad):
     Returns:
         np.ndarray: Target mask.
     """
-    binary_mask = np.zeros(2*lr_pad+1, dtype=np.uint8)
+    binary_mask = np.zeros(2 * lr_pad + 1, dtype=np.uint8)
     binary_mask[lr_pad] = 1
     binary_mask = np.repeat(binary_mask, segment_len_arr)
     return binary_mask
@@ -371,10 +384,10 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
         np.ndarray: Padded signal.
     """
     try:
-        kmer_pad = (kmer-1)//2
-        lr_pad = (sig_window-1)//2
-        l_skip = (np.sum(segment_len_arr[:kmer_pad])-lr_pad)*sampling
-        r_skip = (np.sum(segment_len_arr[-kmer_pad:])-lr_pad)*sampling
+        kmer_pad = (kmer - 1) // 2
+        lr_pad = (sig_window - 1) // 2
+        l_skip = (np.sum(segment_len_arr[:kmer_pad]) - lr_pad) * sampling
+        r_skip = (np.sum(segment_len_arr[-kmer_pad:]) - lr_pad) * sampling
         assert l_skip >= 0, f"Left skip is negative: {l_skip}, segment_len_arr: {segment_len_arr}"
         assert r_skip >= 0, f"Right skip is negative: {r_skip}, segment_len_arr: {segment_len_arr}"
         signal_segmented = np.concatenate(signal_segmented)
@@ -384,13 +397,13 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
             signal_segmented = signal_segmented[l_skip:-r_skip]
         else:
             signal_segmented = signal_segmented[l_skip:]
-        # signal_segmented = np.lib.stride_tricks.sliding_window_view(signal_segmented, sig_window * sampling)[::sampling]
 
-        padding = (pad_to+kmer-1) * sampling - len(signal_segmented)
+        padding = (pad_to + kmer - 1) * sampling - len(signal_segmented)
         if padding > 0:
             signal_segmented = np.pad(signal_segmented, (0, padding), mode="constant", constant_values=0)
 
-    except:
+    except Exception as e:
+        log.error(f"Error in segmented_signal_to_block: {e}")
         return None
     return signal_segmented
 
@@ -424,7 +437,7 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult):
     return move
 
 
-def trim_scale_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shift_mult, scale_mult):
+def trim_scale_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile_b, shift_mult, scale_mult):
     """
     Trims and scales the signal.
 
@@ -469,8 +482,20 @@ def trim_scale_segment_signal(signal,move,sp,ts,ns, quantile_a, quantile_b, shif
     return signal
 
 
-def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor, kmer = 5, cb_len = 21, sampling = 6,
-                             sig_window = 5, max_penalty = 10, chunk_size = 1000, max_token_len = 200, dwell_shift = 10):
+def segment_normalize_signal(
+    seg_df_path,
+    postfix,
+    signal_path_arr,
+    norm_factor,
+    kmer=5,
+    cb_len=21,
+    sampling=6,
+    sig_window=5,
+    max_penalty=10,
+    chunk_size=1000,
+    max_token_len=200,
+    dwell_shift=10,
+):
     """
     Segments and normalizes the signal data.
 
@@ -494,7 +519,7 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
 
     start_mem_watchdog()
 
-    trim = kmer//2
+    trim = kmer // 2
 
     quantile_a = norm_factor["quantile_a"]
     quantile_b = norm_factor["quantile_b"]
@@ -502,7 +527,7 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
     scale_mult = norm_factor["scale_mult"]
 
     for signal_path in tqdm.tqdm(signal_path_arr, total=len(signal_path_arr), desc="Segmenting and Tokenizing Signals"):
-        file_id = signal_path.split('/')[-1]
+        file_id = signal_path.split("/")[-1]
 
         if not os.path.exists(signal_path):
             continue
@@ -522,8 +547,20 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
 
         signal_df["mv"] = signal_df["mv"].apply(lambda x: np.array(x, dtype=int))
         signal_df["dwell_token"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5))
-        signal_df["signal"] = signal_df.apply(lambda x: trim_scale_segment_signal(x["signal"], x["mv"], x["sp"], x["ts"], x["ns"],
-                                                                                  quantile_a, quantile_b, shift_mult, scale_mult), axis=1)
+        signal_df["signal"] = signal_df.apply(
+            lambda x: trim_scale_segment_signal(
+                x["signal"],
+                x["mv"],
+                x["sp"],
+                x["ts"],
+                x["ns"],
+                quantile_a,
+                quantile_b,
+                shift_mult,
+                scale_mult,
+            ),
+            axis=1,
+        )
 
         signal_df = signal_df[signal_df["signal"].notnull()][["read_id", "signal", "dwell_token"]].copy()
 
@@ -542,21 +579,33 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
         if len(signal_df) == 0:
             continue
 
-        signal_df["block_score"] = signal_df["penalty"].apply(lambda x: 1-(x/max_penalty))
-        signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"]:x["end_pos"]], axis=1)
-        signal_df["dwell_motor_token"] = signal_df.apply(lambda x: x["dwell_token"][(x["start_pos"]+dwell_shift+trim):(x["end_pos"]+dwell_shift-trim)], axis=1)
-        signal_df["dwell_pore_token"] = signal_df.apply(lambda x: x["dwell_token"][(x["start_pos"]+trim):(x["end_pos"]-trim)], axis=1)
+        signal_df["block_score"] = signal_df["penalty"].apply(lambda x: 1 - (x / max_penalty))
+        signal_df["signal"] = signal_df.apply(lambda x: x["signal"][x["start_pos"] : x["end_pos"]], axis=1)
+        signal_df["dwell_motor_token"] = signal_df.apply(
+            lambda x: x["dwell_token"][(x["start_pos"] + dwell_shift + trim) : (x["end_pos"] + dwell_shift - trim)],
+            axis=1,
+        )
+        signal_df["dwell_pore_token"] = signal_df.apply(
+            lambda x: x["dwell_token"][(x["start_pos"] + trim) : (x["end_pos"] - trim)], axis=1
+        )
         signal_df["bq"] = signal_df["bq"].apply(lambda x: x[trim:-trim])
         signal_df["segment_len_arr"] = signal_df["signal"].apply(lambda x: create_segment_len_arr(x, sampling))
 
         signal_df["token_len"] = signal_df["segment_len_arr"].apply(lambda x: np.sum(x[trim:-trim]))
-        signal_df = signal_df[(signal_df["segment_len_arr"].apply(lambda x: len(x)==cb_len)) &
-                              (signal_df["token_len"] <= max_token_len) &
-                              (signal_df["token_len"] > 0)]
+        signal_df = signal_df[
+            (signal_df["segment_len_arr"].apply(lambda x: len(x) == cb_len))
+            & (signal_df["token_len"] <= max_token_len)
+            & (signal_df["token_len"] > 0)
+        ]
         try:
-            signal_df["signal"] = signal_df.apply(lambda x: segmented_signal_to_block(x["signal"], x["segment_len_arr"],
-                                                                                      kmer, sampling, sig_window, max_token_len), axis=1)
-        except:
+            signal_df["signal"] = signal_df.apply(
+                lambda x: segmented_signal_to_block(
+                    x["signal"], x["segment_len_arr"], kmer, sampling, sig_window, max_token_len
+                ),
+                axis=1,
+            )
+        except Exception as e:
+            log.warning(f"{e}")
             log.warning(f"Signal Tokenization Error in: {signal_path} - Skipping")
             continue
 
@@ -567,15 +616,30 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
 
         signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x[trim:-trim])
 
-        signal_df = signal_df[["block_score", "segment_len_arr", "signal", "motif", "dwell_motor_token", "dwell_pore_token", "bq"]].copy()
-        signal_df.rename(columns={"motif": "kmer_token", "signal": "signal_token", "bq": "bq_token"}, inplace=True)
+        signal_df = signal_df[
+            [
+                "block_score",
+                "segment_len_arr",
+                "signal",
+                "motif",
+                "dwell_motor_token",
+                "dwell_pore_token",
+                "bq",
+            ]
+        ].copy()
+        signal_df.rename(
+            columns={"motif": "kmer_token", "signal": "signal_token", "bq": "bq_token"},
+            inplace=True,
+        )
         signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x.astype(np.uint8))
         signal_df["signal_token"] = signal_df["signal_token"].apply(lambda x: x.astype(np.float32))
-        signal_df["kmer_token"] = signal_df["kmer_token"].apply(lambda x: np.array(list(x)).view(np.int32).astype(np.uint8))
-        signal_df["bq_token"] = signal_df["bq_token"].apply(lambda x: np.clip(x,0,60).astype(np.uint8))
+        signal_df["kmer_token"] = signal_df["kmer_token"].apply(
+            lambda x: np.array(list(x)).view(np.int32).astype(np.uint8)
+        )
+        signal_df["bq_token"] = signal_df["bq_token"].apply(lambda x: np.clip(x, 0, 60).astype(np.uint8))
 
         for chunk_idx in range(0, len(signal_df) // chunk_size + 1):
-            chunk_df = signal_df.iloc[chunk_idx * chunk_size:min((chunk_idx + 1) * chunk_size, len(signal_df))].copy()
+            chunk_df = signal_df.iloc[chunk_idx * chunk_size : min((chunk_idx + 1) * chunk_size, len(signal_df))].copy()
             save_path = f"{out_path.replace('.pkl','')}-{chunk_idx}.npz"
             save_npz(save_path, chunk_df)
 
@@ -583,6 +647,8 @@ def segment_normalize_signal(seg_df_path, postfix, signal_path_arr, norm_factor,
         gc.collect()
 
     return None
+
+
 def save_npz(save_path, df):
     """
     Saves the dataframe to a compressed NPZ file.
@@ -602,14 +668,16 @@ def save_npz(save_path, df):
         dwell_pore_token = np.stack(df["dwell_pore_token"].values)
         bq_token = np.stack(df["bq_token"].values)
         block_score = df["block_score"].values
-        np.savez_compressed(save_path,
-                            segment_len_arr=segment_len_arr,
-                            signal_token=signal_token,
-                            kmer_token=kmer_token,
-                            dwell_motor_token=dwell_motor_token,
-                            dwell_pore_token=dwell_pore_token,
-                            bq_token=bq_token,
-                            block_score=block_score)
+        np.savez_compressed(
+            save_path,
+            segment_len_arr=segment_len_arr,
+            signal_token=signal_token,
+            kmer_token=kmer_token,
+            dwell_motor_token=dwell_motor_token,
+            dwell_pore_token=dwell_pore_token,
+            bq_token=bq_token,
+            block_score=block_score,
+        )
 
     return None
 
@@ -661,7 +729,9 @@ def split_block_df(signal_path_dict, signal_path_arr, intermediate_path, block_d
     del block_df
     gc.collect()
 
-    for signal_path, group_df in tqdm.tqdm(block_df_groupby, total=len(signal_path_arr), desc="Splitting Block Dataframe"):
+    for signal_path, group_df in tqdm.tqdm(
+        block_df_groupby, total=len(signal_path_arr), desc="Splitting Block Dataframe"
+    ):
         group_df.to_pickle(f"{intermediate_path}/block_df_split/{signal_path}")
 
     del block_df_groupby
@@ -709,8 +779,13 @@ def parse_args():
     parser.add_argument("--smp", dest="spacer_mismatch_penalty", type=int, default=2)
     parser.add_argument("--sst", dest="spacer_size_tolerance", type=int, default=1)
     parser.add_argument("--ac", dest="anchor_list", type=str, nargs="+", default=["A", "A", "A"])
-    parser.add_argument("--sp", dest="spacer_list", type=str, nargs="+",
-                        default=["CGACAU", "CCAUUG", "AAGCGU", "GUAGUC"])
+    parser.add_argument(
+        "--sp",
+        dest="spacer_list",
+        type=str,
+        nargs="+",
+        default=["CGACAU", "CCAUUG", "AAGCGU", "GUAGUC"],
+    )
     parser.add_argument("--ss", dest="spacer_size", type=int, default=6)
     parser.add_argument("--cp", dest="cb_pad", type=int, default=10)
     parser.add_argument("--cb", dest="cb_per_bb", type=int, default=3)
@@ -722,20 +797,32 @@ def parse_args():
     parser.add_argument("--sample", dest="sample", type=int, default=None)
     parser.add_argument("--keep", dest="keep_intermediate", type=bool, default=False)
     parser.add_argument("--cfg", dest="config", type=str, default=None)
-    parser.add_argument("--resume", dest="resume", type=str, default=None, help="Continue from previous run. Provide the path to the previous output.")
+    parser.add_argument(
+        "--resume",
+        dest="resume",
+        type=str,
+        default=None,
+        help="Continue from previous run. Provide the path to the previous output.",
+    )
 
     ## Signal preprocessing parameters
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
-    parser.add_argument("--keep_intermediate", "-ki", action="store_true", help="Keep intermediate files", default=True)
+    parser.add_argument(
+        "--keep_intermediate",
+        "-ki",
+        action="store_true",
+        help="Keep intermediate files",
+        default=True,
+    )
     parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
 
     args = parser.parse_args()
 
     if args.config is not None:
-        with open(args.config, "r") as config_file:
+        with open(args.config) as config_file:
             config_dict = json.load(config_file)
             for key, value in config_dict.items():
                 setattr(args, key, value)
@@ -755,7 +842,10 @@ def parse_args():
     if not os.path.exists(args.block):
         raise FileNotFoundError(f"Context Block file {args.block} does not exist")
     if os.path.exists(args.output):
-        raise FileExistsError(f"Output directory {args.output} already exists. Please choose a different output directory or remove the existing one.")
+        raise FileExistsError(
+            f"Output directory {args.output} already exists. \
+            Please choose a different output directory or remove the existing one."
+        )
     os.makedirs(args.output, exist_ok=True)
 
     return args
@@ -763,7 +853,8 @@ def parse_args():
 
 def main():
     """
-    Main function to extract context blocks from a basecalled BAM file using a directed acyclic graph (DAG).
+    Main function to extract context blocks from a basecalled BAM file
+    using a directed acyclic graph (DAG).
 
     Returns:
         None
@@ -789,7 +880,7 @@ def main():
 
     index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.ncpu, args.chunk, args.max_size, args.min_size)
     signal_path_arr = list(index_dict.keys())
-    signal_name_arr = [x.split('/')[-1] for x in signal_path_arr]
+    signal_name_arr = [x.split("/")[-1] for x in signal_path_arr]
     gc.collect()
 
     if len(signal_path_arr) == 0:
@@ -800,9 +891,11 @@ def main():
         pickle.dump(index_dict, outfile)
 
     signal_path_dict = {}
-    for signal_path, id_list in tqdm.tqdm(index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"):
+    for signal_path, id_list in tqdm.tqdm(
+        index_dict.items(), total=len(index_dict), desc="Creating Read-to-File Index"
+    ):
         for read_id in id_list:
-            signal_path_dict[read_id] = signal_path.split('/')[-1]
+            signal_path_dict[read_id] = signal_path.split("/")[-1]
 
     del index_dict
     gc.collect()
@@ -835,8 +928,10 @@ def main():
 
     proc_list = []
     for signal_paths in signal_path_arr_split:
-        proc = mp.Process(target=segment_normalize_signal,
-                          args=(args.output, args.postfix, signal_paths, norm_factor))
+        proc = mp.Process(
+            target=segment_normalize_signal,
+            args=(args.output, args.postfix, signal_paths, norm_factor),
+        )
         proc_list.append(proc)
         proc.start()
 

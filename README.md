@@ -20,28 +20,65 @@
 * [Usage](#usage)
   * [Training](#training)
   * [Inference](#inference)
-* [Requirements](#requirements)
 * [Installation](#installation)
+  * [Prerequisites](#prerequisites)
+  * [Installation options](#installation-options)
 * [Architecture](#architecture)
 * [License](#license)
 * [Citation](#citation)
 * [Contributors](#contributors)
 * [Acknowledgements](#acknowledgements)
 
+
 ## Introduction
 DeepRM is a transformer-based model for RNA modification detection using Nanopore direct RNA sequencing.
 This repository contains the source code for training and running DeepRM.
 
+
 ## Quickstart
 ```bash
-# Install
-python -m pip install deeprm
 # Prepare data
 deeprm inference prep -i <raw_dir> -o <prep_dir>
 # Run inference
 deeprm inference run -m <weights.pt> -d <prep_dir> -o <pred_dir>
 # Generate site-level results
 deeprm inference pileup -i <pred_dir> -o <pileup_dir>
+```
+
+## Installation
+
+### Prerequisites
+* Linux
+* Python 3.9+
+* PyTorch 2.0+ (recommended CUDA 11.8+)
+  * https://pytorch.org/get-started/locally/
+* Dorado 0.7.3+ (optional, for basecalling)
+  * https://github.com/nanoporetech/dorado
+* SAMtools 1.16.1+ (optional, for BAM file processing)
+  * http://www.htslib.org/
+
+* Python package requirements are listed in `requirements.txt` and will be installed automatically when you install DeepRM.
+
+### Installation options
+1. Install via PIP (recommended)
+
+```bash
+python -m pip install deeprm
+```
+
+2. Install via Conda
+
+```bash
+conda install -c conda-forge deeprm
+```
+
+3. Install from source (GitHub)
+
+```bash
+git clone https://github.com/vadanamu/deeprm
+cd deeprm
+python -m pip install -U pip
+python -m pip install -e .
 ```
 
 ## Usage
@@ -106,36 +143,6 @@ deeprm train compile --input <input_POD5_dir> --output <output_file>
 deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
-
-## Requirements
-* Python 3.8+
-* Dorado 0.7.3+ (https://github.com/nanoporetech/dorado)
-* SAMtools 1.16.1+ (http://www.htslib.org/)
-
-
-* Python package requirements are listed in `requirements.txt` and will be installed automatically when you install DeepRM.
-
-
-## Installation
-1. Install via PIP (recommended)
-
-```bash
-python -m pip install deeprm
-```
-
-2. Install via Conda
-
-```bash
-conda install -c conda-forge deeprm
-```
-
-3. Install from GitHub
-
-```bash
-git clone https://github.com/vadanamu/deeprm
-cd deeprm
-python -m pip install -e .
-```
 
 
 ## Architecture

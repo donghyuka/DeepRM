@@ -1,18 +1,28 @@
+"""
+Module: deeprm.qc.inspect_block
+Inspect block files for quality control.
+Plot distribution of base quality, motif composition, nucleotide composition, and block score distribution.
+"""
 
-import pandas as pd
-import numpy as np
-import os
-from matplotlib import pyplot as plt
-import seaborn as sns
-import pickle
 import argparse
 import itertools as it
+import os
+import pickle
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib import pyplot as plt
+
 from deeprm.utils.logging import get_logger
+
 log = get_logger(__name__)
 
-plt.style.use('default')
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams.update({'font.size': 22, 'legend.facecolor': 'white', 'legend.framealpha': 1, "legend.frameon": 1, "lines.linewidth": 2})
+plt.style.use("default")
+plt.style.use("seaborn-v0_8-whitegrid")
+plt.rcParams.update(
+    {"font.size": 22, "legend.facecolor": "white", "legend.framealpha": 1, "legend.frameon": 1, "lines.linewidth": 2}
+)
 
 
 def seq_to_onehot(seq: str):
@@ -26,7 +36,7 @@ def seq_to_onehot(seq: str):
         np.ndarray: One-hot encoded matrix of the sequence.
     """
     seq = seq.upper()
-    seq = seq.replace('T', 'U')
+    seq = seq.replace("T", "U")
     mapping = dict(zip("ACGU", range(4)))
     mapped = [mapping[i] for i in seq]
     result = np.eye(4)[mapped].astype(float)
@@ -34,23 +44,30 @@ def seq_to_onehot(seq: str):
 
 
 def motif_cdf(block_df_dict, color_dict, output):
-
+    """
+    Calculate and plot the cumulative distribution function (CDF) of 5-mer motifs in the blocks.
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        output (str): Output directory to save the CDF plot and data.
+    Returns:
+        None
+    """
     motif_cdf_dict = {}
     for block_name, block_df in block_df_dict.items():
         motif_arr = block_df["motif"].apply(lambda x: x[8:13]).value_counts()
-        motif_cnt_arr = np.array([motif_arr.get(motif,0) for motif in motif_arr.index])
+        motif_cnt_arr = np.array([motif_arr.get(motif, 0) for motif in motif_arr.index])
         motif_cnt_sorted = np.sort(motif_cnt_arr)[::-1]
-        motif_cdf = np.cumsum(motif_cnt_sorted)/np.sum(motif_cnt_sorted)
+        motif_cdf = np.cumsum(motif_cnt_sorted) / np.sum(motif_cnt_sorted)
         motif_cdf_dict[block_name] = motif_cdf
 
     with open(f"{output}/motif_cdf.pkl", "wb") as f:
         pickle.dump(motif_cdf_dict, f)
 
-    plt.rcParams.update({'font.size': 24})
-    fig, ax = plt.subplots(figsize=(20,20))
+    plt.rcParams.update({"font.size": 24})
+    fig, ax = plt.subplots(figsize=(20, 20))
     for block_name, block_df in block_df_dict.items():
-        ax.plot(motif_cdf_dict[block_name], label=f"{block_name} (n={len(block_df):,})",
-                color=color_dict[block_name])
+        ax.plot(motif_cdf_dict[block_name], label=f"{block_name} (n={len(block_df):,})", color=color_dict[block_name])
     ax.set_title("5-mer Motif CDF")
     ax.set_xlabel("Motif")
     ax.set_ylabel("CDF")
@@ -59,20 +76,28 @@ def motif_cdf(block_df_dict, color_dict, output):
     return None
 
 
-def motif_composition(block_df_dict, color_dict,  output):
-    ## Plot ratio of nucleotides in each position
-    ## Each nucleotide is represented as a box, and the height of the box is the ratio of the nucleotide
+def motif_composition(block_df_dict, output):
+    """
+    Plot ratio of nucleotides in each position.
+    Each nucleotide is represented as a box, and the height of the box is the ratio of the nucleotide.
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        color_dict (dict): Dictionary mapping block names to colors for plotting.
+        output (str): Output directory to save the motif composition plot and data.
+    Returns:
+        None
+    """
 
     for block_name, block_df in block_df_dict.items():
         motif = block_df["motif"].apply(lambda x: seq_to_onehot(x))
         motif_sum = np.sum(motif.to_numpy(), axis=0)
-        motif_sum = motif_sum/np.sum(motif_sum)
-        motif_sum = pd.DataFrame(motif_sum, columns=["A","C","G","U"])
+        motif_sum = motif_sum / np.sum(motif_sum)
+        motif_sum = pd.DataFrame(motif_sum, columns=["A", "C", "G", "U"])
 
         with open(f"{output}/motif_composition.pickle", "wb") as f:
             pickle.dump([motif_sum], f)
 
-        fig, ax = plt.subplots(1, 1, figsize=(20,20))
+        fig, ax = plt.subplots(1, 1, figsize=(20, 20))
 
         motif_sum.plot(kind="bar", stacked=True, ax=ax, color=["royalblue", "tomato", "forestgreen", "gold"])
         ax.set_title(f"Motif composition: ({block_name}) (n={len(block_df):,})")
@@ -84,18 +109,28 @@ def motif_composition(block_df_dict, color_dict,  output):
     return None
 
 
-def nucleotide_composition(block_df_dict, color_dict,  output):
+def nucleotide_composition(block_df_dict, output):
+    """
+    Plot the ratio of nucleotides in each block as a pie chart.
+    Args:
+        block_df_dict (dict): Dictionary of DataFrames, each containing block data.
+        output (str): Output directory to save the nucleotide composition plot.
+    Returns:
+        None
+    """
     ## Plot ratio of nucleotides in pie chart
-    nrows =  2
-    ncols =  int(np.ceil(len(block_df_dict)/nrows))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(8*ncols, 8*nrows))
+    nrows = 2
+    ncols = int(np.ceil(len(block_df_dict) / nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(8 * ncols, 8 * nrows))
     for i, (block_name, block_df) in enumerate(block_df_dict.items()):
-        ax = axes[i//ncols, i%ncols]
+        ax = axes[i // ncols, i % ncols]
         motif = block_df["motif"].apply(lambda x: seq_to_onehot(x))
         motif_sum = motif.to_numpy().sum(axis=0)
-        motif_sum = np.concatenate([motif_sum[:motif_sum.shape[0]//2], motif_sum[motif_sum.shape[0]//2+1:]]).sum(axis=0)
-        motif_sum = motif_sum/np.sum(motif_sum)
-        ax.pie(motif_sum, labels=["A","C","G","U"], autopct='%1.1f%%')
+        motif_sum = np.concatenate(
+            [motif_sum[: motif_sum.shape[0] // 2], motif_sum[motif_sum.shape[0] // 2 + 1 :]]
+        ).sum(axis=0)
+        motif_sum = motif_sum / np.sum(motif_sum)
+        ax.pie(motif_sum, labels=["A", "C", "G", "U"], autopct="%1.1f%%")
         ax.set_title(f"{block_name}")
         ax.set_ylabel("")
         ax.set_xlabel("")
@@ -106,7 +141,7 @@ def nucleotide_composition(block_df_dict, color_dict,  output):
     return None
 
 
-def bq_plot(block_df_dict, color_dict, output, sample=int(1e+4), comment=""):
+def bq_plot(block_df_dict, color_dict, output, sample=int(1e4), comment=""):
     ## Plot the distribution of base quality. Plot position-wise mean with CI95.
 
     stat_dict = {}
@@ -116,19 +151,24 @@ def bq_plot(block_df_dict, color_dict, output, sample=int(1e+4), comment=""):
         bq_arr = np.stack(block_df["bq"].values, axis=0)
         bq_mean = np.mean(bq_arr, axis=0)
         bq_std = np.std(bq_arr, axis=0)
-        bq_ci95 = 1.96*bq_std/np.sqrt(len(bq_arr))
+        bq_ci95 = 1.96 * bq_std / np.sqrt(len(bq_arr))
         stat_dict[block_name] = (bq_mean, bq_ci95)
 
     with open(f"{output}/bq_plot.pickle", "wb") as f:
         pickle.dump(stat_dict, f)
 
-    plt.rcParams.update({'font.size': 24})
-    fig, ax = plt.subplots(figsize=(20,10))
+    plt.rcParams.update({"font.size": 24})
+    fig, ax = plt.subplots(figsize=(20, 10))
     for block_name, block_df in block_df_dict.items():
         pos_bq_mean, pos_bq_ci95 = stat_dict[block_name]
         ax.plot(pos_bq_mean, color=color_dict[block_name], label=f"{block_name} (n={len(block_df):,})")
-        ax.fill_between(np.arange(len(pos_bq_mean)), pos_bq_mean-pos_bq_ci95, pos_bq_mean+pos_bq_ci95,
-                        color=color_dict[block_name], alpha=0.3)
+        ax.fill_between(
+            np.arange(len(pos_bq_mean)),
+            pos_bq_mean - pos_bq_ci95,
+            pos_bq_mean + pos_bq_ci95,
+            color=color_dict[block_name],
+            alpha=0.3,
+        )
     ax.set_title("Base Quality Distribution")
     ax.set_xlabel("Position")
     ax.set_ylabel("Mean Base Quality")
@@ -139,14 +179,22 @@ def bq_plot(block_df_dict, color_dict, output, sample=int(1e+4), comment=""):
 
 def block_score_distribution(block_df_dict, color_dict, output):
     ## Plot the distribution of block score
-    plt.rcParams.update({'font.size': 24})
-    fig, ax = plt.subplots(figsize=(20,20))
+    plt.rcParams.update({"font.size": 24})
+    fig, ax = plt.subplots(figsize=(20, 20))
     for block_name, block_df in block_df_dict.items():
         if "block_score" in block_df.columns:
             block_df["score"] = block_df["block_score"]
-        sns.histplot(block_df["score"], ax=ax, label=f"{block_name} (n={len(block_df):,})",
-                     color=color_dict[block_name], linewidth=5, element="step", stat="density",
-                     fill=False, binwidth = 5)
+        sns.histplot(
+            block_df["score"],
+            ax=ax,
+            label=f"{block_name} (n={len(block_df):,})",
+            color=color_dict[block_name],
+            linewidth=5,
+            element="step",
+            stat="density",
+            fill=False,
+            binwidth=5,
+        )
     ax.set_title("Block Score Distribution")
     ax.set_xlabel("Block Score")
     ax.set_ylabel("Density")
@@ -159,11 +207,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", "-k", type=str, required=True, nargs="+", help="Input block file")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
-    parser.add_argument("--intermediate", "-m", type=str, nargs="+", default = None,  help="Intermediate files prefix")
+    parser.add_argument("--intermediate", "-m", type=str, nargs="+", default=None, help="Intermediate files prefix")
     parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
-    parser.add_argument("--name", "-n", type=str, default = None, nargs="+", help="Block name")
+    parser.add_argument("--name", "-n", type=str, default=None, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
-    parser.add_argument("--sample", "-s", type=int, default=int(1e+6), help="Sampling fraction")
+    parser.add_argument("--sample", "-s", type=int, default=int(1e6), help="Sampling fraction")
     parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
     args = parser.parse_args()
     assert len(input) == len(args.type)
@@ -188,8 +236,9 @@ def parse_args():
             else:
                 raise ValueError("Unable to detect name from block file. Supply --name manually.")
         args.name = name
-        log.info("Names detected:",args.name)
+        log.info("Names detected:", args.name)
     return args
+
 
 def plot_violin(block_df_dict, color_dict, cb_len, output):
     ## merge df
@@ -199,7 +248,7 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
         df = df[["bq"]].copy()
         # df = df.sample(frac=0.1)
         bq_idx = range(cb_len)
-        df["bq_idx"] = np.tile(bq_idx, (len(df),1)).tolist()
+        df["bq_idx"] = np.tile(bq_idx, (len(df), 1)).tolist()
         df = df.explode(["bq", "bq_idx"])
         df["name"] = name
         df["bq"] = df["bq"].astype(int)
@@ -212,9 +261,18 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
 
     df = pd.concat(df_list).reset_index(drop=True)
 
-    fig, ax = plt.subplots(1, 1, figsize=(30,10))
-    sns.violinplot(x="bq_idx", y="bq", hue="name", data=df, ax=ax, palette=palette, linewidth=0.5,
-                   inner=None, hue_order=list(block_df_dict.keys()))
+    fig, ax = plt.subplots(1, 1, figsize=(30, 10))
+    sns.violinplot(
+        x="bq_idx",
+        y="bq",
+        hue="name",
+        data=df,
+        ax=ax,
+        palette=palette,
+        linewidth=0.5,
+        inner=None,
+        hue_order=list(block_df_dict.keys()),
+    )
     ax.set_title("Base Quality Distribution")
     ax.set_xlabel("Position")
     ax.set_ylabel("Base Quality")
@@ -224,14 +282,14 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
     return None
 
 
-def plot_motif(perfect_block_df_dict, color_dict, args, motif_list = ["AGACU","CGACA","UGAUC","GAAGC","UCAAG"]):
+def plot_motif(perfect_block_df_dict, color_dict, args, motif_list=["AGACU", "CGACA", "UGAUC", "GAAGC", "UCAAG"]):
 
     for block_name, block_df in perfect_block_df_dict.items():
         block_df["motif"] = block_df["motif"].apply(lambda x: x[8:13])
         perfect_block_df_dict[block_name] = block_df
 
     for motif in motif_list:
-        motif_block_df_dict= {}
+        motif_block_df_dict = {}
         for block_name, block_df in perfect_block_df_dict.items():
             motif_block_df = block_df[block_df["motif"] == motif].copy()
             motif_block_df_dict[block_name] = motif_block_df
@@ -247,10 +305,7 @@ def main():
 
     warm_color_list = it.cycle(["tomato", "coral", "orange", "gold", "goldenrod", "chocolate"])
     cool_color_list = it.cycle(["royalblue", "dodgerblue", "deepskyblue", "skyblue", "lightblue", "powderblue"])
-    modified_name_list = ["m6A", "m1A", "Am", "I",
-                          "m5C", "hm5C", "Cm",
-                          "m7G", "m1G", "Gm",
-                          "m5U", "Um", "pseU"]
+    modified_name_list = ["m6A", "m1A", "Am", "I", "m5C", "hm5C", "Cm", "m7G", "m1G", "Gm", "m5U", "Um", "pseU"]
 
     block_df_dict = {}
     perfect_block_df_dict = {}
@@ -275,7 +330,7 @@ def main():
             load_success = True
             output_file_exists = True
             log.info("Pickle loading successful.")
-        except:
+        except Exception:
             load_success = False
             output_file_exists = False
             block_df_dict = {}
@@ -287,13 +342,15 @@ def main():
         try:
             for intermediate in args.intermediate:
                 block_df_dict_run = pickle.load(open(intermediate, "rb"))
-                perfect_block_df_dict_run = pickle.load(open(intermediate.replace("block_df_dict", "perfect_block_df_dict"), "rb"))
+                perfect_block_df_dict_run = pickle.load(
+                    open(intermediate.replace("block_df_dict", "perfect_block_df_dict"), "rb")
+                )
                 block_df_dict.update(block_df_dict_run)
                 perfect_block_df_dict.update(perfect_block_df_dict_run)
             load_success = True
             output_file_exists = False
             log.info("Pickle loading from intermediate files successful.")
-        except:
+        except Exception:
             load_success = False
             output_file_exists = False
             block_df_dict = {}
@@ -318,15 +375,14 @@ def main():
         with open(f"{args.output}/perfect_block_df_dict.pkl", "wb") as f:
             pickle.dump(perfect_block_df_dict, f)
 
-    nucleotide_composition(perfect_block_df_dict, color_dict, args.output)
-    motif_composition(perfect_block_df_dict, color_dict, args.output)
+    nucleotide_composition(perfect_block_df_dict, args.output)
+    motif_composition(perfect_block_df_dict, args.output)
     bq_plot(perfect_block_df_dict, color_dict, args.output)
     plot_violin(perfect_block_df_dict, color_dict, args.cb_len, args.output)
     motif_cdf(perfect_block_df_dict, color_dict, args.output)
     block_score_distribution(block_df_dict, color_dict, args.output)
 
     return None
-
 
 
 if __name__ == "__main__":

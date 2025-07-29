@@ -1,19 +1,27 @@
-import gc
+"""
+Module: deeprm.train.train
+This module provides the training functionality for the DeepRM Transformer model.
+It includes the Trainer class, which handles the training loop, evaluation, and checkpointing.
+"""
 
-import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from deeprm.train.train_dataloader import load_dataset, NanoporeDataLoader
-from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
-import torchmetrics.classification as cm
 import argparse
+import gc
+import importlib
 import os
 import time
-import tqdm
+
 import numpy as np
-import importlib
+import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torchmetrics.classification as cm
+import tqdm
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
+
+from deeprm.train.train_dataloader import NanoporeDataLoader, load_dataset
 from deeprm.utils.logging import get_logger
+
 log = get_logger(__name__)
 
 
@@ -27,7 +35,9 @@ def parse_args():
     parser = argparse.ArgumentParser("Train Transformer Model")
     parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
     parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
-    parser.add_argument("--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation")
+    parser.add_argument(
+        "--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation"
+    )
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=1000, help="Number of epochs to train")
     parser.add_argument("--data", dest="data_path", type=str, required=True, help="Path to the dataset")
@@ -47,7 +57,9 @@ def parse_args():
     parser.add_argument("--enc_dropout", type=float, default=0.1, help="Dropout rate for encoder")
     parser.add_argument("--lin_dropout", type=float, default=0.1, help="Dropout rate for linear layers")
     parser.add_argument("--period", type=int, default=30, help="Period for logging")
-    parser.add_argument("--buffer_size", dest="shuffle_buffer_size", type=int, default=160000, help="Shuffle buffer size")
+    parser.add_argument(
+        "--buffer_size", dest="shuffle_buffer_size", type=int, default=160000, help="Shuffle buffer size"
+    )
     parser.add_argument("--kmer_size", type=int, default=5, help="K-mer size")
     parser.add_argument("--signal_size", type=int, default=30, help="Signal size")
     parser.add_argument("--block_len", type=int, default=17, help="Block length")
@@ -106,35 +118,35 @@ def parse_args():
 
 class Trainer:
     def __init__(
-            self,
-            rank: int,
-            gpu_id: int,
-            model: torch.nn.Module,
-            train_loader: NanoporeDataLoader,
-            val_loader: NanoporeDataLoader,
-            optimizer: torch.optim.Optimizer,
-            scheduler: torch.optim.lr_scheduler,
-            loss_func: torch.nn.Module,
-            grad_clip: float,
-            metric_func_dict: dict,
-            checkpoint_path: str,
-            tb_path: str,
-            es_start: int,
-            es_patience: int,
-            es_delta: float,
-            model_name: str,
-            num_gpu: int,
-            lr_interval: int,
-            eval_interval: int,
-            log_interval: int,
-            save_interval: int,
-            model_config: dict = None,
-            soft_label: float = None,
-            score_feature: bool = False,
-            cut_overlap: bool = False,
-            signal_stride: int = 6,
-            no_bq: bool = False,
-            **kwargs
+        self,
+        rank: int,
+        gpu_id: int,
+        model: torch.nn.Module,
+        train_loader: NanoporeDataLoader,
+        val_loader: NanoporeDataLoader,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler,
+        loss_func: torch.nn.Module,
+        grad_clip: float,
+        metric_func_dict: dict,
+        checkpoint_path: str,
+        tb_path: str,
+        es_start: int,
+        es_patience: int,
+        es_delta: float,
+        model_name: str,
+        num_gpu: int,
+        lr_interval: int,
+        eval_interval: int,
+        log_interval: int,
+        save_interval: int,
+        model_config: dict = None,
+        soft_label: float = None,
+        score_feature: bool = False,
+        cut_overlap: bool = False,
+        signal_stride: int = 6,
+        no_bq: bool = False,
+        **kwargs,
     ) -> None:
         """
         Initializes the Trainer class.
@@ -278,8 +290,12 @@ class Trainer:
         self.current_batch_loss = loss.item()
         dist.barrier()
         time.sleep(0.0001 * self.gpu_id)
-        evaltext = f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
-        evaltext += " | ".join([f"{k.upper()} {v:.3E}" for k, v in self.current_val_metric_dict.items() if (k in ["auroc", "ap"])])
+        evaltext = (
+            f"LR {self.current_lr:.3E} | T-Loss {self.current_batch_loss:.3E} | V-Loss {self.current_val_loss:.3E} | "
+        )
+        evaltext += " | ".join(
+            [f"{k.upper()} {v:.3E}" for k, v in self.current_val_metric_dict.items() if (k in ["auroc", "ap"])]
+        )
         self.pbar.update(1)
         self.pbar.set_postfix_str(evaltext)
         return None
@@ -295,12 +311,17 @@ class Trainer:
         self.val_loader.set_epoch(self.current_epoch)
         self.current_batch = 0
         self.model.train()
-        self.current_lr = self.optimizer.param_groups[0]['lr']
+        self.current_lr = self.optimizer.param_groups[0]["lr"]
         colour_choice = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
         dist.barrier()
         time.sleep(0.03 * self.gpu_id)
-        with tqdm.tqdm(total=len(self.train_loader) // self.num_gpu, desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
-                       position=self.rank, colour=colour_choice[self.rank % len(colour_choice)], smoothing=0) as self.pbar:
+        with tqdm.tqdm(
+            total=len(self.train_loader) // self.num_gpu,
+            desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
+            position=self.rank,
+            colour=colour_choice[self.rank % len(colour_choice)],
+            smoothing=0,
+        ) as self.pbar:
 
             for source, targets in self.train_loader:
                 self._run_batch(source, targets)
@@ -327,8 +348,11 @@ class Trainer:
                         if self.histogram:
                             try:
                                 for name, parameter in self.model.named_parameters():
-                                    self.tb_writer.add_histogram(name, parameter.clone().cpu().data.numpy(), self.current_step)
-                            except:
+                                    self.tb_writer.add_histogram(
+                                        name, parameter.clone().cpu().data.numpy(), self.current_step
+                                    )
+                            except Exception as e:
+                                log.warning(f"Error adding histogram: {e}")
                                 pass
                         self._save_checkpoint()
                     dist.barrier()
@@ -338,7 +362,7 @@ class Trainer:
                         self.scheduler.step(self.current_val_loss)
                     else:
                         self.scheduler.step()
-                    self.current_lr = self.optimizer.param_groups[0]['lr']
+                    self.current_lr = self.optimizer.param_groups[0]["lr"]
 
                 self.current_batch += 1
                 self.current_step += 1
@@ -404,13 +428,17 @@ class Trainer:
             ## Save Model if Improved
             self.best_val_loss = self.current_val_loss
             self.best_val_loss_epoch = self.current_epoch
-            torch.save({'model_state_dict': self.model.module.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'scheduler_state_dict': self.scheduler.state_dict(),
-                        'val_loss': self.current_val_loss,
-                        'metric_dict': self.current_val_metric_dict,
-                        'model_config': self.model_config,
-                        }, f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt")
+            torch.save(
+                {
+                    "model_state_dict": self.model.module.state_dict(),
+                    "optimizer_state_dict": self.optimizer.state_dict(),
+                    "scheduler_state_dict": self.scheduler.state_dict(),
+                    "val_loss": self.current_val_loss,
+                    "metric_dict": self.current_val_metric_dict,
+                    "model_config": self.model_config,
+                },
+                f"{self.checkpoint_path}/{self.model_name}-{self.current_epoch}-{self.current_step}.pt",
+            )
             self.continue_training = 1
 
         elif self.current_epoch > self.es_start and self.current_epoch - self.best_val_loss_epoch > self.es_patience:
@@ -457,8 +485,8 @@ def setup_ddp(rank, world_size, gpu_id):
     Returns:
         None
     """
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(gpu_id)
     return None
@@ -485,13 +513,27 @@ def prepare_dataloader(data_path, rank, num_gpu, num_workers, **kwargs):
     val_pos_data_path = f"{data_path}/val/pos"
     val_neg_data_path = f"{data_path}/val/neg"
 
-    train_loader = load_dataset(pos_data_path=train_pos_data_path, neg_data_path=train_neg_data_path,
-                                rank=rank, num_replicas=num_gpu, num_workers=num_workers,
-                                shuffle=True, drop_last=True, **kwargs)
+    train_loader = load_dataset(
+        pos_data_path=train_pos_data_path,
+        neg_data_path=train_neg_data_path,
+        rank=rank,
+        num_replicas=num_gpu,
+        num_workers=num_workers,
+        shuffle=True,
+        drop_last=True,
+        **kwargs,
+    )
 
-    val_loader = load_dataset(pos_data_path=val_pos_data_path, neg_data_path=val_neg_data_path,
-                              rank=rank, num_replicas=num_gpu, num_workers=num_workers,
-                              shuffle=False, drop_last=False, **kwargs)
+    val_loader = load_dataset(
+        pos_data_path=val_pos_data_path,
+        neg_data_path=val_neg_data_path,
+        rank=rank,
+        num_replicas=num_gpu,
+        num_workers=num_workers,
+        shuffle=False,
+        drop_last=False,
+        **kwargs,
+    )
 
     return train_loader, val_loader
 
@@ -510,9 +552,14 @@ def main_worker(rank, args_dict):
     gpu_id = args_dict["gpu_pool"][rank]
     setup_ddp(rank, args_dict["num_gpu"], gpu_id)
     TransformerModel = importlib.import_module(f"model.{args_dict['model_type']}").TransformerModel
-    model = TransformerModel(d_model=args_dict["enc_dim"], n_heads=args_dict["head"], d_ff=args_dict["lin_dim"],
-                             n_layers=args_dict["enc_layer"], lin_depth=args_dict["lin_layer"],
-                             **args_dict)
+    model = TransformerModel(
+        d_model=args_dict["enc_dim"],
+        n_heads=args_dict["head"],
+        d_ff=args_dict["lin_dim"],
+        n_layers=args_dict["enc_layer"],
+        lin_depth=args_dict["lin_layer"],
+        **args_dict,
+    )
     if rank == 0:
         total_params = 0
         for name, parameter in model.named_parameters():
@@ -523,7 +570,9 @@ def main_worker(rank, args_dict):
     model = model.to(gpu_id)
 
     if args_dict["load_checkpoint"] is not None:
-        save_dict = torch.load(args_dict["load_checkpoint"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
+        save_dict = torch.load(
+            args_dict["load_checkpoint"], map_location={"cuda:0": f"cuda:{gpu_id}"}, weights_only=False
+        )
         model.load_state_dict(state_dict=save_dict["model_state_dict"])
         if args_dict["load_weight_only"]:
             for param in model.parameters():
@@ -540,12 +589,20 @@ def main_worker(rank, args_dict):
             optimizer.load_state_dict(save_dict["optimizer_state_dict"])
             if args_dict["override_lr"]:
                 for param_group in optimizer.param_groups:
-                    param_group['lr'] = args_dict["lr"]
+                    param_group["lr"] = args_dict["lr"]
 
     if args_dict["rlrop"] is not None:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=args_dict["lr_step"],
-                                                               threshold=args_dict["rlrop"], threshold_mode="rel", cooldown=0,
-                                                               min_lr=1e-6, eps=1e-8)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=0.5,
+            patience=args_dict["lr_step"],
+            threshold=args_dict["rlrop"],
+            threshold_mode="rel",
+            cooldown=0,
+            min_lr=1e-6,
+            eps=1e-8,
+        )
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args_dict["lr_step"], eta_min=1e-6)
 
@@ -569,17 +626,29 @@ def main_worker(rank, args_dict):
     else:
         raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
 
-    metric_func_dict = {"acc": cm.BinaryAccuracy().to(gpu_id),
-                        "auroc": cm.BinaryAUROC().to(gpu_id),
-                        "ap": cm.BinaryAveragePrecision().to(gpu_id),
-                        "f-1": cm.BinaryF1Score().to(gpu_id),}
+    metric_func_dict = {
+        "acc": cm.BinaryAccuracy().to(gpu_id),
+        "auroc": cm.BinaryAUROC().to(gpu_id),
+        "ap": cm.BinaryAveragePrecision().to(gpu_id),
+        "f-1": cm.BinaryF1Score().to(gpu_id),
+    }
 
     args_dict["checkpoint_path"] = args_dict["output"]
 
     train_loader, val_loader = prepare_dataloader(rank=rank, gpu_id=gpu_id, **args_dict)
-    trainer = Trainer(rank=rank, gpu_id=gpu_id, model=model, train_loader=train_loader, val_loader=val_loader,
-                      optimizer=optimizer, scheduler=scheduler, loss_func=loss_func, metric_func_dict=metric_func_dict,
-                      model_config=args_dict, **args_dict)
+    trainer = Trainer(
+        rank=rank,
+        gpu_id=gpu_id,
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        loss_func=loss_func,
+        metric_func_dict=metric_func_dict,
+        model_config=args_dict,
+        **args_dict,
+    )
 
     log.info(f"[GPU {gpu_id}] Trainer Setup Complete.")
     trainer.train(args_dict["epochs"])
@@ -598,7 +667,7 @@ def main_master():
     args = parse_args()
     args_dict = vars(args)
 
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    torch.multiprocessing.set_sharing_strategy("file_system")
     os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
     os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
     args_dict["output"] = os.path.join(args_dict["output"], args_dict["model_name"])

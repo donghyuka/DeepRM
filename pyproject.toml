@@ -11,18 +11,19 @@ description = "DeepRM – post‑processing & QC for Nanopore m6A detection"
 keywords = ["RNA", "RNA modification", "m6A", "nanopore", "bioinformatics", "deep learning"]
 authors = [{name = "Laboratory of Computational Biology, Seoul National University"}]
 readme = "README.md"
+documentation = "https://deeprm.readthedocs.io/"
+issues = "https://github.com/vadanamu/deeprm/issues"
 requires-python = ">=3.9"
 dependencies = [
     "colorama",
     "tqdm",
     "psutil",
     "networkx>=3.1",
-    "numpy>=2.0,<3.0",
+    "numpy>=1.24,<3.0",
     "pandas>=2.0",
     "polyleven>=0.8",
     "pod5>=0.3.2",
     "pysam>=0.22.0",
-    "torch>=2.4.0",
     "torchmetrics>=1.3.0",
     "matplotlib>=3.7",
     "seaborn>=0.12",
@@ -37,14 +38,23 @@ docs = [
     "sphinxcontrib-mermaid",
     "sphinx-autosummary-accessors",
 ]
+dev = [
+    "black>=23.7.0",
+    "isort>=5.12.0",
+    "ruff>=0.4.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.10.0",
+    "pytest-xdist>=3.3.1",
+    "pre-commit>=3.2.0",
+]
 
 # --- expose the CLI ---
 [project.scripts]
 deeprm = "deeprm.cli:main"
-# ^^^^^  executable     module.function
 
 [tool.setuptools.package-data]
-"deeprm" = ["*.png", "*.json"]   # ship any data files you need
+"deeprm" = ["*.png", "*.json"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -52,3 +62,21 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["deeprm*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py39","py310","py311","py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.ruff]
+line-length = 120
+select = ["E","F","I","UP"]
+ignore = []
+fix = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]

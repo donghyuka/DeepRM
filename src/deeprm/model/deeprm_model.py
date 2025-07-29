@@ -5,8 +5,10 @@ Transformer model, positional encoding, and regression head.
 """
 
 import math
+
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
+
 from deeprm.utils.activations import get_activation_fn
 
 
@@ -33,24 +35,33 @@ class ResNetBlock(nn.Module):
         conv3 (nn.Conv1d): Third convolutional layer with kernel size 1.
         shortcut (nn.Module): Shortcut connection to match input and output dimensions.
     """
-    def __init__(self, in_channels: int, out_channels: int, hidden_channels: int = None, kernel_size: int = 3, stride: int = 1,
-                 activation: str = 'gelu', dropout: float = 0.1, groups: int = 1) -> None:
-        super(ResNetBlock, self).__init__()
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        hidden_channels: int = None,
+        kernel_size: int = 3,
+        stride: int = 1,
+        activation: str = "gelu",
+        dropout: float = 0.1,
+        groups: int = 1,
+    ) -> None:
+        super().__init__()
         if hidden_channels is None:
             hidden_channels = out_channels
         self.bn1 = nn.BatchNorm1d(out_channels)
         self.activation = get_activation_fn(activation)
-        self.conv1 = nn.Conv1d(in_channels, hidden_channels, kernel_size = 1, stride = stride, padding = "same")
+        self.conv1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=1, stride=stride, padding="same")
         self.bn2 = nn.BatchNorm1d(out_channels)
-        self.conv2 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size, stride, padding = "same", groups = groups)
+        self.conv2 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size, stride, padding="same", groups=groups)
         self.bn3 = nn.BatchNorm1d(out_channels)
         self.dropout = nn.Dropout(dropout)
-        self.conv3 = nn.Conv1d(hidden_channels, out_channels, kernel_size = 1, stride = stride, padding = "same")
+        self.conv3 = nn.Conv1d(hidden_channels, out_channels, kernel_size=1, stride=stride, padding="same")
 
         if in_channels != out_channels or stride != 1:
             self.shortcut = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride),
-                nn.BatchNorm1d(out_channels)
+                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride), nn.BatchNorm1d(out_channels)
             )
         else:
             self.shortcut = nn.Identity()
@@ -116,34 +127,60 @@ class TransformerModel(nn.Module):
         block_len (int): Length of the block.
     """
 
-    def __init__(self, d_model: int, n_heads: int, d_ff: int, n_layers: int,
-                 encoder_dropout: float = 0.1, lin_dropout: float = 0.1,
-                 kmer_size: int = 5, signal_size: int = 25, block_len = 17, seq_len: int = 200,
-                 t_act : str = 'gelu', lin_act : str = 'relu',
-                 lin_depth: int = 1, signal_stride = 6, **kwargs) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        d_ff: int,
+        n_layers: int,
+        encoder_dropout: float = 0.1,
+        lin_dropout: float = 0.1,
+        kmer_size: int = 5,
+        signal_size: int = 25,
+        block_len=17,
+        seq_len: int = 200,
+        t_act: str = "gelu",
+        lin_act: str = "relu",
+        lin_depth: int = 1,
+        signal_stride=6,
+        **kwargs,
+    ) -> None:
 
         super().__init__()
 
         ## Embedding Initialization
-        self.kmer_embedding = nn.Embedding(4**kmer_size+1, d_model)
-        self.signal_embedding = nn.Linear(signal_size+3, d_model)
+        self.kmer_embedding = nn.Embedding(4**kmer_size + 1, d_model)
+        self.signal_embedding = nn.Linear(signal_size + 3, d_model)
         self.pos_encoding = PositionalEncoding(d_model, seq_len)
 
         ## Encoder Initialization
         self.d_model = d_model
-        self.model_type = 'Transformer'
-        encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, d_ff, dropout = encoder_dropout,
-                                                   activation = t_act,batch_first=True)
+        self.model_type = "Transformer"
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model, n_heads, d_ff, dropout=encoder_dropout, activation=t_act, batch_first=True
+        )
 
         self.cnn_encoder = nn.Sequential()
-        self.cnn_encoder.add_module('resnet_1', ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups = 8,
-                                                            activation=t_act, dropout=encoder_dropout))
-        self.cnn_encoder.add_module('resnet_2', ResNetBlock(d_model, d_model, kernel_size=15, stride=1, groups = 8,
-                                                            activation=t_act, dropout=encoder_dropout))
-        self.cnn_encoder.add_module('resnet_3', ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups = 8,
-                                                            activation=t_act, dropout=encoder_dropout))
-        self.cnn_encoder.add_module('resnet_4', ResNetBlock(d_model, d_model, kernel_size=15, stride=1, groups = 8,
-                                                            activation=t_act, dropout=encoder_dropout))
+        self.cnn_encoder.add_module(
+            "resnet_1",
+            ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups=8, activation=t_act, dropout=encoder_dropout),
+        )
+        self.cnn_encoder.add_module(
+            "resnet_2",
+            ResNetBlock(
+                d_model, d_model, kernel_size=15, stride=1, groups=8, activation=t_act, dropout=encoder_dropout
+            ),
+        )
+        self.cnn_encoder.add_module(
+            "resnet_3",
+            ResNetBlock(d_model, d_model, kernel_size=5, stride=1, groups=8, activation=t_act, dropout=encoder_dropout),
+        )
+        self.cnn_encoder.add_module(
+            "resnet_4",
+            ResNetBlock(
+                d_model, d_model, kernel_size=15, stride=1, groups=8, activation=t_act, dropout=encoder_dropout
+            ),
+        )
 
         self.cnn_encoder = nn.SyncBatchNorm.convert_sync_batchnorm(self.cnn_encoder)
 
@@ -164,7 +201,7 @@ class TransformerModel(nn.Module):
         self.seq_len = seq_len
         self.block_len = block_len
 
-    def init_weights(self, initrange = 0.1):
+    def init_weights(self, initrange=0.1):
         """
         Initialize the weights of the model.
         Args:
@@ -187,11 +224,13 @@ class TransformerModel(nn.Module):
             Tensor: Processed k-mer tensor of shape (batch_size, seq_len) with numerical indices.
         """
         batch = src_kmer.shape[0]
-        src_kmer = (src_kmer - 65).clip(None,8)%5 ## Convert ACGTU to 01233.
+        src_kmer = (src_kmer - 65).clip(None, 8) % 5  ## Convert ACGTU to 01233.
         src_kmer = src_kmer.unfold(1, self.kmer_size, 1)
-        src_kmer = src_kmer * (4**torch.arange(self.kmer_size, device = src_kmer.device, dtype = torch.int)).unsqueeze(0).unsqueeze(0)
-        src_kmer = src_kmer.sum(dim = -1) + 1
-        src_kmer = torch.cat([src_kmer, torch.zeros(batch, 1, device = src_kmer.device, dtype = torch.int)], dim = 1)
+        src_kmer = src_kmer * (4 ** torch.arange(self.kmer_size, device=src_kmer.device, dtype=torch.int)).unsqueeze(
+            0
+        ).unsqueeze(0)
+        src_kmer = src_kmer.sum(dim=-1) + 1
+        src_kmer = torch.cat([src_kmer, torch.zeros(batch, 1, device=src_kmer.device, dtype=torch.int)], dim=1)
         src_kmer = src_kmer.flatten()
         src_kmer = src_kmer.repeat_interleave(src_seg_len_flat)
         src_kmer = src_kmer.reshape(batch, self.seq_len)
@@ -217,7 +256,7 @@ class TransformerModel(nn.Module):
         Returns:
             Tensor: Flattened segment lengths of shape (batch_size, seq_len).
         """
-        src_seg_len_flat = torch.cat([src_seg_len, self.seq_len - src_seg_len.sum(dim = 1, keepdims=True)], dim = 1)
+        src_seg_len_flat = torch.cat([src_seg_len, self.seq_len - src_seg_len.sum(dim=1, keepdims=True)], dim=1)
         src_seg_len_flat = src_seg_len_flat.flatten()
         return src_seg_len_flat
 
@@ -247,8 +286,8 @@ class TransformerModel(nn.Module):
         """
         batch = src_seg_len.shape[0]
         width = src_seg_len.shape[1]
-        target_mask = torch.arange(width+1,device=src_seg_len.device, dtype = torch.int)
-        target_mask = target_mask == self.block_len//2
+        target_mask = torch.arange(width + 1, device=src_seg_len.device, dtype=torch.int)
+        target_mask = target_mask == self.block_len // 2
         target_mask = target_mask.repeat(batch)
         target_mask = target_mask.repeat_interleave(src_seg_len_flat)
         target_mask = target_mask.reshape(batch, self.seq_len)
@@ -259,19 +298,21 @@ class TransformerModel(nn.Module):
         """
         Process the dwell time and base quality input by flattening and repeating it based on segment lengths.
         Args:
-            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel) containing dwell time and base quality.
+            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel) containing
+                dwell time and base quality.
             src_seg_len_flat (Tensor): Flattened segment lengths for the input sequences.
         Returns:
             Tensor: Processed dwell time and base quality tensor of shape (batch_size, seq_len, channel).
         """
         batch = src_dwell_bq.shape[0]
         channel = src_dwell_bq.shape[2]
-        src_dwell_bq = torch.cat([src_dwell_bq, torch.zeros(batch, 1, channel, device = src_dwell_bq.device, dtype = torch.float32)], dim = 1)
+        src_dwell_bq = torch.cat(
+            [src_dwell_bq, torch.zeros(batch, 1, channel, device=src_dwell_bq.device, dtype=torch.float32)], dim=1
+        )
         src_dwell_bq = src_dwell_bq.flatten(end_dim=1)
-        src_dwell_bq = src_dwell_bq.repeat_interleave(src_seg_len_flat,dim=0)
+        src_dwell_bq = src_dwell_bq.repeat_interleave(src_seg_len_flat, dim=0)
         src_dwell_bq = src_dwell_bq.reshape(batch, self.seq_len, channel)
         return src_dwell_bq
-
 
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor, src_dwell_bq: Tensor) -> Tensor:
         """
@@ -280,7 +321,8 @@ class TransformerModel(nn.Module):
             src_kmer (Tensor): Input tensor of shape (batch_size, seq_len) containing k-mer sequences.
             src_signal (Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
             src_seg_len (Tensor): Segment lengths tensor of shape (batch_size, num_segments).
-            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel) containing dwell time and base quality.
+            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel)
+                containing dwell time and base quality.
         Returns:
             Tensor: Output tensor of shape (batch_size, seq_len) after processing through the model.
         """
@@ -292,25 +334,25 @@ class TransformerModel(nn.Module):
             src_pad_mask = self.create_src_pad_mask(src_signal, src_seg_len)
             target_mask = self.create_target_mask(src_seg_len, src_seg_len_flat)
 
-        src_signal = torch.cat([src_signal, src_dwell_bq], dim = -1)
+        src_signal = torch.cat([src_signal, src_dwell_bq], dim=-1)
         kmer_embedding = self.kmer_embedding(src_kmer)
         signal_embedding = self.signal_embedding(src_signal)
         pos_encoding = self.pos_encoding(src_kmer.shape[0])
 
         ## add all embeddings and dropout
-        final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim = 0).sum(dim = 0)
+        final_embedding = torch.stack([kmer_embedding, signal_embedding, pos_encoding], dim=0).sum(dim=0)
         final_embedding = final_embedding.permute(0, 2, 1)  # Change to (batch, feature, time)
         output = self.cnn_encoder(final_embedding)
         output = output.permute(0, 2, 1)  # Change back to (batch, time, feature)
-        output = self.transformer_encoder(src=output, mask = None, src_key_padding_mask = src_pad_mask)
+        output = self.transformer_encoder(src=output, mask=None, src_key_padding_mask=src_pad_mask)
 
         ## apply regression head to each token:
         output = self.regression_head(output)
         output = output.squeeze(-1)
 
-        target_mask_sum = target_mask.sum(dim = 1)
+        target_mask_sum = target_mask.sum(dim=1)
         output = output * target_mask
-        output = output.sum(dim = 1)
+        output = output.sum(dim=1)
         output = output / target_mask_sum
 
         output = torch.sigmoid(output)
@@ -318,6 +360,7 @@ class TransformerModel(nn.Module):
         return output
 
     ## END OF TransformerModel
+
 
 class PositionalEncoding(nn.Module):
     """
@@ -328,6 +371,7 @@ class PositionalEncoding(nn.Module):
     Attributes:
         pe (Tensor): Positional encoding tensor of shape (1, seq_len, d_model).
     """
+
     def __init__(self, d_model: int, seq_len: int) -> None:
         super().__init__()
 
@@ -336,7 +380,7 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(1, seq_len, d_model)
         pe[:, :, 0::2] = torch.sin(position * div_term)
         pe[:, :, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe)
 
     def forward(self, batch_size) -> Tensor:
         """
@@ -363,10 +407,11 @@ class RegressionHead(nn.Module):
     Attributes:
         lin_layers (nn.Sequential): Sequential container for the linear layers.
     """
+
     def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
         super().__init__()
-        layer_list=  []
-        for i in range(lin_depth-1):
+        layer_list = []
+        for i in range(lin_depth - 1):
             layer_list.append(nn.Linear(d_model, d_model))
             layer_list.append(nn.BatchNorm1d(seq_length))
             layer_list.append(get_activation_fn(lin_act))
@@ -374,9 +419,9 @@ class RegressionHead(nn.Module):
 
         layer_list.append(nn.Linear(d_model, d_model))
         layer_list.append(get_activation_fn(lin_act))
-        layer_list.append(nn.Linear(d_model, d_model//4))
+        layer_list.append(nn.Linear(d_model, d_model // 4))
         layer_list.append(get_activation_fn(lin_act))
-        layer_list.append(nn.Linear(d_model//4, 1))
+        layer_list.append(nn.Linear(d_model // 4, 1))
         self.lin_layers = nn.Sequential(*layer_list)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -389,7 +434,7 @@ class RegressionHead(nn.Module):
         """
         return self.lin_layers(x)
 
-    def init_weights(self, initrange = 0.1):
+    def init_weights(self, initrange=0.1):
         """
         Initialize the weights of the linear layers in the regression head.
         Args:
@@ -403,4 +448,5 @@ class RegressionHead(nn.Module):
                 if layer.bias is not None:
                     layer.bias.data.zero_()
         return None
+
     ## END OF RegressionHead

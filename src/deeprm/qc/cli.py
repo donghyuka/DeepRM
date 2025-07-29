@@ -1,18 +1,25 @@
-# src/deeprm/qc/cli.py
-import argparse, sys
+"""
+Module: deeprm.qc.cli
+CLI for DeepRM QC modules.
+"""
+
+import argparse
+import sys
 from importlib import import_module
 
 _COMMANDS = {
-    "run":        "deeprm.qc.inspect_run",
-    "alignment":  "deeprm.qc.inspect_alignment",
-    "block":      "deeprm.qc.inspect_block",
+    "run": "deeprm.qc.inspect_run",
+    "alignment": "deeprm.qc.inspect_alignment",
+    "block": "deeprm.qc.inspect_block",
 }
+
 
 def _delegate(modname: str, argv):
     mod = import_module(modname)
     if hasattr(mod, "main"):
         return mod.main(argv)
     raise SystemExit(f"✖ {modname} has no main()")
+
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
@@ -22,6 +29,7 @@ def main(argv=None):
         sp.add_parser(name, help=f"{name} QC task")
     ns, rest = p.parse_known_args(argv)
     _delegate(_COMMANDS[ns.cmd], rest)
+
 
 if __name__ == "__main__":
     main()

@@ -1,9 +1,21 @@
-import tqdm
+"""
+Module: deeprm.train.extract_block
+Extract context blocks from reads.
+
+Key steps to extract context blocks from reads:
+    1. Index all k-mers from the read.
+    2. Connect the spacers using the k-mer index.
+    3. Build a DAG of spacers.
+    4. Find the longest path in the DAG.
+    5. Extract the sequence from the longest path.
+"""
+
 import gc
+import glob
 import itertools as it
 import multiprocessing as mp
-import glob
 from collections import defaultdict
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -11,16 +23,12 @@ import polyleven as pl
 import pysam
 from tqdm import tqdm
 
+from deeprm.utils.logging import get_logger
 from deeprm.utils.memory import start_mem_watchdog
 from deeprm.utils.utils import mean_phred
-from deeprm.utils.logging import get_logger
+
 log = get_logger(__name__)
 
-## Step 1: Index all k-mers from the read.
-## Step 2: Connect the spacers using the k-mer index.
-## Step 3: Build a DAG of spacers.
-## Step 4: Find the longest path in the DAG.
-## Step 5: Extract the sequence from the longest path.
 
 def get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size):
     """
@@ -32,7 +40,8 @@ def get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size):
         cb_size (int): Size of the context block.
 
     Returns:
-        dict: Dictionary with keys as tuples of (from_idx, to_idx) and values as tuples of (displacement, small_steps, big_steps).
+        dict: Dictionary with keys as tuples of (from_idx, to_idx) and
+            values as tuples of (displacement, small_steps, big_steps).
     """
     min_ideal_displacement_dict = {}
     big_step_size = cb_size + spacer_size
@@ -53,8 +62,9 @@ def get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size):
     return min_ideal_displacement_dict
 
 
-def get_ideal_displacement(from_spacer_idx, to_spacer_idx, displacement, min_ideal_displacement_dict, cb_per_bb,
-                           bb_size):
+def get_ideal_displacement(
+    from_spacer_idx, to_spacer_idx, displacement, min_ideal_displacement_dict, cb_per_bb, bb_size
+):
     """
     Calculates the ideal displacement and steps between spacers.
 
@@ -70,7 +80,8 @@ def get_ideal_displacement(from_spacer_idx, to_spacer_idx, displacement, min_ide
         tuple: Ideal displacement, small steps, and big steps.
     """
     min_ideal_displacement, min_small_steps, min_big_steps = min_ideal_displacement_dict[
-        (from_spacer_idx, to_spacer_idx)]
+        (from_spacer_idx, to_spacer_idx)
+    ]
     if displacement <= min_ideal_displacement:
         ideal_displacement = min_ideal_displacement
         small_steps = min_small_steps
@@ -122,9 +133,9 @@ def get_kmer_dict(read, k, bq_cutoff, phred):
     """
     kmer_dict = defaultdict(list)
     for i in range(len(read) - k + 1):
-        kmer = read[i:i + k]
+        kmer = read[i : i + k]
         if bq_cutoff:
-            bq = np.mean(phred[i:i + k])
+            bq = np.mean(phred[i : i + k])
             if bq < bq_cutoff:
                 continue
         kmer_dict[kmer].append(i)
@@ -152,8 +163,18 @@ def get_ed_kmers(kmer, spacer_mismatch_tolerance):
     return kmer_ed_dict
 
 
-def validate_anchor(read, from_pos, to_pos, possible_indel_list, spacer_size, cb_pad, single_anchor,
-                    indel_penalty, anchor_mismatch_penalty, displacement_error):
+def validate_anchor(
+    read,
+    from_pos,
+    to_pos,
+    possible_indel_list,
+    spacer_size,
+    cb_pad,
+    single_anchor,
+    indel_penalty,
+    anchor_mismatch_penalty,
+    displacement_error,
+):
     """
     Validates the anchor in the read sequence.
 
@@ -172,9 +193,10 @@ def validate_anchor(read, from_pos, to_pos, possible_indel_list, spacer_size, cb
     Returns:
         tuple: Missing anchor, anchor position, and total indel.
     """
-    query = read[from_pos + spacer_size:to_pos]
+    query = read[from_pos + spacer_size : to_pos]
     anchor_candidate_list = [
-        (displacement_error * indel_penalty + anchor_mismatch_penalty, 1, None, displacement_error)]
+        (displacement_error * indel_penalty + anchor_mismatch_penalty, 1, None, displacement_error)
+    ]
     ## penalty, missing_anchor, anchor_pos, total_indel
     for front_indel, back_indel in possible_indel_list:
         anchor_query = query[cb_pad + front_indel]
@@ -202,17 +224,35 @@ def get_kmer_tuple(spacer_mismatch_tolerance, from_spacer_kmer_ed_dict, to_space
     for total_mismatch in range(spacer_mismatch_tolerance + 1):
         for front_mismatch in range(total_mismatch + 1):
             back_mismatch = total_mismatch - front_mismatch
-            for from_kmer, to_kmer in it.product(from_spacer_kmer_ed_dict[front_mismatch],
-                                                 to_spacer_kmer_ed_dict[back_mismatch]):
+            for from_kmer, to_kmer in it.product(
+                from_spacer_kmer_ed_dict[front_mismatch], to_spacer_kmer_ed_dict[back_mismatch]
+            ):
                 kmer_tuple_list.append((from_kmer, to_kmer, total_mismatch))
     return kmer_tuple_list
 
 
-def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_size_tolerance, cb_pad,
-                          cb_per_bb, indel_penalty, anchor_mismatch_penalty, spacer_mismatch_penalty,
-                          spacer_size, spacer_list, indel_dict, min_ideal_displacement_dict, anchor_list,
-                          score_converting_func, cb_size_tolerance, spacer_mismatch_tolerance, spacer_size_tolerance,
-                          bb_size):
+def find_block_candidates(
+    seq,
+    phred,
+    cb_bq_cutoff,
+    spacer_kmer_ed_dict,
+    skip_size_tolerance,
+    cb_pad,
+    cb_per_bb,
+    indel_penalty,
+    anchor_mismatch_penalty,
+    spacer_mismatch_penalty,
+    spacer_size,
+    spacer_list,
+    indel_dict,
+    min_ideal_displacement_dict,
+    anchor_list,
+    score_converting_func,
+    cb_size_tolerance,
+    spacer_mismatch_tolerance,
+    spacer_size_tolerance,
+    bb_size,
+):
     """
     Finds block candidates in the read sequence.
 
@@ -258,8 +298,9 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
         for to_spacer_idx in range(len(spacer_list)):
 
             to_spacer_kmer_ed_dict = spacer_kmer_ed_dict[to_spacer_idx]
-            kmer_tuple_list = get_kmer_tuple(spacer_mismatch_tolerance, from_spacer_kmer_ed_dict,
-                                             to_spacer_kmer_ed_dict)
+            kmer_tuple_list = get_kmer_tuple(
+                spacer_mismatch_tolerance, from_spacer_kmer_ed_dict, to_spacer_kmer_ed_dict
+            )
 
             for from_kmer, to_kmer, kmer_mismatch in kmer_tuple_list:
                 for from_pos, to_pos in it.product(kmer_pos_dict[from_kmer], kmer_pos_dict[to_kmer]):
@@ -268,10 +309,9 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
                     if displacement < 0:
                         continue
 
-                    ideal_displacement, small_steps, big_steps = get_ideal_displacement(from_spacer_idx, to_spacer_idx,
-                                                                                        displacement,
-                                                                                        min_ideal_displacement_dict,
-                                                                                        cb_per_bb, bb_size)
+                    ideal_displacement, small_steps, big_steps = get_ideal_displacement(
+                        from_spacer_idx, to_spacer_idx, displacement, min_ideal_displacement_dict, cb_per_bb, bb_size
+                    )
                     displacement_tolerance_skip = big_steps * skip_size_tolerance
 
                     displacement_error = displacement - ideal_displacement
@@ -284,14 +324,25 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
                     is_cb = False
                     missing_anchor = 1
 
-                    if big_steps == 1 and small_steps == 0 and displacement_error_abs <= cb_size_tolerance and single_anchor is not None:
+                    if (
+                        big_steps == 1
+                        and small_steps == 0
+                        and displacement_error_abs <= cb_size_tolerance
+                        and single_anchor is not None
+                    ):
                         possible_indel_list = indel_dict[displacement_error]
-                        missing_anchor, anchor_pos, total_indel = validate_anchor(seq, from_pos, to_pos,
-                                                                                  possible_indel_list,
-                                                                                  spacer_size, cb_pad, single_anchor,
-                                                                                  indel_penalty,
-                                                                                  anchor_mismatch_penalty,
-                                                                                  displacement_error_abs)
+                        missing_anchor, anchor_pos, total_indel = validate_anchor(
+                            seq,
+                            from_pos,
+                            to_pos,
+                            possible_indel_list,
+                            spacer_size,
+                            cb_pad,
+                            single_anchor,
+                            indel_penalty,
+                            anchor_mismatch_penalty,
+                            displacement_error_abs,
+                        )
                         if missing_anchor == 0:
                             is_cb = True
                             displacement_error_abs = total_indel
@@ -299,15 +350,25 @@ def find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict, skip_si
                     elif big_steps == 0 and small_steps == 1 and displacement_error_abs <= spacer_size_tolerance:
                         missing_anchor = 0
 
-                    penalty = spacer_mismatch_penalty * kmer_mismatch + indel_penalty * displacement_error_abs + anchor_mismatch_penalty * missing_anchor
+                    penalty = (
+                        spacer_mismatch_penalty * kmer_mismatch
+                        + indel_penalty * displacement_error_abs
+                        + anchor_mismatch_penalty * missing_anchor
+                    )
                     score = score_converting_func(penalty)
 
                     from_pos_id = (from_spacer_idx, from_pos)
                     to_pos_id = (to_spacer_idx, to_pos)
 
                     if is_cb:
-                        cb_info_dict[(from_pos_id, to_pos_id)] = [from_spacer_idx, from_pos, to_pos, anchor_pos,
-                                                                  penalty, score]
+                        cb_info_dict[(from_pos_id, to_pos_id)] = [
+                            from_spacer_idx,
+                            from_pos,
+                            to_pos,
+                            anchor_pos,
+                            penalty,
+                            score,
+                        ]
 
                     dag_list.append((from_pos_id, to_pos_id, score))
                     dag_dict[(from_pos_id, to_pos_id)] = score
@@ -330,18 +391,37 @@ def dag_longest_path(edge_list):
     dag = nx.DiGraph()
     dag.add_nodes_from(node_list)
     dag.add_weighted_edges_from(edge_list)
-    longest_path = nx.dag_longest_path(dag, weight='weight')
+    longest_path = nx.dag_longest_path(dag, weight="weight")
 
     return longest_path
 
 
-def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_tolerance,
-                                            skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
-                                            spacer_mismatch_tolerance, spacer_mismatch_penalty,
-                                            cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
-                                            anchor_list, spacer_list, spacer_size, bb_size, flush_path, pid,
-                                            flush_interval,
-                                            score_converting_func, cb_size, min_ideal_displacement_dict, resume):
+def extract_blocks_from_read_list_mp_worker(
+    record_list,
+    indel_penalty,
+    cb_size_tolerance,
+    skip_size_tolerance,
+    anchor_mismatch_penalty,
+    spacer_size_tolerance,
+    spacer_mismatch_tolerance,
+    spacer_mismatch_penalty,
+    cb_pad,
+    cb_per_bb,
+    cb_bq_cutoff,
+    indel_dict,
+    spacer_kmer_ed_dict,
+    anchor_list,
+    spacer_list,
+    spacer_size,
+    bb_size,
+    flush_path,
+    pid,
+    flush_interval,
+    score_converting_func,
+    cb_size,
+    min_ideal_displacement_dict,
+    resume,
+):
     """
     Worker function to extract blocks from a list of reads using multiprocessing.
 
@@ -400,15 +480,28 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
         seq = record[1].replace("T", "U")
         phred = record[2]
 
-        cb_info_dict, dag_list, dag_dict = find_block_candidates(seq, phred, cb_bq_cutoff, spacer_kmer_ed_dict,
-                                                                 skip_size_tolerance, cb_pad,
-                                                                 cb_per_bb, indel_penalty, anchor_mismatch_penalty,
-                                                                 spacer_mismatch_penalty,
-                                                                 spacer_size, spacer_list, indel_dict,
-                                                                 min_ideal_displacement_dict, anchor_list,
-                                                                 score_converting_func, cb_size_tolerance,
-                                                                 spacer_mismatch_tolerance,
-                                                                 spacer_size_tolerance, bb_size)
+        cb_info_dict, dag_list, dag_dict = find_block_candidates(
+            seq,
+            phred,
+            cb_bq_cutoff,
+            spacer_kmer_ed_dict,
+            skip_size_tolerance,
+            cb_pad,
+            cb_per_bb,
+            indel_penalty,
+            anchor_mismatch_penalty,
+            spacer_mismatch_penalty,
+            spacer_size,
+            spacer_list,
+            indel_dict,
+            min_ideal_displacement_dict,
+            anchor_list,
+            score_converting_func,
+            cb_size_tolerance,
+            spacer_mismatch_tolerance,
+            spacer_size_tolerance,
+            bb_size,
+        )
 
         if len(cb_info_dict) > 0:
             longest_path = dag_longest_path(dag_list)
@@ -419,13 +512,14 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
                     selected_cb.append(cb_info_dict[(x, y)])
                 total_score += dag_dict[(x, y)]
 
-            selected_cb_df = pd.DataFrame(selected_cb,
-                                          columns=["cb_idx", "start_pos", "end_pos", "pos_RM", "penalty", "score"])
+            selected_cb_df = pd.DataFrame(
+                selected_cb, columns=["cb_idx", "start_pos", "end_pos", "pos_RM", "penalty", "score"]
+            )
             selected_cb_df["read_id"] = read_id
             selected_cb_df["total_score"] = total_score
 
             spacer_pos = np.unique(selected_cb_df[["start_pos", "end_pos"]].values.flatten())
-            spacer_phred = [phred[x:x + spacer_size] for x in spacer_pos]
+            spacer_phred = [phred[x : x + spacer_size] for x in spacer_pos]
 
             if len(spacer_phred) > 0:
                 spacer_phred = np.concatenate(spacer_phred)
@@ -434,8 +528,8 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
                 selected_cb_df["mean_spacer_phred"] = mean_spacer_phred
                 selected_cb_df["start_pos"] = selected_cb_df["pos_RM"] - cb_pad
                 selected_cb_df["end_pos"] = selected_cb_df["pos_RM"] + cb_pad + 1
-                selected_cb_df["motif"] = selected_cb_df.apply(lambda x: seq[x["start_pos"]:x["end_pos"]], axis=1)
-                selected_cb_df["bq"] = selected_cb_df.apply(lambda x: phred[x["start_pos"]:x["end_pos"]], axis=1)
+                selected_cb_df["motif"] = selected_cb_df.apply(lambda x: seq[x["start_pos"] : x["end_pos"]], axis=1)
+                selected_cb_df["bq"] = selected_cb_df.apply(lambda x: phred[x["start_pos"] : x["end_pos"]], axis=1)
                 selected_cb_df = selected_cb_df[selected_cb_df["end_pos"] <= len(seq)]
                 block_df_list.append(selected_cb_df)
             ## END IF
@@ -447,10 +541,12 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
                 block_df_flush = pd.concat(block_df_list, axis=0).reset_index(drop=True)
                 block_df_flush["bq_len"] = block_df_flush["bq"].apply(len)
                 block_df_flush["motif_len"] = block_df_flush["motif"].apply(len)
-                block_df_flush = block_df_flush[(block_df_flush["start_pos"] >= 0) &
-                                                (block_df_flush["bq_len"] == cb_size) &
-                                                (block_df_flush["motif_len"] == cb_size) &
-                                                (block_df_flush["mean_spacer_phred"] >= cb_bq_cutoff)]
+                block_df_flush = block_df_flush[
+                    (block_df_flush["start_pos"] >= 0)
+                    & (block_df_flush["bq_len"] == cb_size)
+                    & (block_df_flush["motif_len"] == cb_size)
+                    & (block_df_flush["mean_spacer_phred"] >= cb_bq_cutoff)
+                ]
 
                 flush_file = f"{flush_path}df_{pid}_{read_idx}.pkl"
                 block_df_flush.to_pickle(flush_file)
@@ -474,12 +570,32 @@ def extract_blocks_from_read_list_mp_worker(record_list, indel_penalty, cb_size_
     return None
 
 
-def extract_block(input, output, indel_tolerance, indel_penalty, cb_size_tolerance,
-                  skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
-                  spacer_mismatch_tolerance, max_read_length,
-                  spacer_mismatch_penalty, anchor_list, spacer_list, spacer_size, cb_pad,
-                  cb_per_bb, read_bq_cutoff, cb_bq_cutoff, flush_path, flush_interval, ncpu,
-                  resume, sample, **kwargs):
+def extract_block(
+    input,
+    output,
+    indel_tolerance,
+    indel_penalty,
+    cb_size_tolerance,
+    skip_size_tolerance,
+    anchor_mismatch_penalty,
+    spacer_size_tolerance,
+    spacer_mismatch_tolerance,
+    max_read_length,
+    spacer_mismatch_penalty,
+    anchor_list,
+    spacer_list,
+    spacer_size,
+    cb_pad,
+    cb_per_bb,
+    read_bq_cutoff,
+    cb_bq_cutoff,
+    flush_path,
+    flush_interval,
+    ncpu,
+    resume,
+    sample,
+    **kwargs,
+):
     """
     Extracts context blocks from a list of reads using multiprocessing.
 
@@ -512,29 +628,37 @@ def extract_block(input, output, indel_tolerance, indel_penalty, cb_size_toleran
     Returns:
         None
     """
+
+    def score_converting_func(x):
+        return 1 - (x / (2 * max_cb_penalty))
+
     spacer_list = [x.replace("T", "U") for x in spacer_list]
     anchor_list = [x.replace("T", "U") for x in anchor_list]
     indel_dict = get_integer_partition(indel_tolerance, cb_size_tolerance)
     spacer_kmer_ed_dict = {i: get_ed_kmers(kmer, spacer_mismatch_tolerance) for i, kmer in enumerate(spacer_list)}
     assert indel_tolerance >= cb_size_tolerance
 
-    max_cb_penalty = anchor_mismatch_penalty + spacer_mismatch_penalty * spacer_mismatch_tolerance + indel_penalty * indel_tolerance
-    score_converting_func = lambda x: 1 - (x / (2 * max_cb_penalty))
+    max_cb_penalty = (
+        anchor_mismatch_penalty + spacer_mismatch_penalty * spacer_mismatch_tolerance + indel_penalty * indel_tolerance
+    )
     cb_size = 2 * cb_pad + 1
     bb_size = cb_size * cb_per_bb + spacer_size
     min_ideal_displacement_dict = get_min_ideal_displacement_dict(cb_per_bb, spacer_size, cb_size)
-
 
     record_list = []
     with pysam.AlignmentFile(input, "rb", check_sq=False, threads=ncpu) as input_bam:
         with tqdm(total=input_bam.mapped) as pbar:
             for idx, record in enumerate(input_bam):
                 qscore = mean_phred(np.array(record.query_qualities, dtype=int))
-                if qscore >= read_bq_cutoff :
+                if qscore >= read_bq_cutoff:
                     read_length = record.query_length
                     if read_length <= max_read_length and read_length >= kwargs["min_read_length"]:
-                        record_tuple = (str(record.query_name), str(record.query_sequence),
-                                        np.array(record.query_qualities), int(read_length))
+                        record_tuple = (
+                            str(record.query_name),
+                            str(record.query_sequence),
+                            np.array(record.query_qualities),
+                            int(read_length),
+                        )
                     record_list.append(record_tuple)
                 pbar.update(1)
 
@@ -555,14 +679,35 @@ def extract_block(input, output, indel_tolerance, indel_penalty, cb_size_toleran
     proc_list = []
 
     for pid in range(ncpu):
-        proc = mp.Process(target=extract_blocks_from_read_list_mp_worker,
-                          args=(record_split_dict[pid], indel_penalty, cb_size_tolerance,
-                                skip_size_tolerance, anchor_mismatch_penalty, spacer_size_tolerance,
-                                spacer_mismatch_tolerance, spacer_mismatch_penalty,
-                                cb_pad, cb_per_bb, cb_bq_cutoff, indel_dict, spacer_kmer_ed_dict,
-                                anchor_list, spacer_list, spacer_size, bb_size,
-                                flush_path, pid, flush_interval, score_converting_func, cb_size,
-                                min_ideal_displacement_dict, resume))
+        proc = mp.Process(
+            target=extract_blocks_from_read_list_mp_worker,
+            args=(
+                record_split_dict[pid],
+                indel_penalty,
+                cb_size_tolerance,
+                skip_size_tolerance,
+                anchor_mismatch_penalty,
+                spacer_size_tolerance,
+                spacer_mismatch_tolerance,
+                spacer_mismatch_penalty,
+                cb_pad,
+                cb_per_bb,
+                cb_bq_cutoff,
+                indel_dict,
+                spacer_kmer_ed_dict,
+                anchor_list,
+                spacer_list,
+                spacer_size,
+                bb_size,
+                flush_path,
+                pid,
+                flush_interval,
+                score_converting_func,
+                cb_size,
+                min_ideal_displacement_dict,
+                resume,
+            ),
+        )
         proc_list.append(proc)
         proc.start()
 
@@ -574,7 +719,8 @@ def extract_block(input, output, indel_tolerance, indel_penalty, cb_size_toleran
         try:
             block_df = pd.read_pickle(f"{flush_path}df_{pid}.pkl")
             block_df_list.append(block_df)
-        except:
+        except Exception as e:
+            log.warning(f"{e}")
             log.warning(f"PID {pid} did not return any result.")
     block_df = pd.concat(block_df_list, axis=0).reset_index(drop=True)
     del block_df_list

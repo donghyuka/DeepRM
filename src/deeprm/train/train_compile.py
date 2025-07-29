@@ -1,9 +1,24 @@
-import numpy as np
+"""
+Module: deeprm.train.train_compile
+This module compiles training data from positive and negative token files into a structured format.
+This script reads NPZ files containing tokenized data, samples it based on specified criteria,
+and saves it in a structured directory format.
+"""
+
+import argparse
+import gc
+import glob
 import multiprocessing as mp
-import os, argparse, tqdm, gc, glob
-from deeprm.utils.memory import start_mem_watchdog
+import os
+
+import numpy as np
+import tqdm
+
 from deeprm.utils.logging import get_logger
+from deeprm.utils.memory import start_mem_watchdog
+
 log = get_logger(__name__)
+
 
 def parse_args():
     """
@@ -16,7 +31,13 @@ def parse_args():
     args.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
     args.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
     args.add_argument("--output", dest="out_path", type=str, required=True, help="Output directory")
-    args.add_argument("--thread", dest="cpu", type=int, default=int(os.cpu_count()*0.9), help="Number of threads to use")
+    args.add_argument(
+        "--thread",
+        dest="cpu",
+        type=int,
+        default=int(os.cpu_count() * 0.9),
+        help="Number of threads to use",
+    )
     args.add_argument("--chunk", dest="chunk", type=int, default=4000, help="Chunk size")
     args.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
     args.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
@@ -46,13 +67,20 @@ def parse_args():
 
     return args
 
-def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
-                    label_dict = {0:"neg", 1:"pos"},
-                    set_split_dict = {"train":0.95, "val":0.05},
-                    score_name_list = [0.0, 1.0],
-                    id_digit=9,
-                    shuffle = True,
-                    read_once = 100):
+
+def sample_and_save(
+    in_path_list,
+    out_path,
+    ncpu,
+    label,
+    chunk,
+    label_dict={0: "neg", 1: "pos"},
+    set_split_dict={"train": 0.95, "val": 0.05},
+    score_name_list=[0.0, 1.0],
+    id_digit=9,
+    shuffle=True,
+    read_once=100,
+):
     """
     Samples data from input files and saves it to the output directory.
 
@@ -73,7 +101,15 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
         None
     """
     in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.npz")]
-    column_keys = ["segment_len_arr", "signal_token", "kmer_token", "dwell_motor_token", "dwell_pore_token", "bq_token", "block_score"]
+    column_keys = [
+        "segment_len_arr",
+        "signal_token",
+        "kmer_token",
+        "dwell_motor_token",
+        "dwell_pore_token",
+        "bq_token",
+        "block_score",
+    ]
 
     if shuffle:
         in_file_list = np.random.permutation(in_file_list)
@@ -85,12 +121,28 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
 
     for set_name in set_split_dict:
         for score in score_name_list:
-            remainder_dict[(set_name,score)] = man.list()
+            remainder_dict[(set_name, score)] = man.list()
 
     for pid in range(ncpu):
-        proc = mp.Process(target=sample_and_save_worker, args=(ncpu, pid, in_file_list[pid], out_path, label_str,
-                                                               set_split_dict, score_name_list, chunk, label,
-                                                               remainder_dict, id_digit, shuffle, read_once, column_keys))
+        proc = mp.Process(
+            target=sample_and_save_worker,
+            args=(
+                ncpu,
+                pid,
+                in_file_list[pid],
+                out_path,
+                label_str,
+                set_split_dict,
+                score_name_list,
+                chunk,
+                label,
+                remainder_dict,
+                id_digit,
+                shuffle,
+                read_once,
+                column_keys,
+            ),
+        )
         proc_list.append(proc)
         proc.start()
 
@@ -108,14 +160,27 @@ def sample_and_save(in_path_list, out_path, ncpu, label, chunk,
             for column_key in column_keys:
                 remainder_data[column_key] = np.concatenate([x[column_key] for x in remainder_data_list])
             buffer_dict = None
-            chunk_save_data(ncpu, pid, file_id, remainder_data, column_keys, out_path, label_str, set_name, buffer_dict,
-                            chunk, score_name, id_digit)
+            chunk_save_data(
+                ncpu,
+                pid,
+                file_id,
+                remainder_data,
+                column_keys,
+                out_path,
+                label_str,
+                set_name,
+                buffer_dict,
+                chunk,
+                score_name,
+                id_digit,
+            )
             del remainder_data
             gc.collect()
     del remainder_dict
     gc.collect()
 
     return None
+
 
 def pad_signal(signal, max_len):
     """
@@ -130,8 +195,23 @@ def pad_signal(signal, max_len):
     """
     return np.concatenate([signal, np.zeros(max_len - len(signal), dtype=np.float32)])
 
-def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_split_dict, score_name_list,
-                           chunk, label, remainder_dict, id_digit, shuffle, read_once, column_keys):
+
+def sample_and_save_worker(
+    ncpu,
+    pid,
+    in_file_list,
+    out_path,
+    label_str,
+    set_split_dict,
+    score_name_list,
+    chunk,
+    label,
+    remainder_dict,
+    id_digit,
+    shuffle,
+    read_once,
+    column_keys,
+):
     """
     Worker function to sample and save data.
 
@@ -157,8 +237,8 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
     start_mem_watchdog()
 
     file_id = [-1]
-    data_buffer = {x:[] for x in column_keys}
-    buffer_dict = {key:None for key in remainder_dict.keys()}
+    data_buffer = {x: [] for x in column_keys}
+    buffer_dict = {key: None for key in remainder_dict.keys()}
 
     for df_idx, df_path in tqdm.tqdm(enumerate(in_file_list), desc=f"Saving {label_str} data", total=len(in_file_list)):
         with np.load(df_path) as data:
@@ -169,21 +249,33 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
             continue
 
         else:
-            data = {key:np.concatenate(data_buffer[key]) for key in column_keys}
+            data = {key: np.concatenate(data_buffer[key]) for key in column_keys}
 
             if shuffle:
                 idx = np.random.permutation(len(data[column_keys[0]]))
                 for key in column_keys:
                     data[key] = data[key][idx]
 
-            data_buffer = {x:[] for x in column_keys}
+            data_buffer = {x: [] for x in column_keys}
             gc.collect()
 
             for score_name in score_name_list:
                 bool_idx = data["block_score"] >= score_name
-                score_data = {key:data[key][bool_idx] for key in column_keys}
-                save_split_data(ncpu, pid, file_id, score_data, column_keys, out_path, label_str, set_split_dict, chunk,
-                                score_name, id_digit, buffer_dict)
+                score_data = {key: data[key][bool_idx] for key in column_keys}
+                save_split_data(
+                    ncpu,
+                    pid,
+                    file_id,
+                    score_data,
+                    column_keys,
+                    out_path,
+                    label_str,
+                    set_split_dict,
+                    chunk,
+                    score_name,
+                    id_digit,
+                    buffer_dict,
+                )
 
             del data
             gc.collect()
@@ -196,7 +288,21 @@ def sample_and_save_worker(ncpu, pid, in_file_list, out_path, label_str, set_spl
 
     return None
 
-def save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, set_split_dict, chunk, score_name, id_digit, buffer_dict):
+
+def save_split_data(
+    ncpu,
+    pid,
+    file_id,
+    data,
+    column_keys,
+    out_path,
+    label_str,
+    set_split_dict,
+    chunk,
+    score_name,
+    id_digit,
+    buffer_dict,
+):
     """
     Saves split data to the output directory.
 
@@ -217,27 +323,56 @@ def save_split_data(ncpu, pid, file_id, data, column_keys, out_path, label_str, 
     Returns:
         None
     """
-    set_idx = np.cumsum([0] + [int(np.floor(len(data[column_keys[0]]) * split_ratio)) for split_ratio in set_split_dict.values()])
+    set_idx = np.cumsum(
+        [0] + [int(np.floor(len(data[column_keys[0]]) * split_ratio)) for split_ratio in set_split_dict.values()]
+    )
 
     for idx, set_name in enumerate(set_split_dict):
         set_idx_start = set_idx[idx]
-        set_idx_end = set_idx[idx+1]
-        set_data = {key:data[key][set_idx_start:set_idx_end] for key in column_keys}
-        buffer = buffer_dict[(set_name,score_name)]
+        set_idx_end = set_idx[idx + 1]
+        set_data = {key: data[key][set_idx_start:set_idx_end] for key in column_keys}
+        buffer = buffer_dict[(set_name, score_name)]
 
         if buffer is not None:
-            set_data = {key:np.concatenate([buffer[key], set_data[key]]) for key in column_keys}
-            buffer_dict[(set_name,score_name)] = None
+            set_data = {key: np.concatenate([buffer[key], set_data[key]]) for key in column_keys}
+            buffer_dict[(set_name, score_name)] = None
             gc.collect()
 
-        chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_str, set_name, buffer_dict, chunk, score_name, id_digit)
+        chunk_save_data(
+            ncpu,
+            pid,
+            file_id,
+            set_data,
+            column_keys,
+            out_path,
+            label_str,
+            set_name,
+            buffer_dict,
+            chunk,
+            score_name,
+            id_digit,
+        )
 
         del set_data
         gc.collect()
 
     return None
 
-def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_str, set_name, buffer_dict, chunk, score_name, id_digit):
+
+def chunk_save_data(
+    ncpu,
+    pid,
+    file_id,
+    set_data,
+    column_keys,
+    out_path,
+    label_str,
+    set_name,
+    buffer_dict,
+    chunk,
+    score_name,
+    id_digit,
+):
     """
     Saves data in chunks to the output directory.
 
@@ -261,8 +396,10 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
     len_set_data = len(set_data[column_keys[0]])
     for chunk_idx in range(0, len_set_data // chunk + 1):
         file_id[0] += 1
-        out_data_id = (ncpu+1) * file_id[0] + pid
-        chunk_data = {key:val[chunk_idx * chunk:min((chunk_idx + 1) * chunk, len_set_data)] for key, val in set_data.items()}
+        out_data_id = (ncpu + 1) * file_id[0] + pid
+        chunk_data = {
+            key: val[chunk_idx * chunk : min((chunk_idx + 1) * chunk, len_set_data)] for key, val in set_data.items()
+        }
 
         if len(chunk_data[column_keys[0]]) == chunk:
             save_path = f"{out_path}/score-{score_name}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
@@ -274,13 +411,16 @@ def chunk_save_data(ncpu, pid, file_id, set_data, column_keys, out_path, label_s
             gc.collect()
 
         elif buffer_dict is not None:
-            buffer = buffer_dict[(set_name,score_name)]
+            buffer = buffer_dict[(set_name, score_name)]
             if buffer is not None:
-                buffer_dict[(set_name,score_name)] = {key:np.concatenate([buffer[key], chunk_data[key]]) for key in column_keys}
+                buffer_dict[(set_name, score_name)] = {
+                    key: np.concatenate([buffer[key], chunk_data[key]]) for key in column_keys
+                }
             else:
-                buffer_dict[(set_name,score_name)] = chunk_data.copy()
+                buffer_dict[(set_name, score_name)] = chunk_data.copy()
 
     return None
+
 
 def main():
     """
@@ -301,12 +441,27 @@ def main():
                 os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
 
     if args.pos_path is not None:
-        sample_and_save(args.pos_path, args.out_path, args.cpu, label = 1, chunk = args.chunk, score_name_list = args.score)
+        sample_and_save(
+            args.pos_path,
+            args.out_path,
+            args.cpu,
+            label=1,
+            chunk=args.chunk,
+            score_name_list=args.score,
+        )
 
     if args.neg_path is not None:
-        sample_and_save(args.neg_path, args.out_path, args.cpu, label = 0, chunk = args.chunk, score_name_list = args.score)
+        sample_and_save(
+            args.neg_path,
+            args.out_path,
+            args.cpu,
+            label=0,
+            chunk=args.chunk,
+            score_name_list=args.score,
+        )
 
     return None
+
 
 if __name__ == "__main__":
     main()

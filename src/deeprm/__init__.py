@@ -2,7 +2,7 @@
 deeprm package init.
 """
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:  # resolve the installed package version at runtime
     __version__ = version("deeprm")

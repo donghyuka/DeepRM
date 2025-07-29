@@ -5,19 +5,22 @@ This script handles the inference process for DeepRM models, including loading t
 processing input data, and saving the output predictions.
 """
 
-
-import torch
-import os, glob
 import argparse
+import glob
+import importlib
+import os
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
-from deeprm.inference.inference_dataloader import load_dataset
+import torch
 import torch.multiprocessing as mp
 import tqdm
-import importlib
-from collections import deque
 from torch.amp import autocast
-from concurrent.futures import ThreadPoolExecutor
+
+from deeprm.inference.inference_dataloader import load_dataset
 from deeprm.utils.logging import get_logger
+
 log = get_logger(__name__)
 
 
@@ -29,7 +32,7 @@ def parse_args():
         argparse.Namespace: Parsed command-line arguments.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", "-i", dest = "data", type=str, required=True, help="Data path")
+    parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
     parser.add_argument("--model_type", "-t", type=str, default=None, help="Model type")
@@ -80,7 +83,7 @@ def run_inference(args):
     Returns:
         None
     """
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    torch.multiprocessing.set_sharing_strategy("file_system")
     args_dict = vars(args)
     log.info("Inference Program Started.")
     if args_dict["num_gpu"] > 0:
@@ -111,7 +114,7 @@ def run_inference(args):
         log.info(f"Output directory: {out_dir}")
         os.makedirs(out_dir, exist_ok=True)
         args_dict_model["out_dir"] = out_dir
-        mp.spawn(inference_worker, nprocs=max(1,args.num_gpu), args=(args_dict_model,), join=True)
+        mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(args_dict_model,), join=True)
     return None
 
 
@@ -128,9 +131,9 @@ def inference_worker(rank, args_dict):
     """
     gpu_id = args_dict["gpu_pool"][rank]
     if args_dict["num_gpu"] > 0:
-        save_dict = torch.load(args_dict["model"], map_location={'cuda:0': f'cuda:{gpu_id}'}, weights_only=False)
+        save_dict = torch.load(args_dict["model"], map_location={"cuda:0": f"cuda:{gpu_id}"}, weights_only=False)
     else:
-        save_dict = torch.load(args_dict["model"], map_location='cpu', weights_only=False)
+        save_dict = torch.load(args_dict["model"], map_location="cpu", weights_only=False)
     model_config = save_dict["model_config"]
 
     if args_dict["model_type"] is not None:
@@ -139,14 +142,23 @@ def inference_worker(rank, args_dict):
     dwell_bq_dim = 3
     TransformerModel = importlib.import_module(f"deeprm.model.{model_config['model']}").TransformerModel
 
-    model = TransformerModel(d_model = model_config["enc_dim"], n_heads = model_config["head"], d_ff = model_config["lin_dim"],
-                             n_layers = model_config["enc_layer"], lin_depth = model_config["lin_layer"],
-                             t_act = model_config["t_act"], lin_act = model_config["lin_act"],
-                             encoder_dropout = model_config["enc_dropout"], lin_dropout = model_config["lin_dropout"],
-                             kmer_size = model_config["kmer_size"], signal_size = model_config["signal_size"],
-                             block_len = model_config["block_len"],
-                             seq_len = model_config["seq_len"], signal_stride = model_config["signal_stride"],
-                             dwell_bq_dim = dwell_bq_dim)
+    model = TransformerModel(
+        d_model=model_config["enc_dim"],
+        n_heads=model_config["head"],
+        d_ff=model_config["lin_dim"],
+        n_layers=model_config["enc_layer"],
+        lin_depth=model_config["lin_layer"],
+        t_act=model_config["t_act"],
+        lin_act=model_config["lin_act"],
+        encoder_dropout=model_config["enc_dropout"],
+        lin_dropout=model_config["lin_dropout"],
+        kmer_size=model_config["kmer_size"],
+        signal_size=model_config["signal_size"],
+        block_len=model_config["block_len"],
+        seq_len=model_config["seq_len"],
+        signal_stride=model_config["signal_stride"],
+        dwell_bq_dim=dwell_bq_dim,
+    )
 
     if rank == 0:
         total_params = 0
@@ -156,7 +168,7 @@ def inference_worker(rank, args_dict):
         log.info(f"Total Params: {total_params:,}")
     if args_dict["num_gpu"] > 0:
         model.to(gpu_id)
-    model.load_state_dict(state_dict=save_dict["model_state_dict"], strict = False)
+    model.load_state_dict(state_dict=save_dict["model_state_dict"], strict=False)
     save_dict.clear()
     model.eval()
 
@@ -170,14 +182,20 @@ def inference_worker(rank, args_dict):
     else:
         saved = 0
 
-    data_loader = load_dataset(args_dict["data"], args_dict["batch"], args_dict["shard"], gpu_id, max(1,args_dict["num_gpu"]),
-                               prefetch_factor = args_dict["prefetch"],
-                               worker = args_dict["worker"],
-                               cb_len = model_config["block_len"] + model_config["kmer_size"] - 1,
-                               kmer_len = model_config["kmer_size"],
-                               sampling = int(model_config["signal_size"] / model_config["kmer_size"]),
-                               sig_window = model_config["kmer_size"],
-                               resume_from = saved)
+    data_loader = load_dataset(
+        args_dict["data"],
+        args_dict["batch"],
+        args_dict["shard"],
+        gpu_id,
+        max(1, args_dict["num_gpu"]),
+        prefetch_factor=args_dict["prefetch"],
+        worker=args_dict["worker"],
+        cb_len=model_config["block_len"] + model_config["kmer_size"] - 1,
+        kmer_len=model_config["kmer_size"],
+        sampling=int(model_config["signal_size"] / model_config["kmer_size"]),
+        sig_window=model_config["kmer_size"],
+        resume_from=saved,
+    )
 
     inference_loop(args_dict, rank, gpu_id, model, data_loader)
 
@@ -195,9 +213,9 @@ def to_gpu(data, device, stream):
         tuple: A tuple containing the transferred data tensors (src_kmer, src_signal, src_seg_len, src_dwell_bq).
     """
     with torch.cuda.stream(stream):
-        src_signal   = data["signal_token"].to(device, non_blocking=True)
-        src_seg_len  = data["segment_len"].to(device, non_blocking=True)
-        src_kmer     = data["kmer_token"].to(device, non_blocking=True)
+        src_signal = data["signal_token"].to(device, non_blocking=True)
+        src_seg_len = data["segment_len"].to(device, non_blocking=True)
+        src_kmer = data["kmer_token"].to(device, non_blocking=True)
         src_dwell_bq = data["dwell_bq_token"].to(device, non_blocking=True)
     return (src_kmer, src_signal, src_seg_len, src_dwell_bq)
 
@@ -224,13 +242,13 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             flush_idx = -1
             idx = -1
 
-            for batch_data_cpu in tqdm.tqdm(data_loader, total=len(data_loader), smoothing = 0):
+            for batch_data_cpu in tqdm.tqdm(data_loader, total=len(data_loader), smoothing=0):
 
                 if idx == -1:
                     ## First batch
                     batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
                     label = batch_data_cpu["label_id"]
-                    idx+=1
+                    idx += 1
                     flush_idx += 1
                     continue
 
@@ -243,13 +261,13 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                 id_buffer.append(label)
                 pred_buffer.append(pred)
 
-                if flush_idx == args_dict["flush"]-1:
+                if flush_idx == args_dict["flush"] - 1:
                     preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
                     ids = np.concatenate(list(id_buffer), axis=0)
                     id_buffer.clear()
                     pred_buffer.clear()
                     out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.npz"
-                    np.savez_compressed(out_path, label_id = ids, pred = preds)
+                    np.savez_compressed(out_path, label_id=ids, pred=preds)
                     flush_idx = 0
                 else:
                     flush_idx += 1
@@ -257,7 +275,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                 torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
                 batch_data_gpu = to_gpu_proc.result()
                 label = batch_data_cpu["label_id"]
-                idx+=1
+                idx += 1
 
             ## Last batch
             pred = model(*batch_data_gpu)
@@ -273,7 +291,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             id_buffer.clear()
             pred_buffer.clear()
             out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.npz"
-            np.savez_compressed(out_path, label_id = ids, pred = preds)
+            np.savez_compressed(out_path, label_id=ids, pred=preds)
 
             executor.shutdown(wait=True)
 
@@ -282,5 +300,3 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
 
 if __name__ == "__main__":
     main()
-
-

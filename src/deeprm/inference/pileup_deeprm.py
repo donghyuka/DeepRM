@@ -11,16 +11,18 @@ The two metrics calculated are:
 Finally, it writes a .npz file containing the results.
 """
 
+import argparse
+import gc
+import glob
 import multiprocessing as mp
 import os
-import tqdm
-import argparse
-import glob
+
 import numpy as np
-import gc
 import pysam
+import tqdm
 
 mp.set_start_method("fork", force=True)
+
 
 def parse_args():
     """
@@ -49,11 +51,13 @@ def parse_args():
     parser.add_argument("--postfix", "-x", type=str, default="", help="Comment")
     parser.add_argument("--slice", "-s", type=int, default=None, help="Slice index (for 2D predictions)")
     parser.add_argument("--flip", "-f", action="store_true", help="Flip label")
-    parser.add_argument("--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position")
+    parser.add_argument(
+        "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
+    )
 
     args = parser.parse_args()
     if args.thread is None:
-        args.thread = max(1,int(0.95 * mp.cpu_count()))
+        args.thread = max(1, int(0.95 * mp.cpu_count()))
 
     if args.input.endswith("/"):
         args.input = args.input[:-1]
@@ -64,8 +68,8 @@ def parse_args():
     os.makedirs(args.output, exist_ok=True)
     return args
 
-def grouped_sum(n_unique, idx, vals):
 
+def grouped_sum(n_unique, idx, vals):
     """
     Sum values in 'vals' according to group indices 'idx'.
 
@@ -81,7 +85,8 @@ def grouped_sum(n_unique, idx, vals):
     np.add.at(group_sums, idx, vals)
     return group_sums
 
-def worker(pid, file_paths, keys, shared_dict, slice= None, threshold_pos = 0.98, epsilon = 1e-30, flip=False):
+
+def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, epsilon=1e-30, flip=False):
     """
     Worker function to process a subset of prediction files.
     Computes per-label statistics and stores results in a shared dictionary.
@@ -104,14 +109,16 @@ def worker(pid, file_paths, keys, shared_dict, slice= None, threshold_pos = 0.98
     data_dict = {keys: [] for keys in keys}
 
     ## Iterate over prediction files
-    for idx, path in enumerate(tqdm.tqdm(file_paths, desc = "Reading input files", leave=False)):
+    for idx, path in enumerate(tqdm.tqdm(file_paths, desc="Reading input files", leave=False)):
         with np.load(path) as data:
-            pred = data["pred"]         # prediction probabilities
-            label_id = data["label_id"] # integer labels for each prediction
+            pred = data["pred"]  # prediction probabilities
+            label_id = data["label_id"]  # integer labels for each prediction
 
         ## Ensure correct dtypes
         assert pred.dtype == np.float32, f"Expected pred to be int32, but got {pred.dtype} in {path}"
-        assert label_id.dtype == np.int64 or label_id.dtype == np.uint64, f"Expected label_id to be int64, but got {label_id.dtype} in {path}"
+        assert (
+            label_id.dtype == np.int64 or label_id.dtype == np.uint64
+        ), f"Expected label_id to be int64, but got {label_id.dtype} in {path}"
         assert len(pred) == len(label_id), f"Length of pred and label_id do not match in {path}"
 
         ## Filter out any NaN or infinite values
@@ -122,7 +129,7 @@ def worker(pid, file_paths, keys, shared_dict, slice= None, threshold_pos = 0.98
         ## Slice 2D predictions if requested
         if slice is not None:
             assert pred.ndim == 2, f"Expected pred to be 2D as slice was given, but got {pred.ndim} in {path}"
-            pred = pred[:,slice]
+            pred = pred[:, slice]
         else:
             assert pred.ndim == 1, f"Expected pred to be 1D as slice was not given, but got {pred.ndim} in {path}"
 
@@ -143,7 +150,7 @@ def worker(pid, file_paths, keys, shared_dict, slice= None, threshold_pos = 0.98
         logsum_1_p_pos = np.log10(np.clip(1 - pred, epsilon, 1.0)) * count_pos
 
         ## Calculate KL divergence
-        kl_div = pred * np.log2(2 * pred + epsilon) + (1-pred) * np.log2(2 * (1 - pred) + epsilon)
+        kl_div = pred * np.log2(2 * pred + epsilon) + (1 - pred) * np.log2(2 * (1 - pred) + epsilon)
         kl_div_neg = kl_div * (pred <= 0.5)
         kl_div_pos = kl_div * (pred > 0.5)
 
@@ -163,31 +170,31 @@ def worker(pid, file_paths, keys, shared_dict, slice= None, threshold_pos = 0.98
     n_label_id = len(global_ids)
 
     ## pre-allocate accumulators
-    final_count_all    = np.zeros(n_label_id, dtype=np.int32)
-    final_count_pos    = np.zeros(n_label_id, dtype=np.int32)
-    final_logsum       = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_neg       = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_pos       = np.zeros(n_label_id, dtype=np.float32)
+    final_count_all = np.zeros(n_label_id, dtype=np.int32)
+    final_count_pos = np.zeros(n_label_id, dtype=np.int32)
+    final_logsum = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_neg = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_pos = np.zeros(n_label_id, dtype=np.float32)
 
     ## vectorized accumulation (because the label_id is already unique for each chunk)
-    for chunk_idx in tqdm.tqdm(range(len(data_dict["label_id"])), desc=f"Accumulating data", leave=False):
+    for chunk_idx in tqdm.tqdm(range(len(data_dict["label_id"])), desc="Accumulating data", leave=False):
         label_idx = np.searchsorted(global_ids, data_dict["label_id"][chunk_idx])
-        final_count_all  [label_idx] += data_dict["count_all"][chunk_idx]
-        final_count_pos  [label_idx] += data_dict["count_pos"][chunk_idx]
-        final_logsum     [label_idx] += data_dict["logsum_1_p_pos"][chunk_idx]
-        final_kl_neg     [label_idx] += data_dict["kl_div_neg"][chunk_idx]
-        final_kl_pos     [label_idx] += data_dict["kl_div_pos"][chunk_idx]
+        final_count_all[label_idx] += data_dict["count_all"][chunk_idx]
+        final_count_pos[label_idx] += data_dict["count_pos"][chunk_idx]
+        final_logsum[label_idx] += data_dict["logsum_1_p_pos"][chunk_idx]
+        final_kl_neg[label_idx] += data_dict["kl_div_neg"][chunk_idx]
+        final_kl_pos[label_idx] += data_dict["kl_div_pos"][chunk_idx]
 
     ## extract only the IDs that were seen
     unique_id = np.nonzero(final_count_all > 0)[0]
 
     ## slice to compact arrays
-    label_id     = np.ascontiguousarray(global_ids[unique_id])
-    count_all    = np.ascontiguousarray(final_count_all[unique_id])
-    count_pos    = np.ascontiguousarray(final_count_pos[unique_id])
-    logsum_1_p_pos   = np.ascontiguousarray(final_logsum[unique_id])
-    kl_div_neg   = np.ascontiguousarray(final_kl_neg[unique_id])
-    kl_div_pos   = np.ascontiguousarray(final_kl_pos[unique_id])
+    label_id = np.ascontiguousarray(global_ids[unique_id])
+    count_all = np.ascontiguousarray(final_count_all[unique_id])
+    count_pos = np.ascontiguousarray(final_count_pos[unique_id])
+    logsum_1_p_pos = np.ascontiguousarray(final_logsum[unique_id])
+    kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
+    kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
 
     ## Store in shared dictionary
     shared_dict["label_id"][pid] = label_id
@@ -223,8 +230,9 @@ def main():
     ## Start worker processes to process each chunk of files
     proc_list = []
     for pid, file_paths in enumerate(file_paths_split):
-        proc = mp.Process(target=worker, args=(pid, file_paths, keys, shared_dict,
-                                               args.slice, args.pos, args.epsilon, args.flip))
+        proc = mp.Process(
+            target=worker, args=(pid, file_paths, keys, shared_dict, args.slice, args.pos, args.epsilon, args.flip)
+        )
         proc.start()
         proc_list.append(proc)
     for proc in proc_list:
@@ -237,35 +245,37 @@ def main():
     n_label_id = len(global_ids)
 
     ## pre-allocate accumulators
-    final_count_all    = np.zeros(n_label_id, dtype=np.int32)
-    final_count_pos    = np.zeros(n_label_id, dtype=np.int32)
-    final_logsum       = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_neg       = np.zeros(n_label_id, dtype=np.float32)
-    final_kl_pos       = np.zeros(n_label_id, dtype=np.float32)
+    final_count_all = np.zeros(n_label_id, dtype=np.int32)
+    final_count_pos = np.zeros(n_label_id, dtype=np.int32)
+    final_logsum = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_neg = np.zeros(n_label_id, dtype=np.float32)
+    final_kl_pos = np.zeros(n_label_id, dtype=np.float32)
 
     ## vectorized accumulation (because the label_id is already unique for each chunk)
     for pid in tqdm.tqdm(range(len(file_paths_split)), desc="Accumulating data", leave=False):
         label_idx = np.searchsorted(global_ids, shared_dict["label_id"][pid])
-        final_count_all  [label_idx] += shared_dict["count_all"][pid]
-        final_count_pos  [label_idx] += shared_dict["count_pos"][pid]
-        final_logsum     [label_idx] += shared_dict["logsum_1_p_pos"][pid]
-        final_kl_neg     [label_idx] += shared_dict["kl_div_neg"][pid]
-        final_kl_pos     [label_idx] += shared_dict["kl_div_pos"][pid]
+        final_count_all[label_idx] += shared_dict["count_all"][pid]
+        final_count_pos[label_idx] += shared_dict["count_pos"][pid]
+        final_logsum[label_idx] += shared_dict["logsum_1_p_pos"][pid]
+        final_kl_neg[label_idx] += shared_dict["kl_div_neg"][pid]
+        final_kl_pos[label_idx] += shared_dict["kl_div_pos"][pid]
 
     ## extract only the IDs that were seen
     unique_id = np.nonzero(final_count_all > 0)[0]
 
     ## slice to compact arrays
-    label_id     = np.ascontiguousarray(global_ids[unique_id])
-    count_all    = np.ascontiguousarray(final_count_all[unique_id])
-    count_pos    = np.ascontiguousarray(final_count_pos[unique_id])
-    logsum_1_p_pos   = np.ascontiguousarray(final_logsum[unique_id])
-    kl_div_neg   = np.ascontiguousarray(final_kl_neg[unique_id])
-    kl_div_pos   = np.ascontiguousarray(final_kl_pos[unique_id])
+    label_id = np.ascontiguousarray(global_ids[unique_id])
+    count_all = np.ascontiguousarray(final_count_all[unique_id])
+    count_pos = np.ascontiguousarray(final_count_pos[unique_id])
+    logsum_1_p_pos = np.ascontiguousarray(final_logsum[unique_id])
+    kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
+    kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
 
     ## Calculate PM6A and DOM metrics
     dom = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
-    pm6a = - (2 - dom) * logsum_1_p_pos / count_all + ((1 - dom)* np.log10(np.clip(1 - dom,1e-30,1)) + dom * np.log10(np.clip(dom,1e-30,1))) * (count_pos / count_all)
+    pm6a = -(2 - dom) * logsum_1_p_pos / count_all + (
+        (1 - dom) * np.log10(np.clip(1 - dom, 1e-30, 1)) + dom * np.log10(np.clip(dom, 1e-30, 1))
+    ) * (count_pos / count_all)
 
     ## Read BAM Header to get reference names
     input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)
@@ -275,23 +285,23 @@ def main():
     ## Convert label_id to ref_names and ref_pos
     transcript_id = label_id // args.label_div
     ref_pos = label_id % args.label_div
-    ref_names = ref_arr[transcript_id] ## Map transcript_id to reference names with vectorized operation
+    ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
 
     ## Save results to compressed .npz
     path = f"{args.output}/pileup.npz"
-    np.savez_compressed(path,
-                              ref_names = ref_names,
-                              ref_pos=ref_pos,
-                              pm6a=pm6a,
-                              dom=dom,
-                              count_all=count_all,
-
-                              ## Below are not really necessary, but kept for debugging and reprocessing.
-                              count_pos=count_pos,
-                              kl_div_neg=kl_div_neg,
-                              kl_div_pos=kl_div_pos,
-                              logsum_1_p_pos=logsum_1_p_pos
-                        )
+    np.savez_compressed(
+        path,
+        ref_names=ref_names,
+        ref_pos=ref_pos,
+        pm6a=pm6a,
+        dom=dom,
+        count_all=count_all,
+        ## Below are not really necessary, but kept for debugging and reprocessing.
+        count_pos=count_pos,
+        kl_div_neg=kl_div_neg,
+        kl_div_pos=kl_div_pos,
+        logsum_1_p_pos=logsum_1_p_pos,
+    )
     return None
 
 
