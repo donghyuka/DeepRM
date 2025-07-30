@@ -1,9 +1,18 @@
 ## idea
 .idea/
-## docs build
-docs/_build
 ## patch
 patch
 ## venv
 venv/
+
+## Build artifacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+docs/_build/
 /src/deeprm.egg-info/

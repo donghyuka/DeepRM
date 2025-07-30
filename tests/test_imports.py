@@ -2,6 +2,7 @@ import importlib
 
 
 def test_import_package():
+    ## move to src/deeprm/__init__.py
     m = importlib.import_module("deeprm")
     assert hasattr(m, "__version__")
 

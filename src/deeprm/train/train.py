@@ -17,18 +17,24 @@ import tqdm
 from deeprm.utils import check_deps
 from deeprm.utils.logging import get_logger
 
-log = get_logger(__name__)
 check_deps.check_torch_available()
-check_deps.check_torchmetrics_available()
 
-import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import torchmetrics.classification as cm
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
+import torch  # noqa: E402
+import torch.distributed as dist  # noqa: E402
+import torch.multiprocessing as mp  # noqa: E402
+from torch.nn.parallel import DistributedDataParallel as DDP  # noqa: E402
+from torch.utils.tensorboard import SummaryWriter  # noqa: E402
 
-from deeprm.train.train_dataloader import NanoporeDataLoader, load_dataset
+from deeprm.train.train_dataloader import NanoporeDataLoader, load_dataset  # noqa: E402
+
+log = get_logger(__name__)
+
+try:
+    import torchmetrics.classification as cm
+
+    TORCHMETRICS_AVAILABLE = True
+except Exception:
+    TORCHMETRICS_AVAILABLE = False
 
 
 def add_arguments(parser: argparse.ArgumentParser):
@@ -662,12 +668,16 @@ def main_worker(rank, args_dict):
     else:
         raise ValueError(f"Loss Function {args_dict['loss']} Not Implemented.")
 
-    metric_func_dict = {
-        "acc": cm.BinaryAccuracy().to(gpu_id),
-        "auroc": cm.BinaryAUROC().to(gpu_id),
-        "ap": cm.BinaryAveragePrecision().to(gpu_id),
-        "f-1": cm.BinaryF1Score().to(gpu_id),
-    }
+    if TORCHMETRICS_AVAILABLE:
+        metric_func_dict = {
+            "acc": cm.BinaryAccuracy().to(gpu_id),
+            "auroc": cm.BinaryAUROC().to(gpu_id),
+            "ap": cm.BinaryAveragePrecision().to(gpu_id),
+            "f-1": cm.BinaryF1Score().to(gpu_id),
+        }
+    else:
+        log.warning("torchmetrics is not available. Some metrics will not be computed.")
+        metric_func_dict = {}
 
     args_dict["checkpoint_path"] = args_dict["output"]
 

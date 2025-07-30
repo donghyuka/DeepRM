@@ -18,6 +18,7 @@ import multiprocessing as mp
 import os
 
 import numpy as np
+import pandas as pd
 import pysam
 import tqdm
 
@@ -44,6 +45,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
+    parser.add_argument("--bed", "-bed", action="store_true", help="Format output as BED-like structure")
 
     return None
 
@@ -139,9 +141,11 @@ def main(args: argparse.Namespace):
     ref_arr = np.array(input_bam.references)
     input_bam.close()
 
-    ## Convert label_id to ref_names and ref_pos
-    transcript_id = label_id // args.label_div
-    ref_pos = label_id % args.label_div
+    ## Convert label_id to ref_names, ref_pos, and ref_strand
+    ref_strand = np.sign(label_id)
+    label_id_abs = np.abs(label_id)
+    transcript_id = label_id_abs // args.label_div
+    ref_pos = label_id_abs % args.label_div
     ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
 
     ## Save results to compressed .npz
@@ -150,15 +154,33 @@ def main(args: argparse.Namespace):
         path,
         ref_names=ref_names,
         ref_pos=ref_pos,
+        ref_strand=ref_strand,
         pm6a=pm6a,
         dom=dom,
         count_all=count_all,
-        ## Below are not really necessary, but kept for debugging and reprocessing.
         count_pos=count_pos,
         kl_div_neg=kl_div_neg,
         kl_div_pos=kl_div_pos,
         logsum_1_p_pos=logsum_1_p_pos,
     )
+
+    if args.bed:
+        ## Optionally format results into a BED-like structure
+        path = f"{args.output}/pileup.bed"
+        bed_formatter(
+            ref_names=ref_names,
+            ref_pos=ref_pos,
+            ref_strand=ref_strand,
+            pm6a=pm6a,
+            dom=dom,
+            count_all=count_all,
+            count_pos=count_pos,
+            kl_div_neg=kl_div_neg,
+            kl_div_pos=kl_div_pos,
+            logsum_1_p_pos=logsum_1_p_pos,
+            output_path=path,
+        )
+
     return None
 
 
@@ -296,4 +318,66 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
     shared_dict["logsum_1_p_pos"][pid] = logsum_1_p_pos
     shared_dict["kl_div_neg"][pid] = kl_div_neg
     shared_dict["kl_div_pos"][pid] = kl_div_pos
+    return None
+
+
+def bed_formatter(
+    ref_names, ref_pos, ref_strand, pm6a, dom, count_all, count_pos, kl_div_neg, kl_div_pos, logsum_1_p_pos, output_path
+):
+    """
+    Formats the results into a BED-like structure.
+
+    Args:
+        ref_names (np.ndarray): Array of reference names.
+        ref_pos (np.ndarray): Array of reference positions.
+        ref_strand (np.ndarray): Array of reference strands.
+        pm6a (np.ndarray): PM6A scores.
+        dom (np.ndarray): DOM scores.
+        count_all (np.ndarray): Total counts.
+        count_pos (np.ndarray): Positive counts.
+        kl_div_neg (np.ndarray): KL divergence for negative predictions.
+        kl_div_pos (np.ndarray): KL divergence for positive predictions.
+        logsum_1_p_pos (np.ndarray): Log-sum of positive predictions.
+
+    Returns:
+        list: List of formatted strings for each entry.
+    """
+    col1 = ref_names
+    col2 = ref_pos
+    col3 = ref_pos + 1  # BED format requires end position to be exclusive
+    col4 = pm6a
+    col5 = dom
+    col6 = ref_strand
+    col7 = ref_pos
+    col8 = ref_pos + 1
+    col9 = ["255,0,0"] * len(ref_names)  # Color for BED format
+    col10 = count_all
+    col11 = count_pos
+    col12 = count_all - count_pos
+    col13 = kl_div_neg
+    col14 = kl_div_pos
+    col15 = logsum_1_p_pos
+
+    df = pd.DataFrame(
+        {
+            "col1": col1,
+            "col2": col2,
+            "col3": col3,
+            "col4": col4,
+            "col5": col5,
+            "col6": col6,
+            "col7": col7,
+            "col8": col8,
+            "col9": col9,
+            "col10": col10,
+            "col11": col11,
+            "col12": col12,
+            "col13": col13,
+            "col14": col14,
+            "col15": col15,
+        }
+    )
+
+    df.to_csv(output_path, sep="\t", header=False, index=False, float_format="%.6f")
+
     return None

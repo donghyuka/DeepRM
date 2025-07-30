@@ -51,8 +51,9 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--cb_len", "-l", type=int, default=21, help="Context block length")
     parser.add_argument("--bam_thread", "-a", type=int, default=4, help="BAM decompression thread per process")
     parser.add_argument("--process_once", "-n", type=int, default=1000, help="Reads per processing batch")
-    parser.add_argument("--dwell_shift", "-d", type=int, default=10, help="Distance between motor and pore")
+    parser.add_argument("--dwell_shift", "-f", type=int, default=10, help="Distance between motor and pore")
     parser.add_argument("--sig_window", "-w", type=int, default=5, help="Signal window size")
+    parser.add_argument("--label_div", "-d", type=int, default=10**9, help="Label division factor")
 
     return None
 
@@ -124,6 +125,7 @@ def main(args: argparse.Namespace):
                 args.dwell_shift,
                 args.sig_window,
                 args.process_once,
+                args.label_div,
             ),
         )
         proc_list.append(proc)
@@ -348,7 +350,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
     Returns:
         None (appends DataFrame to bam_data).
     """
-    bam_df = {k: [] for k in ["read_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap"]}
+    bam_df = {k: [] for k in ["read_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap", "strand"]}
     input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, thread=n_thread)
     ref_index_dict = {ref: i for i, ref in enumerate(input_bam.references)}
 
@@ -373,6 +375,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         sp = read.get_tag("sp") if read.has_tag("sp") else 0
         mv = np.array(read.get_tag("mv")[1:], dtype=bool)
         seq = np.array(list(read.query_sequence)).view(np.int32).astype(np.uint8)
+        strand = -1 if read.is_reverse else 1
         bam_df["read_id"].append(read_id)
         bam_df["ts"].append(ts)
         bam_df["ns"].append(ns)
@@ -382,6 +385,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         bam_df["seq"].append(seq)
         bam_df["ref"].append(read.reference_name)
         bam_df["ap"].append(ap)
+        bam_df["strand"].append(strand)
 
     input_bam.close()
     bam_df = pd.DataFrame.from_dict(bam_df, orient="columns")
@@ -407,6 +411,7 @@ def segment_normalize_signal(
     dwell_shift=10,
     sig_window=5,
     process_once=1000,
+    label_div=10**9,
 ):
     """
     Segment and normalize signals per read, and save token chunks.
@@ -425,6 +430,7 @@ def segment_normalize_signal(
         dwell_shift (int): shift for dwell token alignment.
         sig_window (int): local signal window size.
         process_once (int): reads to process per batch.
+        label_div (int): label division factor for unique ID generation.
 
     Returns:
         None (writes .npz files).
@@ -454,6 +460,7 @@ def segment_normalize_signal(
         if len(pod5_df) == 0:
             continue
         split_points = np.array_split(np.arange(len(pod5_df)), max(1, np.ceil(len(pod5_df) // process_once)))
+        pod5_df[["r_pos", "ref", "strand"]] = pod5_df[["r_pos", "ref", "strand"]].astype(np.int64)
         for signal_df in [pod5_df.iloc[s[0] : s[-1] + 1] for s in split_points]:
             if len(signal_df) == 0:
                 continue
@@ -491,7 +498,7 @@ def segment_normalize_signal(
             signal_df["start_pos"] = signal_df["q_pos"] - cb_half_len
             signal_df["end_pos"] = signal_df["q_pos"] + cb_half_len + 1
             signal_df["q_len"] = signal_df["seq"].apply(len)
-            signal_df["label_id"] = signal_df["ref"].astype(np.int64) * (10**9) + signal_df["r_pos"].astype(np.int64)
+            signal_df["label_id"] = (signal_df["ref"] * label_div + signal_df["r_pos"]) * signal_df["strand"]
 
             # filter by context
             signal_df = signal_df[

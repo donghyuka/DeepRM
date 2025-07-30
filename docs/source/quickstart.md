@@ -9,7 +9,7 @@ deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <pre
 # Run inference
 deeprm inference run -d <prep_dir> -o <pred_dir>
 # Generate site-level results
-deeprm inference pileup -i <pred_dir> -o <pileup_dir>
+deeprm inference pileup -i <pred_dir> -o <pileup_dir> --bed
 ```
 
 ### Training

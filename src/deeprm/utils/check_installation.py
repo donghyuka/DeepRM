@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from deeprm.utils.logging import get_logger
 
@@ -24,8 +24,8 @@ def _supports_color(stream) -> bool:
 class Issue:
     severity: str  # "ERROR" | "WARN"
     message: str
-    hint: Optional[str] = None
-    code: Optional[str] = None  # machine-usable code, e.g., "TORCH_MISSING"
+    hint: str | None = None
+    code: str | None = None  # machine-usable code, e.g., "TORCH_MISSING"
 
 
 def _run(cmd: List[str], timeout: int = 6) -> Tuple[int, str, str]:
@@ -36,7 +36,7 @@ def _run(cmd: List[str], timeout: int = 6) -> Tuple[int, str, str]:
         return 127, "", str(e)
 
 
-def _parse_nvidia_smi_banner(txt: str) -> Tuple[Optional[str], Optional[str]]:
+def _parse_nvidia_smi_banner(txt: str) -> Tuple[str | None, str | None]:
     # Looks for lines like: "CUDA Version: 12.4" and "Driver Version: 535.129.03"
     drv = None
     cuda = None
@@ -126,9 +126,8 @@ def _torch_info() -> Tuple[Dict[str, Any], List[Issue]]:
             Issue(
                 severity="ERROR",
                 message=(
-                    "You have a CUDA-built torch (compiled with CUDA {}) but that version of CUDA is not available at runtime.".format(
-                        info["built_cuda"]
-                    )
+                    "You have a CUDA-built torch (compiled with CUDA {}) "
+                    "but that version of CUDA is not available at runtime.".format(info["built_cuda"])
                 ),
                 hint=(
                     "This usually means the NVIDIA driver/CUDA runtime is missing or incompatible. "
@@ -216,17 +215,20 @@ def collect(require_train: bool = False) -> Tuple[Dict[str, Any], List[Issue]]:
     return env, issues
 
 
-def parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
+def parser(prog: str | None = None) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog=prog or "deeprm doctor", description="Environment checks for DeepRM (torch/metrics/GPU)."
     )
     p.add_argument("--verbose", "-v", action="store_true", help="Show all environment details.")
+    p.add_argument(
+        "--require-train", action="store_true", default=False, help="Check for training dependencies (torchmetrics)."
+    )
     return p
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: List[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    env, issues = collect(require_train=True)
+    env, issues = collect(require_train=args.require_train)
     warnings = [i for i in issues if i.severity == "WARN"]
     errors = [i for i in issues if i.severity == "ERROR"]
 
@@ -244,9 +246,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 log.warning(f"\t{issue.message}")
                 if issue.hint:
                     log.warning(f"\tHint: {issue.hint}")
-        return 1
 
-    if warnings:
+        log.warning("Re-run with `--verbose` flag to see full environment details.")
+
+    elif warnings:
         log.warning(f"Environment checks completed with {len(warnings)} warning{'s' if len(warnings) > 1 else ''}:")
         for i, issue in enumerate(warnings, start=1):
             log.warning(f"{i}. {issue.code}")
@@ -254,15 +257,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             if issue.hint:
                 log.warning(f"\tHint: {issue.hint}")
 
+        log.warning("Re-run with `--verbose` flag to see full environment details.")
+
     else:
         log.info("Environment checks passed successfully.")
 
     if args.verbose:
         print(json.dumps(env, indent=2))
 
-    return 0
+    return None
 
 
-def entry(argv: Optional[List[str]] = None) -> int:
+def entry(argv: List[str] | None = None) -> int:
     """Entry point for the CLI."""
     return main(argv) if argv is not None else main(sys.argv[1:])

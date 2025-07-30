@@ -1,0 +1,76 @@
+# =========================
+# Core project metadata
+# =========================
+include pyproject.toml
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CITATION.cff
+include .readthedocs.yml
+
+# =========================
+# Python package (src/ layout)
+# =========================
+graft src
+prune src/**/__pycache__
+
+# If you ship typing markers/stubs:
+include src/deeprm/py.typed
+recursive-include src *.pyi
+
+# Common small runtime data files (safe to ship)
+recursive-include src *.json *.yaml *.yml *.toml *.ini *.cfg *.txt *.csv *.tsv
+
+# Avoid accidentally bundling egg-info from source tree
+prune src/*.egg-info
+exclude src/deeprm.egg-info/*
+
+# # =========================
+# # C++ / CMake extension (future-proof)
+# # Safe to include even if not present yet
+# # =========================
+# include CMakeLists.txt
+# graft cpp
+# graft cmake
+# # Include typical C/C++/CUDA sources and CMake files
+# recursive-include cpp *.h *.hpp *.hh *.hxx *.c *.cc *.cxx *.cpp *.cu *.cuh *.ipp *.inl *.tpp CMakeLists.txt
+# # Exclude build artifacts
+# recursive-exclude cpp **/*.o **/*.obj **/*.lo **/*.la **/*.a **/*.lib **/*.exp **/*.pdb **/*.dll **/*.dylib **/*.so
+# recursive-exclude cpp **/CMakeFiles/** **/cmake-build-*/** **/build/**
+
+# =========================
+# Documentation sources (not built HTML)
+# =========================
+graft docs
+prune docs/_build
+recursive-exclude docs **/.ipynb_checkpoints
+# If notebooks are large, exclude them; otherwise comment this out:
+recursive-exclude docs **/*.ipynb
+
+# =========================
+# Tests (useful for conda-forge and downstream)
+# =========================
+graft tests
+recursive-exclude tests **/__pycache__ *.pyc *.pyo
+
+# =========================
+# Examples
+# Ship scripts/configs, but exclude large binary assets
+# =========================
+graft example
+# prune example
+
+# =========================
+# CI/dev/VCS clutter
+# =========================
+prune .git
+prune .github
+prune .venv
+prune venv
+prune .idea
+exclude .gitignore .gitattributes .editorconfig .pre-commit-config.yaml
+
+# =========================
+# Global excludes
+# =========================
+global-exclude __pycache__ *.py[cod] *~ *.swp *.swo .DS_Store

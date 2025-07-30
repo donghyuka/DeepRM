@@ -39,14 +39,15 @@ This repository contains the source code for training and running DeepRM.
 ### Prerequisites
 * Linux
 * Python 3.9+
-* Pytorch 2.0+ (with CUDA support for GPU inference)
+* Pytorch 2.0+
   * https://pytorch.org/get-started/locally/
-* Torchmetrics 0.9.0+ (for training)
+  * Please ensure that you have installed the correct version of PyTorch with CUDA support if you want to use GPU for inference or training.
+
+#### Optional
+* Torchmetrics 0.9.0+ (only for training)
   * ```bash
     python -m pip install torchmetrics
     ```
-
-#### Optional
 * Dorado 0.7.3+ (optional, for basecalling)
   * https://github.com/nanoporetech/dorado
 * SAMtools 1.16.1+ (optional, for BAM file processing)
@@ -75,6 +76,11 @@ cd deeprm
 python -m pip install -U pip
 python -m pip install -e .
 ```
+ * If installation fails on old OS (e.g., CentOS 7) due to NumPy, you can try installing older versions of NumPy first:
+ * ```bash
+    python -m pip install "numpy<2.3.0,>2.0.0"
+    python -m pip install -e .
+    ```
 
 ### Verify Installation
 
@@ -94,16 +100,16 @@ deeprm check
 # Prepare data
 deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
 # Run inference
-deeprm inference run -d <prep_dir> -o <pred_dir>
+deeprm inference run -i <prep_dir> -o <pred_dir>
 # Generate site-level results
-deeprm inference pileup -i <pred_dir> -o <pileup_dir>
+deeprm inference pileup -i <pred_dir> -o <pileup_dir> --bed
 ```
 ### Training
 ```bash
 # Prepare unmodified data
 deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
  # Prepare modified data
-deeprm train prep -p training_m6a_example.pod5 -b training_m6a_example.bam -o <prep_dir>/m6a
+deeprm train prep -p training_m6a_example.pod5 -n training_a_example.bam -o <prep_dir>/m6a
 # Compile training data
 deeprm train compile -n <prep_dir>/a -p <prep_dir>/m6a -o <prep_dir>/compiled
 # Run training
@@ -118,7 +124,7 @@ deeprm train run -d <prep_dir>/compiled -o <output_dir> --gpu
 #### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
-dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > <raw_bam_path>"
+dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 {args.pod5} > <raw_bam_path>"
 ```
 * Filter, sort, and index the BAM files:
 ```bash
@@ -128,7 +134,7 @@ samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
-deeprm inference prep --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
+deeprm inference prep -p <input_POD5_dir> -b <input_BAM_dir> -o <data_dir>
 ```
 * This will create:
   * Inference dataset: /block
@@ -138,12 +144,12 @@ deeprm inference prep --input <input_POD5_dir> --output <output_file> --dorado <
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
-deeprm inference run --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool>
+deeprm inference run -i <data_dir> -o <prediction_dir>
 ```
 * This will create a directory with single-molecule level result files.
 * To get a site-level result, run the following command:
 ```bash
-deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --mpileup <filtered_mpileup_file>
+deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --bed
 ```
 * This will create a directory with site-level result files.
 
@@ -157,20 +163,20 @@ samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the training data (synthetic oligonucleotide), run the following command:
 ```bash
-deeprm train prep --input <input_POD5_dir> --output <output_file>
+deeprm train prep -p <input_POD5_dir> -b <input_BAM_dir> -o <data_dir>
 ```
 * This will create:
   * Training dataset: /block
 * To compile the training dataset, run the following command:
 ```bash
-deeprm train compile --input <input_POD5_dir> --output <output_file>
+deeprm train compile -p <modified_data_dir> -n <unmodified_data_dir> -o <dataset_dir>
 ```
 * This will create:
   * Training dataset: /block
 #### Run Training
 * To train the model, run the following command:
 ```bash
-deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
+deeprm train run --model deeprm_model --data <dataset_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
 
