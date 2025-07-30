@@ -9,19 +9,23 @@ import argparse
 import glob
 import importlib
 import os
+import pathlib
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-import torch
-import torch.multiprocessing as mp
 import tqdm
-from torch.amp import autocast
 
 from deeprm.inference.inference_dataloader import load_dataset
+from deeprm.utils import check_deps
 from deeprm.utils.logging import get_logger
 
 log = get_logger(__name__)
+check_deps.check_torch_available()
+
+import torch
+import torch.multiprocessing as mp
+from torch.amp import autocast
 
 
 def add_arguments(parser: argparse.ArgumentParser):
@@ -34,11 +38,11 @@ def add_arguments(parser: argparse.ArgumentParser):
     """
     parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
-    parser.add_argument("--model", "-m", type=str, required=True, nargs="+", help="Model path")
-    parser.add_argument("--model_type", "-t", type=str, default=None, help="Model type")
+    parser.add_argument("--model", "-m", type=str, default=None, help="Model path")
+    parser.add_argument("--model_type", "-t", type=str, default="deeprm_model", help="Model type")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
-    parser.add_argument("--gpu", "-g", type=int, default=4, help="Num. of GPU devices", dest="num_gpu")
+    parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
     parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
@@ -62,6 +66,16 @@ def main(args: argparse.Namespace):
     Returns:
         None
     """
+    if args.model is None:
+        ## Get directory of the current file
+        deeprm_root = pathlib.Path(__file__).parent.parent.parent.parent
+        args.model = f"{deeprm_root}/weight/deeprm_weights.pt"
+    if not args.model.endswith(".pt"):
+        raise ValueError("Invalid model path. It should be a .pt file.")
+    if args.data.endswith("/"):
+        args.data = args.data[:-1]
+    if not os.path.isdir(args.data):
+        raise ValueError("Invalid data path. It should be a directory containing data files.")
     if args.num_gpu is None:
         if args.gpu_pool is None:
             args.num_gpu = torch.cuda.device_count()
@@ -69,8 +83,6 @@ def main(args: argparse.Namespace):
             args.num_gpu = len(args.gpu_pool)
     if args.gpu_pool is None:
         args.gpu_pool = list(range(args.num_gpu))
-    inference_path = f"{args.output}/inference"
-    os.makedirs(inference_path, exist_ok=True)
     run_inference(args)
     return None
 
@@ -86,37 +98,22 @@ def run_inference(args):
         None
     """
     torch.multiprocessing.set_sharing_strategy("file_system")
-    args_dict = vars(args)
     log.info("Inference Program Started.")
-    if args_dict["num_gpu"] > 0:
+    if args.num_gpu > 0:
         log.info(f"Using {args.num_gpu} GPUs.")
     else:
         log.info("Using CPU.")
-    model_list = []
-    for model_path in args_dict["model"]:
-        if model_path.endswith(".pt"):
-            model_list.append(model_path)
-        elif os.path.isdir(model_path):
-            model_list += [x for x in glob.glob(f"{model_path}/*.pt")]
-        else:
-            raise ValueError("Invalid model path. It should be a .pt file or a directory containing .pt files.")
 
-    if args_dict["data"].endswith("/"):
-        args_dict["data"] = args_dict["data"][:-1]
-    if not os.path.isdir(args_dict["data"]):
-        raise ValueError("Invalid data path. It should be a directory containing data files.")
-    for model in model_list:
-        ## make tensorboard directory
-        log.info(f"Running inference: {model}")
-        args_dict_model = args_dict.copy()
-        args_dict_model["model"] = model
-        out_dir = f"{args_dict['output']}/inference/{model.split('/')[-1][:-3]}-{args_dict['data'].split('/')[-1]}"
-        if len(args_dict["postfix"]) > 0:
-            out_dir = f"{out_dir}-{args_dict['postfix']}"
-        log.info(f"Output directory: {out_dir}")
-        os.makedirs(out_dir, exist_ok=True)
-        args_dict_model["out_dir"] = out_dir
-        mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(args_dict_model,), join=True)
+    ## make tensorboard directory
+    log.info(f"Running inference: {args.model}")
+    output = f"{args.output}/{args.model.split('/')[-1][:-3]}-{args.data.split('/')[-1]}"
+    if len(args.postfix) > 0:
+        output = f"{output}-{args.postfix}"
+    args.output = output
+
+    log.info(f"Output directory: {output}")
+    os.makedirs(output, exist_ok=True)
+    mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(vars(args),), join=True)
     return None
 
 
@@ -175,7 +172,7 @@ def inference_worker(rank, args_dict):
     model.eval()
 
     if args_dict["resume"]:
-        saved = glob.glob(f"{args_dict['out_dir']}/inference_{rank}_*.pkl")
+        saved = glob.glob(f"{args_dict['output']}/inference_{rank}_*.pkl")
         if len(saved) > 0:
             saved = [int(x.split("/")[-1].split("_")[-1].split(".")[0]) for x in saved]
             saved = max(saved)
@@ -268,7 +265,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     ids = np.concatenate(list(id_buffer), axis=0)
                     id_buffer.clear()
                     pred_buffer.clear()
-                    out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.npz"
+                    out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
                     np.savez_compressed(out_path, label_id=ids, pred=preds)
                     flush_idx = 0
                 else:
@@ -292,7 +289,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             ids = np.concatenate(list(id_buffer), axis=0)
             id_buffer.clear()
             pred_buffer.clear()
-            out_path = f"{args_dict['out_dir']}/inference_{rank}_{idx}.npz"
+            out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
             np.savez_compressed(out_path, label_id=ids, pred=preds)
 
             executor.shutdown(wait=True)

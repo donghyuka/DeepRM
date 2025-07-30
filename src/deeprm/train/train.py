@@ -12,18 +12,23 @@ import os
 import time
 
 import numpy as np
+import tqdm
+
+from deeprm.utils import check_deps
+from deeprm.utils.logging import get_logger
+
+log = get_logger(__name__)
+check_deps.check_torch_available()
+check_deps.check_torchmetrics_available()
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torchmetrics.classification as cm
-import tqdm
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from deeprm.train.train_dataloader import NanoporeDataLoader, load_dataset
-from deeprm.utils.logging import get_logger
-
-log = get_logger(__name__)
 
 
 def add_arguments(parser: argparse.ArgumentParser):

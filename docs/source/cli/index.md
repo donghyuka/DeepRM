@@ -1,4 +1,4 @@
-# API Reference
+# CLI Reference
 
 ```{toctree}
 :maxdepth: 1
@@ -7,4 +7,5 @@
 inference
 train
 qc
+check
 ```

@@ -30,19 +30,19 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
 
-    parser.add_argument("--pos", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
-    parser.add_argument("--neg", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
-    parser.add_argument("--output", dest="out_path", type=str, required=True, help="Output directory")
+    parser.add_argument("--pos", "-p", dest="pos_path", type=str, default=None, nargs="+", help="Positive token files")
+    parser.add_argument("--neg", "-n", dest="neg_path", type=str, default=None, nargs="+", help="Negative token files")
+    parser.add_argument("--output", "-o", dest="out_path", type=str, required=True, help="Output directory")
     parser.add_argument(
         "--thread",
+        "-t",
         dest="cpu",
         type=int,
         default=int(os.cpu_count() * 0.9),
         help="Number of threads to use",
     )
-    parser.add_argument("--chunk", dest="chunk", type=int, default=4000, help="Chunk size")
-    parser.add_argument("--seed", dest="seed", type=int, default=None, help="Random seed")
-    parser.add_argument("--score", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
+    parser.add_argument("--chunk", "-c", dest="chunk", type=int, default=4000, help="Chunk size")
+    parser.add_argument("--score", "-s", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
     return None
 
 
@@ -78,9 +78,6 @@ def main(args: argparse.Namespace):
             if not os.path.exists(neg_path):
                 log.error(f"Negative token file {neg_path} does not exist")
                 raise FileNotFoundError(f"Negative token file {neg_path} does not exist")
-
-    if args.seed is None:
-        args.seed = np.random.randint(0, 1000000)
 
     os.makedirs(args.out_path, exist_ok=True)
 

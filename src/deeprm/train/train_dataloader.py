@@ -15,12 +15,15 @@ import glob
 import math
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, IterableDataset
 
+from deeprm.utils import check_deps
 from deeprm.utils.logging import get_logger
 
 log = get_logger(__name__)
+check_deps.check_torch_available()
+
+import torch
+from torch.utils.data import DataLoader, IterableDataset
 
 
 class BinaryClassDatasetIterator:

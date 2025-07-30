@@ -40,7 +40,8 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     num_cpu = os.cpu_count()
-    parser.add_argument("--input", dest="input BAM file", type=str, required=True)
+    parser.add_argument("--bam", dest="input", type=str, required=True, help="Input BAM file")
+    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--output", dest="output directory", type=str, required=True)
     parser.add_argument("--cpu", dest="ncpu", type=int, default=int(num_cpu * 0.9))
 
@@ -70,8 +71,14 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--max", dest="max_read_length", type=int, default=1000)
     parser.add_argument("--min", dest="min_read_length", type=int, default=0)
     parser.add_argument("--sample", dest="sample", type=int, default=None)
-    parser.add_argument("--keep", dest="keep_intermediate", type=bool, default=False)
-    parser.add_argument("--cfg", dest="config", type=str, default=None)
+    parser.add_argument(
+        "--cfg",
+        dest="config",
+        type=str,
+        default=os.path.join(os.path.dirname(__file__), "config", "dag_config.json"),
+        help="Path to the configuration file in JSON format. \
+                        If provided, it will override the command-line arguments.",
+    )
     parser.add_argument(
         "--resume",
         dest="resume",
@@ -81,17 +88,10 @@ def add_arguments(parser: argparse.ArgumentParser):
     )
 
     ## Signal preprocessing parameters
-    parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
-    parser.add_argument(
-        "--keep_intermediate",
-        "-ki",
-        action="store_true",
-        help="Keep intermediate files",
-        default=True,
-    )
+    parser.add_argument("--keep", action="store_true", help="Keep intermediate files", default=True)
     parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
     return None
 

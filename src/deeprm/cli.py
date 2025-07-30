@@ -40,10 +40,14 @@ _HELP_REGISTRY: Dict[str, dict] = {
             ("block", "Inspect block-level signals"),
         ],
     },
+    "check": {
+        "desc": "Verify installation",
+        "module": "deeprm.utils.check_installation",
+    },
 }
 
 
-def _resolved_version() -> str:
+def resolved_version() -> str:
     try:
         return version("deeprm")
     except PackageNotFoundError:
@@ -70,8 +74,9 @@ def _format_groups_block() -> str:
     lines.append("Groups & subcommands:\n")
     for g, info in _HELP_REGISTRY.items():
         lines.append(f"  {g:<10} {info['desc']}")
-        for name, desc in info["subcommands"]:
-            lines.append(f"    {name:<10} {desc}")
+        if "subcommands" in info:
+            for name, desc in info["subcommands"]:
+                lines.append(f"    {name:<10} {desc}")
         lines.append("")  # blank line between groups
     return "\n".join(lines).rstrip() + "\n"
 
@@ -100,7 +105,7 @@ def _build_top_parser() -> argparse.ArgumentParser:
     p.register("action", "parsers", argparse._SubParsersAction)  # for typing clarity
 
     # Top-level flags
-    p.add_argument("--version", "-v", action="version", version=f"DeepRM {_resolved_version()}")
+    p.add_argument("--version", "-v", action="version", version=f"DeepRM {resolved_version()}")
     p.add_argument(
         "-h",
         "--help",

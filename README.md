@@ -10,20 +10,18 @@
 ![deeprm.png](docs/images/deeprm.png)
 
 ## Table of Contents
-* [✨ Introduction](#introduction)
-* [🎯 Key Features](#key-features)
-* [📦 Installation](#installation)
-  * [Prerequisites](#prerequisites)
-  * [Installation options](#installation-options)
-* [🚀 Quickstart](#quickstart)
-* [💻 Usage](#usage)
-  * [Inference](#inference)
-  * [Training](#training)
-* [📐 Architecture](#architecture)
-* [📝 Citation](#citation)
-* [📝 License](#license)
-* [🏛️ Contributors](#contributors)
-* [🏛️ Acknowledgements](#acknowledgements)
+* [✨ Introduction](#-introduction)
+* [🎯 Key Features](#-key-features)
+* [📦 Installation](#-installation)
+* [🚀 Quickstart](#-quickstart)
+* [💻 Usage](#-usage)
+  * [Inference](#inference-usage)
+  * [Training](#training-usage)
+* [📐 Architecture](#-architecture)
+* [📝 Citation](#-citation)
+* [📝 License](#-license)
+* [🏛️ Contributors](#-contributors)
+* [🏛️ Acknowledgements](#-acknowledgements)
 
 
 ## ✨ Introduction
@@ -41,6 +39,14 @@ This repository contains the source code for training and running DeepRM.
 ### Prerequisites
 * Linux
 * Python 3.9+
+* Pytorch 2.0+ (with CUDA support for GPU inference)
+  * https://pytorch.org/get-started/locally/
+* Torchmetrics 0.9.0+ (for training)
+  * ```bash
+    python -m pip install torchmetrics
+    ```
+
+#### Optional
 * Dorado 0.7.3+ (optional, for basecalling)
   * https://github.com/nanoporetech/dorado
 * SAMtools 1.16.1+ (optional, for BAM file processing)
@@ -70,19 +76,43 @@ python -m pip install -U pip
 python -m pip install -e .
 ```
 
+### Verify Installation
+
+```bash
+deeprm --version
+deeprm check
+```
+ * If everything is installed correctly, you should see the version of DeepRM and a message indicating that the installation is successful.
+ * If you encounter CUDA or torch-related errors, make sure you have installed the correct version of PyTorch with CUDA support.
 
 ## 🚀 Quickstart
+* For demonstration purposes, DeepRM will automatically use examples POD5 and BAM files provided in the repository.
+* You can also use your own POD5 and BAM files.
+
+### Inference
 ```bash
 # Prepare data
-deeprm inference prep -i <raw_dir> -o <prep_dir>
+deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
 # Run inference
-deeprm inference run -m <weights.pt> -d <prep_dir> -o <pred_dir>
+deeprm inference run -d <prep_dir> -o <pred_dir>
 # Generate site-level results
 deeprm inference pileup -i <pred_dir> -o <pileup_dir>
 ```
+### Training
+```bash
+# Prepare unmodified data
+deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
+ # Prepare modified data
+deeprm train prep -p training_m6a_example.pod5 -b training_m6a_example.bam -o <prep_dir>/m6a
+# Compile training data
+deeprm train compile -n <prep_dir>/a -p <prep_dir>/m6a -o <prep_dir>/compiled
+# Run training
+deeprm train run -d <prep_dir>/compiled -o <output_dir> --gpu
+```
+
 
 ## 💻 Usage
-### Inference
+### Inference usage
 ![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
 
 #### Prepare Data
@@ -117,7 +147,7 @@ deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --mpileup
 ```
 * This will create a directory with site-level result files.
 
-### Training
+### Training usage
 ![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
 #### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.

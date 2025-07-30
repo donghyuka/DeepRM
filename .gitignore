@@ -6,3 +6,4 @@ docs/_build
 patch
 ## venv
 venv/
+/src/deeprm.egg-info/

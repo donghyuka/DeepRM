@@ -1,29 +1,25 @@
-# Getting Started
+## 🚀 Quickstart
+* For demonstration purposes, DeepRM will automatically use examples POD5 and BAM files provided in the repository.
+* You can also use your own POD5 and BAM files.
 
-Welcome to **DeepRM**! This short guide shows the fastest path from zero to results.
-
-## 1. Installation
-
-Follow the instructions in the project **README** or on the documentation's *Installation* page.
-
-## 2. Run the quick‑start script
-
-We provide a tiny example pipeline (requires GPU‑enabled PyTorch and some sample data):
-
+### Inference
 ```bash
-RAW_DIR=/data/raw_reads  \
-MODEL=/models/deeprm_weights.pt \
-examples/quickstart.sh
+# Prepare data
+deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
+# Run inference
+deeprm inference run -d <prep_dir> -o <pred_dir>
+# Generate site-level results
+deeprm inference pileup -i <pred_dir> -o <pileup_dir>
 ```
 
-The script will:
-
-1. Preprocess raw reads (`deeprm inference prep`).
-2. Run model inference on GPU (`deeprm inference run`).
-3. Aggregate predictions into site‑level scores (`deeprm inference pileup`).
-
-Outputs land in `./work/pileup/` by default.
-
-## 3. Next Steps
-
-- **CLI reference** → Use the sidebar or run `deeprm <group> --help`.
+### Training
+```bash
+# Prepare unmodified data
+deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
+ # Prepare modified data
+deeprm train prep -p training_m6a_example.pod5 -b training_m6a_example.bam -o <prep_dir>/m6a
+# Compile training data
+deeprm train compile -n <prep_dir>/a -p <prep_dir>/m6a -o <prep_dir>/compiled
+# Run training
+deeprm train run -d <prep_dir>/compiled -o <output_dir> --gpu
+```

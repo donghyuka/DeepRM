@@ -6,6 +6,10 @@ Transformer model, positional encoding, and regression head.
 
 import math
 
+from deeprm.utils import check_deps
+
+check_deps.check_torch_available()
+
 import torch
 from torch import Tensor, nn
 

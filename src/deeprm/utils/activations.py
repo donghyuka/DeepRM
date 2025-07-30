@@ -2,6 +2,9 @@
 Activation function utilities for DeepRM.
 """
 
+from deeprm.utils import check_deps
+
+check_deps.check_torch_available()
 import torch.nn as nn
 
 

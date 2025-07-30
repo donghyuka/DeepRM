@@ -11,6 +11,11 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+
+from deeprm.utils import check_deps
+
+check_deps.check_torch_available()
+
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 

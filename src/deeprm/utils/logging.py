@@ -44,7 +44,7 @@ class ColorFormatter(logging.Formatter):
         """
         # time prefix
         asctime = self.formatTime(record, self.datefmt)
-        prefix = f"[{asctime}]"
+        prefix = f"[{asctime}] {record.levelname}"
 
         # main message (preserve logging’s lazy %-formatting)
         message = record.getMessage()
