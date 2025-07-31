@@ -49,8 +49,10 @@ class NanoporeDatasetIterator:
     def _read_df(self, path):
         """
         Reads a single NPZ file and returns the data as a dictionary.
+
         Args:
             path (str): Path to the NPZ file.
+
         Returns:
             dict: Dictionary containing the data from the NPZ file.
         """
@@ -206,7 +208,7 @@ class NanoporeDataLoader(DataLoader):
         num_workers (int): Number of worker processes.
         pin_memory (bool): Whether to pin memory.
         drop_last (bool): Whether to drop the last incomplete batch.
-        collate_fn (callable): Function to collate data into batches.
+        collate_fn (typing.Callable): Function to collate data into batches.
         prefetch_factor (int): Number of batches to prefetch.
     """
 
@@ -302,8 +304,10 @@ def load_dataset(
 def collate_fn(batch):
     """
     Collate function to process a batch of data from the Nanopore dataset.
+
     Args:
         batch (list): List of dictionaries containing data from the dataset.
+
     Returns:
         dict: Dictionary containing processed data ready for model input.
     """

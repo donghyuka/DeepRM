@@ -437,7 +437,7 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
     Writes the signal dataframe to a file.
 
     Args:
-        signal_df (pd.DataFrame): Dataframe containing the signal data.
+        signal_df (pandas.DataFrame): Dataframe containing the signal data.
         signal_df_path (str): Path to save the signal data.
         pid (int): Process ID.
         pod5_idx (int): POD5 file index.
@@ -469,14 +469,14 @@ def write_df(signal_df, signal_df_path, pid, pod5_idx, save_idx, index_dict, max
 
 def sequence_to_kmer_token(seq, kmer):
     """
-    Converts a DNA sequence to k-mer tokens.
+    Converts a DNA/RNA sequence to k-mer tokens.
 
     Args:
-        seq (str): DNA sequence.
+        seq (str): DNA/RNA sequence.
         kmer (int): Length of the k-mer.
 
     Returns:
-        np.ndarray: Array of k-mer tokens.
+        numpy.ndarray: Array of k-mer tokens.
     """
     ## 1. change string to array of int - 0, 1, 2, 3
     seq = seq.upper()
@@ -505,7 +505,7 @@ def create_segment_len_arr(segment_arr, sampling):
         sampling (int): Sampling rate.
 
     Returns:
-        np.ndarray: Array of segment lengths.
+        numpy.ndarray: Array of segment lengths.
     """
     segment_len_arr = np.array([len(x) for x in segment_arr], dtype=int) // sampling
     return segment_len_arr
@@ -516,11 +516,11 @@ def expand_token_to_segment(token_arr, segment_len_arr):
     Expands tokens to segments.
 
     Args:
-        token_arr (np.ndarray): Array of tokens.
-        segment_len_arr (np.ndarray): Array of segment lengths.
+        token_arr (numpy.ndarray): Array of tokens.
+        segment_len_arr (numpy.ndarray): Array of segment lengths.
 
     Returns:
-        np.ndarray: Expanded array of tokens.
+        numpy.ndarray: Expanded array of tokens.
     """
     token = np.repeat(token_arr, segment_len_arr)
     return token
@@ -531,10 +531,10 @@ def create_move_token(segment_len_arr):
     Creates move tokens.
 
     Args:
-        segment_len_arr (np.ndarray): Array of segment lengths.
+        segment_len_arr (numpy.ndarray): Array of segment lengths.
 
     Returns:
-        np.ndarray: Array of move tokens.
+        numpy.ndarray: Array of move tokens.
     """
     token = np.arange(1, len(segment_len_arr) + 1, dtype=np.uint8)
     token = np.repeat(token, segment_len_arr)
@@ -546,11 +546,11 @@ def create_target_mask(segment_len_arr, lr_pad):
     Creates a target mask.
 
     Args:
-        segment_len_arr (np.ndarray): Array of segment lengths.
+        segment_len_arr (numpy.ndarray): Array of segment lengths.
         lr_pad (int): Left-right padding.
 
     Returns:
-        np.ndarray: Target mask.
+        numpy.ndarray: Target mask.
     """
     binary_mask = np.zeros(2 * lr_pad + 1, dtype=np.uint8)
     binary_mask[lr_pad] = 1
@@ -563,15 +563,15 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
     Segments and pads the signal.
 
     Args:
-        signal_segmented (np.ndarray): Segmented signal.
-        segment_len_arr (np.ndarray): Array of segment lengths.
+        signal_segmented (numpy.ndarray): Segmented signal.
+        segment_len_arr (numpy.ndarray): Array of segment lengths.
         kmer (int): Length of the k-mer.
         sampling (int): Sampling rate.
         sig_window (int): Signal window size.
         pad_to (int): Padding size.
 
     Returns:
-        np.ndarray: Padded signal.
+        numpy.ndarray: Padded signal.
     """
     try:
         kmer_pad = (kmer - 1) // 2
@@ -603,14 +603,14 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult):
     Converts move data to dwell time.
 
     Args:
-        move (np.ndarray): Move data.
+        move (numpy.ndarray): Move data.
         quantile_a (float): Quantile A for normalization.
         quantile_b (float): Quantile B for normalization.
         shift_mult (float): Shift multiplier for normalization.
         scale_mult (float): Scale multiplier for normalization.
 
     Returns:
-        np.ndarray: Dwell time data.
+        numpy.ndarray: Dwell time data.
     """
     sampling = move[0]
     move = np.flip(move[1:]) * np.arange(1, len(move))
@@ -632,8 +632,8 @@ def trim_scale_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile_b, 
     Trims and scales the signal.
 
     Args:
-        signal (np.ndarray): Signal data.
-        move (np.ndarray): Move data.
+        signal (numpy.ndarray): Signal data.
+        move (numpy.ndarray): Move data.
         sp (int): Start position.
         ts (int): Timestamp.
         ns (int): Number of samples.
@@ -643,7 +643,7 @@ def trim_scale_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile_b, 
         scale_mult (float): Scale multiplier for normalization.
 
     Returns:
-        np.ndarray: Trimmed and scaled signal.
+        numpy.ndarray: Trimmed and scaled signal.
     """
     signal = signal[sp:]
     signal_len = len(signal)
@@ -694,14 +694,14 @@ def segment_normalize_signal(
         postfix (str): Postfix for the output files.
         signal_path_arr (list): List of signal paths.
         norm_factor (dict): Normalization factors.
-        kmer (int, optional): Length of the k-mer. Defaults to 5.
-        cb_len (int, optional): Length of the codebook. Defaults to 21.
-        sampling (int, optional): Sampling rate. Defaults to 6.
-        sig_window (int, optional): Signal window size. Defaults to 5.
-        max_penalty (int, optional): Maximum penalty. Defaults to 10.
-        chunk_size (int, optional): Chunk size for processing. Defaults to 1000.
-        max_token_len (int, optional): Maximum token length. Defaults to 200.
-        dwell_shift (int, optional): Dwell shift. Defaults to 10.
+        kmer (int): Length of the k-mer. Defaults to 5. (optional)
+        cb_len (int): Length of the codebook. Defaults to 21. (optional)
+        sampling (int): Sampling rate. Defaults to 6. (optional)
+        sig_window (int): Signal window size. Defaults to 5. (optional)
+        max_penalty (int): Maximum penalty. Defaults to 10. (optional)
+        chunk_size (int): Chunk size for processing. Defaults to 1000. (optional)
+        max_token_len (int): Maximum token length. Defaults to 200. (optional)
+        dwell_shift (int): Dwell shift. Defaults to 10. (optional)
 
     Returns:
         None
@@ -845,7 +845,7 @@ def save_npz(save_path, df):
 
     Args:
         save_path (str): Path to save the NPZ file.
-        df (pd.DataFrame): Dataframe containing the data to be saved.
+        df (pandas.DataFrame): Dataframe containing the data to be saved.
 
     Returns:
         None
@@ -877,10 +877,10 @@ def assign_block_id(block_df):
     Assigns block IDs to the dataframe.
 
     Args:
-        block_df (pd.DataFrame): Dataframe containing block data.
+        block_df (pandas.DataFrame): Dataframe containing block data.
 
     Returns:
-        pd.DataFrame: Dataframe with assigned block IDs.
+        pandas.DataFrame: Dataframe with assigned block IDs.
     """
     index = 0
     read_id_prev = ""
@@ -904,7 +904,7 @@ def split_block_df(signal_path_dict, signal_path_arr, intermediate_path, block_d
         signal_path_dict (dict): Dictionary mapping read IDs to signal paths.
         signal_path_arr (list): List of signal paths.
         intermediate_path (str): Path to save intermediate files.
-        block_df (pd.DataFrame): Dataframe containing block data.
+        block_df (pandas.DataFrame): Dataframe containing block data.
 
     Returns:
         None

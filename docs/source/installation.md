@@ -1,7 +1,7 @@
-## 📦 Installation
+# 📦 Installation
 
-### Prerequisites
-* Linux
+## Prerequisites
+* Linux x86_64
 * Python 3.9+
 * Pytorch 2.0+ (with CUDA support for GPU inference)
     * https://pytorch.org/get-started/locally/
@@ -10,7 +10,7 @@
       python -m pip install torchmetrics
       ```
 
-#### Optional
+### Optional
 * Dorado 0.7.3+ (optional, for basecalling)
     * https://github.com/nanoporetech/dorado
 * SAMtools 1.16.1+ (optional, for BAM file processing)
@@ -18,7 +18,7 @@
 
 * Python package requirements are listed in `requirements.txt` and will be installed automatically when you install DeepRM.
 
-### Installation options
+## Installation options
 1. Install via PIP (recommended)
 
 ```bash
@@ -40,7 +40,7 @@ python -m pip install -U pip
 python -m pip install -e .
 ```
 
-### Verify Installation
+## Verify Installation
 
 ```bash
 deeprm --version

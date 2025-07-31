@@ -10,7 +10,7 @@ def mean_phred(phred):
     Calculates the mean Phred quality score.
 
     Args:
-        phred (np.ndarray or list): Array or list of Phred quality scores.
+        phred (numpy.ndarray): Array or list of Phred quality scores.
 
     Returns:
         float: Mean Phred quality score.

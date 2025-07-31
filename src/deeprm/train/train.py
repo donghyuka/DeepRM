@@ -25,7 +25,7 @@ import torch.multiprocessing as mp  # noqa: E402
 from torch.nn.parallel import DistributedDataParallel as DDP  # noqa: E402
 from torch.utils.tensorboard import SummaryWriter  # noqa: E402
 
-from deeprm.train.train_dataloader import NanoporeDataLoader, load_dataset  # noqa: E402
+from deeprm.train.train_dataloader import load_dataset  # noqa: E402
 
 log = get_logger(__name__)
 
@@ -164,10 +164,10 @@ class Trainer:
         rank: int,
         gpu_id: int,
         model: torch.nn.Module,
-        train_loader: NanoporeDataLoader,
-        val_loader: NanoporeDataLoader,
+        train_loader,
+        val_loader,
         optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler,
+        scheduler,
         loss_func: torch.nn.Module,
         grad_clip: float,
         metric_func_dict: dict,
@@ -197,10 +197,12 @@ class Trainer:
             rank (int): Rank of the current process.
             gpu_id (int): GPU ID to use.
             model (torch.nn.Module): Model to train.
-            train_loader (NanoporeDataLoader): DataLoader for training data.
-            val_loader (NanoporeDataLoader): DataLoader for validation data.
+            train_loader (torch.utils.data.DataLoader): DataLoader for training data.
+                (deeprm.train.train_dataloader.NanoporeDataLoader)
+            val_loader (torch.utils.data.DataLoader): DataLoader for validation data.
+                (deeprm.train.train_dataloader.NanoporeDataLoader)
             optimizer (torch.optim.Optimizer): Optimizer for training.
-            scheduler (torch.optim.lr_scheduler): Learning rate scheduler.
+            scheduler: Learning rate scheduler.
             loss_func (torch.nn.Module): Loss function.
             grad_clip (float): Gradient clipping value.
             metric_func_dict (dict): Dictionary of metric functions.
@@ -215,12 +217,12 @@ class Trainer:
             eval_interval (int): Interval for evaluation.
             log_interval (int): Interval for logging.
             save_interval (int): Interval for saving checkpoints.
-            model_config (dict, optional): Model configuration dictionary. Defaults to None.
-            soft_label (float, optional): Soft label value. Defaults to None.
-            score_feature (bool, optional): Score feature flag. Defaults to False.
-            cut_overlap (bool, optional): Cut overlap flag. Defaults to False.
-            signal_stride (int, optional): Signal stride. Defaults to 6.
-            no_bq (bool, optional): No base quality flag. Defaults to False.
+            model_config (dict): Model configuration dictionary. Defaults to None. (optional)
+            soft_label (float): Soft label value. Defaults to None. (optional)
+            score_feature (bool): Score feature flag. Defaults to False. (optional)
+            cut_overlap (bool): Cut overlap flag. Defaults to False. (optional)
+            signal_stride (int): Signal stride. Defaults to 6. (optional)
+            no_bq (bool): No base quality flag. Defaults to False. (optional)
             **kwargs: Additional keyword arguments.
         """
         self.rank = rank

@@ -14,7 +14,7 @@ _LEAVES = {
 }
 
 
-def _skeleton_group_parser() -> argparse.ArgumentParser:
+def parser() -> argparse.ArgumentParser:
     gp = argparse.ArgumentParser(
         prog="deeprm inference",
         description="DeepRM Inference Module",
@@ -61,7 +61,7 @@ def _build_leaf_parser(cmd: str, prog: str) -> argparse.ArgumentParser:
 
 def entry(argv: List[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    gp = _skeleton_group_parser()
+    gp = parser()
 
     # If group-only help
     if not argv or argv[0] in ("-h", "--help"):

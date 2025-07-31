@@ -1,23 +1,29 @@
-# `deeprm train` – Training commands
+# `deeprm train`
+
+Tools for preparing data and training models. Torch is optional at install time; imported only when needed.
+
+## Group help
+
+```{argparse}
+:module: deeprm.train.cli
+:func: parser
+:prog: deeprm train
+```
+
+## Examples
 
 ```bash
-deeprm train --help
+# Prepare training data
+deeprm train prep --in train_raw/ --out train_prep/
+
+# Compile dataset shards
+deeprm train compile --in train_prep/ --out ds/
+
+# Launch training (DDP optional)
+deeprm train run --config configs/train.yaml --out runs/exp1
 ```
 
-```{eval-rst}
-.. argparse::
-   :module: deeprm.train.cli
-   :func: parser
-   :prog: deeprm train
-```
+## Notes
 
-Subcommands:
-- `prep` – prepare training data
-- `run` – launch training
-- `compile` – optional ahead-of-time compilation helpers
-
-Example:
-```bash
-deeprm train prep -i <data_dir> -o <work_dir>
-deeprm train run -c <config.yaml> -o <runs/exp1>
-```
+- Install training extras (CPU): `pip install "deeprm[torch,train]"`.
+- GPU/ROCm: install PyTorch from the official index URL first, then `pip install "deeprm[train]"`.

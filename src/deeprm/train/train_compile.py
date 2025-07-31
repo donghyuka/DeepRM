@@ -228,11 +228,11 @@ def pad_signal(signal, max_len):
     Pads the signal to the maximum length with zeros.
 
     Args:
-        signal (np.ndarray): Input signal array.
+        signal (numpy.ndarray): Input signal array.
         max_len (int): Maximum length to pad to.
 
     Returns:
-        np.ndarray: Padded signal array.
+        numpy.ndarray: Padded signal array.
     """
     return np.concatenate([signal, np.zeros(max_len - len(signal), dtype=np.float32)])
 

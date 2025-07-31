@@ -1,22 +1,21 @@
-# `deeprm qc` – QC utilities
+# `deeprm qc`
 
-```bash
-deeprm qc --help
+Quality-control utilities for predictions and site-level outputs.
+
+## Group help
+
+```{argparse}
+:module: deeprm.qc.cli
+:func: parser
+:prog: deeprm qc
 ```
 
-```{eval-rst}
-.. argparse::
-   :module: deeprm.qc.cli
-   :func: parser
-   :prog: deeprm qc
-```
+## Examples
 
-Subcommands:
-- `run` – basic QC
-- `alignment` – inspect alignments and metrics
-- `block` – inspect block-level signals
-
-Example:
 ```bash
-deeprm qc alignment -i <reads.bam> -o qc/alignment
+# Summarize per-sample metrics
+deeprm qc summary --in pileup/ --out qc/summary.csv
+
+# Visualize distribution of DOM/PM6A (requires matplotlib)
+deeprm qc plot --in pileup/ --out qc/plots/
 ```

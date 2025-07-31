@@ -128,7 +128,7 @@ def get_kmer_dict(read, k, bq_cutoff, phred):
         phred (list): List of Phred quality scores.
 
     Returns:
-        defaultdict: Dictionary with k-mers as keys and positions as values.
+        collections.defaultdict: Dictionary with k-mers as keys and positions as values.
     """
     kmer_dict = defaultdict(list)
     for i in range(len(read) - k + 1):
@@ -150,7 +150,7 @@ def get_ed_kmers(kmer, spacer_mismatch_tolerance):
         spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
 
     Returns:
-        defaultdict: Dictionary with edit distances as keys and lists of k-mers as values.
+        collections.defaultdict: Dictionary with edit distances as keys and lists of k-mers as values.
     """
     nucs = "ACGU"
     possible_nucs = ["".join(x) for x in it.product(nucs, repeat=len(kmer))]
@@ -271,7 +271,7 @@ def find_block_candidates(
         indel_dict (dict): Dictionary of integer partitions for indel tolerance.
         min_ideal_displacement_dict (dict): Dictionary of minimum ideal displacements.
         anchor_list (list): List of anchors.
-        score_converting_func (function): Function to convert penalty to score.
+        score_converting_func (typing.Callable): Function to convert penalty to score.
         cb_size_tolerance (int): Context block size tolerance.
         spacer_mismatch_tolerance (int): Tolerance for mismatches in spacers.
         spacer_size_tolerance (int): Tolerance for spacer size.
@@ -445,7 +445,7 @@ def extract_blocks_from_read_list_mp_worker(
         flush_path (str): Path to save intermediate flush files.
         pid (int): Process ID.
         flush_interval (int): Interval for flushing data to disk.
-        score_converting_func (function): Function to convert penalty to score.
+        score_converting_func (typing.Callable): Function to convert penalty to score.
         cb_size (int): Size of the context block.
         min_ideal_displacement_dict (dict): Dictionary of minimum ideal displacements.
         resume (str): Path to resume from previous run.

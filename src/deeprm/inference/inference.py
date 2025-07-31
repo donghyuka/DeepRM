@@ -29,10 +29,11 @@ from torch.amp import autocast
 
 
 def add_arguments(parser: argparse.ArgumentParser):
-    """
-    Adds command-line arguments.
+    """Adds command-line arguments.
+
     Args:
         parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+
     Returns:
         None
     """
@@ -54,17 +55,18 @@ def add_arguments(parser: argparse.ArgumentParser):
 
 
 def main(args: argparse.Namespace):
-    """
-    Main function to run the evaluation pipeline.
+    """Main function to run the evaluation pipeline.
 
-    Steps:
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+
+    Notes:
         1. Parse command-line arguments.
         2. Create necessary directories.
         3. Run inference.
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments.
-    Returns:
-        None
     """
     if args.model is None:
         ## Get directory of the current file
@@ -88,8 +90,7 @@ def main(args: argparse.Namespace):
 
 
 def run_inference(args):
-    """
-    Runs the inference process.
+    """Runs the inference process.
 
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
@@ -118,8 +119,7 @@ def run_inference(args):
 
 
 def inference_worker(rank, args_dict):
-    """
-    Worker function for running inference on a single GPU.
+    """Worker function for running inference on a single GPU.
 
     Args:
         rank (int): Rank of the current process.
@@ -202,12 +202,13 @@ def inference_worker(rank, args_dict):
 
 
 def to_gpu(data, device, stream):
-    """
-    Transfers data to the specified GPU device using a non-blocking stream.
+    """Transfers data to the specified GPU device using a non-blocking stream.
+
     Args:
         data (dict): Dictionary containing the data to be transferred.
         device (torch.device): The target GPU device.
         stream (torch.cuda.Stream): The CUDA stream for non-blocking transfer.
+
     Returns:
         tuple: A tuple containing the transferred data tensors (src_kmer, src_signal, src_seg_len, src_dwell_bq).
     """
@@ -220,14 +221,15 @@ def to_gpu(data, device, stream):
 
 
 def inference_loop(args_dict, rank, gpu_id, model, data_loader):
-    """
-    Runs the inference loop for the given model and data loader.
+    """Runs the inference loop for the given model and data loader.
+
     Args:
         args_dict (dict): Dictionary of command-line arguments.
         rank (int): Rank of the current process.
         gpu_id (int): ID of the GPU to use.
         model (torch.nn.Module): The model to run inference on.
         data_loader (torch.utils.data.DataLoader): DataLoader for the dataset.
+
     Returns:
         None
     """

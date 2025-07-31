@@ -32,12 +32,12 @@ This repository contains the source code for training and running DeepRM.
 * **High accuracy**: Achieves state-of-the-art accuracy in RNA modification detection and stoichiometry measurement.
 * **Single-molecule resolution**: Provides single-molecule level predictions for RNA modifications.
 * **End-to-end pipeline**: Easy-to-use pipeline from raw reads to site-level predictions.
-* **Flexible**: Supports training of custom models.
+* **Customizable**: Supports training of custom models.
 
 ## 📦 Installation
 
 ### Prerequisites
-* Linux
+* Linux x86_64
 * Python 3.9+
 * Pytorch 2.0+
   * https://pytorch.org/get-started/locally/

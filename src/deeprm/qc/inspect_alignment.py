@@ -33,8 +33,10 @@ plt.rcParams.update(
 def add_arguments(parser: argparse.ArgumentParser):
     """
     Adds command-line arguments.
+
     Args:
         parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+
     Returns:
         None
     """
@@ -57,8 +59,10 @@ def main(args: argparse.Namespace):
     This function parses command line arguments, checks for existing output,
     and runs the CIGAR extraction and error rate calculation.
     It also plots the error rates using KDE and boxplot.
+
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
+
     Returns:
         None
     """
@@ -93,10 +97,12 @@ def main(args: argparse.Namespace):
 def extract_cigar_worker(pid, args, error_dict):
     """
     Worker function to extract CIGAR strings and calculate error rates for a given process ID.
+
     Args:
         pid (int): Process ID for multiprocessing.
         args (argparse.Namespace): Parsed command line arguments.
-        error_dict (mp.Manager().dict): Shared dictionary to store error rates.
+        error_dict (dict): Shared dictionary to store error rates.
+
     Returns:
         None
     """
@@ -128,7 +134,7 @@ def extract_cigar_master(args):
     Args:
         args (argparse.Namespace): Parsed command line arguments.
     Returns:
-        pd.DataFrame: DataFrame containing error rates for each read.
+        pandas.DataFrame: DataFrame containing error rates for each read.
     """
     manager = mp.Manager()
     error_dict = manager.dict()
@@ -149,10 +155,12 @@ def md_to_mismatch_arr(md):
     """
     Convert MD tag to mismatch array.
     1 = mismatch, 0 = match. Deletions are ignored (filled as matches).
+
     Args:
         md (str): MD tag string from the BAM file.
+
     Returns:
-        np.ndarray: Array of mismatches (1s) and matches (0s).
+        numpy.ndarray: Array of mismatches (1s) and matches (0s).
     """
     pattern = re.compile(r"(\d+)|(\^[A-Z]+)|([A-Z])")
     result = []
@@ -170,12 +178,14 @@ def md_to_mismatch_arr(md):
 def get_error_rate_func(cigar, md, use_md=True):
     """
     Calculate error rates from CIGAR string and MD tag.
+
     Args:
         cigar (str): CIGAR string from the BAM file.
         md (str): MD tag string from the BAM file.
         use_md (bool): Whether to use MD tag for mismatch calculation. Default is True.
+
     Returns:
-        np.ndarray: Array containing mismatch rate, insertion rate, and deletion rate.
+        numpy.ndarray: Array containing mismatch rate, insertion rate, and deletion rate.
     """
     cigar_list = re.findall(r"(\d+)([A-Z,=])", cigar)
     mismatch = 0
@@ -210,9 +220,11 @@ def get_error_rate_func(cigar, md, use_md=True):
 def plot_kde(df_error, args):
     """
     Plot the distribution of read alignment accuracy using KDE.
+
     Args:
-        df_error (pd.DataFrame): DataFrame containing error rates for each read.
+        df_error (pandas.DataFrame): DataFrame containing error rates for each read.
         args (argparse.Namespace): Parsed command line arguments.
+
     Returns:
         None
     """
@@ -244,9 +256,11 @@ def plot_kde(df_error, args):
 def plot_boxplot(df_error, args):
     """
     Plot a boxplot of the error rates for each read.
+
     Args:
-        df_error (pd.DataFrame): DataFrame containing error rates for each read.
+        df_error (pandas.DataFrame): DataFrame containing error rates for each read.
         args (argparse.Namespace): Parsed command line arguments.
+
     Returns:
         None
     """

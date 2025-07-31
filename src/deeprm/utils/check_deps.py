@@ -1,8 +1,10 @@
 def check_torch_available():
     """
     Checks if PyTorch is available.
+
     Raises:
         SystemExit: If PyTorch is not installed, provides instructions for installation.
+
     Returns:
         None
     """

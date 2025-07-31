@@ -1,10 +1,8 @@
-
-
-## 💻 Usage
-### Inference usage
+# 💻 Usage
+## Inference usage
 ![deeprm_inference_pipeline.png](../images/deeprm_inference_pipeline.png)
 
-#### Prepare Data
+### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
 dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves {args.model} {args.pod5} > <raw_bam_path>"
@@ -23,7 +21,7 @@ deeprm inference prep --input <input_POD5_dir> --output <output_file> --dorado <
     * Inference dataset: /block
     * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
     * Quality check results: /qc/*.png
-#### Run Inference
+### Run Inference
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
 ```bash
@@ -36,9 +34,9 @@ deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --mpileup
 ```
 * This will create a directory with site-level result files.
 
-### Training usage
+## Training usage
 ![deeprm_train_pipeline.png](../images/deeprm_train_pipeline.png)
-#### Prepare Data
+### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
 dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > <bam_path>
@@ -56,7 +54,7 @@ deeprm train compile --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
     * Training dataset: /block
-#### Run Training
+### Run Training
 * To train the model, run the following command:
 ```bash
 deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>

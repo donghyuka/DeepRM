@@ -13,7 +13,7 @@ _LEAVES = {
 }
 
 
-def _skeleton_group_parser() -> argparse.ArgumentParser:
+def parser() -> argparse.ArgumentParser:
     gp = argparse.ArgumentParser(prog="deeprm train", description="DeepRM Training Module", add_help=True)
     sub = gp.add_subparsers(dest="cmd", metavar="{prep,run,compile}")
     for name, help_text in [
@@ -51,7 +51,7 @@ def _build_leaf_parser(cmd: str, prog: str) -> argparse.ArgumentParser:
 
 def entry(argv: List[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    gp = _skeleton_group_parser()
+    gp = parser()
     if not argv or argv[0] in ("-h", "--help"):
         gp.print_help()
         return 0

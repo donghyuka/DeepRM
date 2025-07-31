@@ -24,8 +24,10 @@ class ColorFormatter(logging.Formatter):
     Custom logging formatter that adds colored output and time prefix.
     It formats log messages with a timestamp and applies colors based on the log level.
     It also indents multiline messages to align with the timestamp prefix.
+
     Args:
         datefmt (str): Format string for the timestamp. Defaults to "%Y-%m-%d %H:%M:%S".
+
     Attributes:
         datefmt (str): Format string for the timestamp.
     """
@@ -37,8 +39,10 @@ class ColorFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """
         Format the log record with a timestamp and colored output.
+
         Args:
             record (logging.LogRecord): The log record to format.
+
         Returns:
             str: The formatted log message with timestamp and color.
         """
@@ -63,9 +67,11 @@ class ColorFormatter(logging.Formatter):
 def get_logger(name: str = "deeprm", level: int = logging.INFO) -> logging.Logger:
     """
     Return a configured logger with colored console output.
+
     Args:
         name (str): Name of the logger. Defaults to "deeprm".
         level (int): Logging level. Defaults to logging.INFO.
+
     Returns:
         logging.Logger: Configured logger instance.
     """

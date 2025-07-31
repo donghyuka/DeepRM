@@ -158,7 +158,7 @@ def mean_phred(phred):
     """
     Calculate the mean Phred quality score from an array of scores.
     Args:
-        phred (array-like): Array of Phred scores.
+        phred (numpy.ndarray): Array of Phred scores.
     Returns:
         float: Mean Phred quality score.
     """
@@ -170,15 +170,15 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
     Convert segmented signal into a fixed-length block for given k-mer context.
 
     Args:
-        signal_segmented (list of np.ndarray): list of signal segments around each base.
-        segment_len_arr (np.ndarray): lengths of each segment in sampling units.
+        signal_segmented (list): list of signal segments around each base. (list of numpy.ndarray)
+        segment_len_arr (numpy.ndarray): lengths of each segment in sampling units.
         kmer (int): length of k-mer context.
         sampling (int): samples per signal unit.
         sig_window (int): size of local signal window for padding calculation.
         pad_to (int): desired total length of output block in signal units.
 
     Returns:
-        np.ndarray or None: concatenated, trimmed, and padded signal block, or None on failure.
+        numpy.ndarray or None: concatenated, trimmed, and padded signal block, or None on failure.
     """
     try:
         kmer_pad = (kmer - 1) // 2
@@ -205,11 +205,11 @@ def create_segment_len_arr(segment_arr, sampling):
     Compute segment-length array in sampling units for each sub-segment.
 
     Args:
-        segment_arr (list of np.ndarray): raw signal segments.
+        segment_arr (list): raw signal segments (list of numpy.ndarray).
         sampling (int): samples per signal unit.
 
     Returns:
-        np.ndarray: integer length array per segment after downsampling.
+        numpy.ndarray: integer length array per segment after downsampling.
     """
     return np.array([len(x) for x in segment_arr], dtype=int) // sampling
 
@@ -218,13 +218,8 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult, sampling
     """
     Transform raw move array into scaled dwell-time tokens.
 
-    Steps:
-    1. Convert boolean moves into positions and compute deltas.
-    2. Log-transform dwell durations.
-    3. Scale and shift based on quantiles and multipliers.
-
     Args:
-        move (array-like): boolean array indicating move events per sample.
+        move (numpy.ndarray): boolean array indicating move events per sample.
         quantile_a (float): lower quantile for scaling.
         quantile_b (float): upper quantile for scaling.
         shift_mult (float): shift multiplier.
@@ -232,7 +227,12 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult, sampling
         sampling (int): samples per signal unit.
 
     Returns:
-        np.ndarray: standardized dwell-time values.
+        numpy.ndarray: standardized dwell-time values.
+
+    Notes:
+        1. Convert boolean moves into positions and compute deltas.
+        2. Log-transform dwell durations.
+        3. Scale and shift based on quantiles and multipliers.
     """
     move = np.arange(1, len(move) + 1, dtype=np.int32)[np.flip(move)]
     move = np.concatenate([np.zeros(1, dtype=np.int32), move])
@@ -250,15 +250,9 @@ def normalise_trim_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile
     """
     Normalize and segment raw signal based on trimming and dwell indices.
 
-    Pipeline:
-    1. Trim start (sp) and segment window (ts:ns).
-    2. Flip signal for reverse processing.
-    3. Shift and scale signal by quantile multipliers.
-    4. Split by dwell move indices to segment per-base.
-
     Args:
-        signal (np.ndarray): raw signal trace.
-        move (np.ndarray): dwell-time tokens.
+        signal (numpy.ndarray): raw signal trace.
+        move (numpy.ndarray): dwell-time tokens.
         sp (int): samples to skip at start.
         ts (int): trim start index.
         ns (int): trim end index (0 means till end).
@@ -269,7 +263,13 @@ def normalise_trim_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile
         sampling (int): samples per signal unit.
 
     Returns:
-        list of np.ndarray or None: list of per-base signal segments or None on error.
+        list or None: list of per-base signal segments or None on error.
+
+    Notes:
+        1. Trim start (sp) and segment window (ts:ns).
+        2. Flip signal for reverse processing.
+        3. Shift and scale signal by quantile multipliers.
+        4. Split by dwell move indices to segment per-base.
     """
     signal = signal[sp:]
     signal_len = len(signal)
@@ -304,7 +304,7 @@ def parse_pod5(pod5_path):
         pod5_path (str): file path to the POD5 file.
 
     Returns:
-        pd.DataFrame: with columns ['signal', 'offset', 'scale'], indexed by 'read_id'.
+        pandas.DataFrame: with columns ['signal', 'offset', 'scale'], indexed by 'read_id'.
     """
     signal_list = []
     offset_list = []
@@ -417,7 +417,7 @@ def segment_normalize_signal(
     Segment and normalize signals per read, and save token chunks.
 
     Args:
-        bam_df (pd.DataFrame): alignment metadata indexed by read_id.
+        bam_df (pandas.DataFrame): alignment metadata indexed by read_id.
         pod5_paths (list): list of POD5 file paths.
         norm_factor (dict): normalization parameters.
         pid (int): process ID for naming outputs.
@@ -586,7 +586,7 @@ def save_npz(save_path, df):
 
     Args:
         save_path (str): Output .npz file path.
-        df (pd.DataFrame): DataFrame with token columns.
+        df (pandas.DataFrame): DataFrame with token columns.
 
     Returns:
         None

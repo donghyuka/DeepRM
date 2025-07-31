@@ -33,8 +33,10 @@ plt.rcParams.update(
 def add_arguments(parser: argparse.ArgumentParser):
     """
     Adds command-line arguments.
+
     Args:
         parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+
     Returns:
         None
     """
@@ -57,8 +59,10 @@ def main(args: argparse.Namespace):
     It reads a BAM file, collects statistics on read lengths,
     mean quality scores, and poly(A) lengths,
     and generates plots for these statistics.
+
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
+
     Returns:
         None
     """
@@ -132,12 +136,14 @@ def main(args: argparse.Namespace):
 def plot_read_len_oligo(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_length):
     """
     Plot read length distribution for oligo data.
+
     Args:
-        read_len_arr (np.ndarray): Array of read lengths.
-        mean_qual_arr (np.ndarray): Array of mean quality scores.
+        read_len_arr (numpy.ndarray): Array of read lengths.
+        mean_qual_arr (numpy.ndarray): Array of mean quality scores.
         bq_thres (int): Base quality threshold.
         out_path (str): Output directory path.
         bb_length (int): Length of the barcode.
+
     Returns:
         None
     """
@@ -214,11 +220,13 @@ def plot_read_len_oligo(read_len_arr, mean_qual_arr, bq_thres, out_path, bb_leng
 def plot_read_len_mrna(read_len_arr, mean_qual_arr, bq_thres, out_path):
     """
     Plot read length distribution for mRNA data.
+
     Args:
-        read_len_arr (np.ndarray): Array of read lengths.
-        mean_qual_arr (np.ndarray): Array of mean quality scores.
+        read_len_arr (numpy.ndarray): Array of read lengths.
+        mean_qual_arr (numpy.ndarray): Array of mean quality scores.
         bq_thres (int): Base quality threshold.
         out_path (str): Output directory path.
+
     Returns:
         None
     """
@@ -288,11 +296,13 @@ def plot_read_len_mrna(read_len_arr, mean_qual_arr, bq_thres, out_path):
 def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
     """
     Plot poly(A) length distribution.
+
     Args:
-        read_len_arr (np.ndarray): Array of read lengths.
-        mean_qual_arr (np.ndarray): Array of mean quality scores.
+        read_len_arr (numpy.ndarray): Array of read lengths.
+        mean_qual_arr (numpy.ndarray): Array of mean quality scores.
         bq_thres (int): Base quality threshold.
         out_path (str): Output directory path.
+
     Returns:
         None
     """
@@ -361,11 +371,13 @@ def plot_polya_len(read_len_arr, mean_qual_arr, bq_thres, out_path):
 def plot_qual(mean_qual_arr, out_path, bq_thres=7, max_bq=30):
     """
     Plot mean quality score distribution.
+
     Args:
-        mean_qual_arr (np.ndarray): Array of mean quality scores.
+        mean_qual_arr (numpy.ndarray): Array of mean quality scores.
         out_path (str): Output directory path.
         bq_thres (int): Base quality threshold.
         max_bq (int): Maximum base quality score for plotting.
+
     Returns:
         None
     """
@@ -411,10 +423,12 @@ def plot_qual(mean_qual_arr, out_path, bq_thres=7, max_bq=30):
 def read_bam_worker(args, pid, collect_dict):
     """
     Worker function to read BAM file and collect statistics.
+
     Args:
         args (argparse.Namespace): Parsed command line arguments.
         pid (int): Process ID.
-        collect_dict (multiprocessing.Manager().dict): Shared dictionary to collect results.
+        collect_dict (dict): Shared dictionary to collect results.
+
     Returns:
         None
     """

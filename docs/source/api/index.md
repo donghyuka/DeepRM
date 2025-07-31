@@ -1,8 +1,8 @@
-# API Reference
+# 🤖 API Reference
 
 ```{toctree}
-:maxdepth: 1
-:caption: Packages
+:maxdepth: 2
+:caption: Modules
 
 inference
 train

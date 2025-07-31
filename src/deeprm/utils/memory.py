@@ -16,9 +16,11 @@ from deeprm.utils.logging import get_logger
 def _check_once(limit_gb: float, logger: logging.Logger) -> bool:
     """
     Check if the resident set size (RSS) exceeds the given limit in GiB.
+
     Args:
         limit_gb (float): Memory limit in GiB.
         logger (logging.Logger): Logger to log messages.
+
     Returns:
         bool: True if RSS exceeds limit, False otherwise.
     """
@@ -32,9 +34,11 @@ def _check_once(limit_gb: float, logger: logging.Logger) -> bool:
 def start_mem_watchdog(limit_gb: float = None, interval_s: int = 10) -> threading.Thread:
     """
     Start a daemon thread that exits the *current process* if RSS exceeds limit.
+
     Args:
-        limit_gb (float, optional): Memory limit in GiB. Defaults to 95% of total RAM.
-        interval_s (int, optional): Check interval in seconds. Defaults to 10.
+        limit_gb (float): Memory limit in GiB. Defaults to 95% of total RAM. (optional)
+        interval_s (int): Check interval in seconds. Defaults to 10. (optional)
+
     Returns:
         threading.Thread: The watchdog thread.
     """

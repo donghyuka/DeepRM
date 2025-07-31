@@ -190,11 +190,11 @@ def grouped_sum(n_unique, idx, vals):
 
     Args:
         n_unique (int): Number of unique groups.
-        idx (array-like): Integer indices mapping each element in 'vals' to a group.
-        vals (np.ndarray): Values to sum per group.
+        idx (numpy.ndarray): Integer indices mapping each element in 'vals' to a group.
+        vals (numpy.ndarray): Values to sum per group.
 
     Returns:
-        np.ndarray: Array of summed values of length n_unique.
+        numpy.ndarray: Array of summed values of length n_unique.
     """
     group_sums = np.zeros((n_unique,), dtype=vals.dtype)
     np.add.at(group_sums, idx, vals)
@@ -208,10 +208,10 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
 
     Args:
         pid (int): Process ID for indexing results.
-        file_paths (list of str): List of .npz input file paths.
-        keys (list of str): List of data keys to compute/store.
-        shared_dict (multiprocessing.Manager.dict): Shared structure for results.
-        slice (int, optional): Column for 2D predictions. Defaults to None.
+        file_paths (list): List of .npz input file paths.
+        keys (list): List of data keys to compute/store.
+        shared_dict (dict): Shared structure for results.
+        slice (int): Column for 2D predictions. Defaults to None. (optional)
         threshold_pos (float): Threshold to count positive predictions.
         epsilon (float): Small constant for log and division safety.
         flip (bool): Whether to invert probabilities (1 - p).
@@ -328,16 +328,16 @@ def bed_formatter(
     Formats the results into a BED-like structure.
 
     Args:
-        ref_names (np.ndarray): Array of reference names.
-        ref_pos (np.ndarray): Array of reference positions.
-        ref_strand (np.ndarray): Array of reference strands.
-        pm6a (np.ndarray): PM6A scores.
-        dom (np.ndarray): DOM scores.
-        count_all (np.ndarray): Total counts.
-        count_pos (np.ndarray): Positive counts.
-        kl_div_neg (np.ndarray): KL divergence for negative predictions.
-        kl_div_pos (np.ndarray): KL divergence for positive predictions.
-        logsum_1_p_pos (np.ndarray): Log-sum of positive predictions.
+        ref_names (numpy.ndarray): Array of reference names.
+        ref_pos (numpy.ndarray): Array of reference positions.
+        ref_strand (numpy.ndarray): Array of reference strands.
+        pm6a (numpy.ndarray): PM6A scores.
+        dom (numpy.ndarray): DOM scores.
+        count_all (numpy.ndarray): Total counts.
+        count_pos (numpy.ndarray): Positive counts.
+        kl_div_neg (numpy.ndarray): KL divergence for negative predictions.
+        kl_div_pos (numpy.ndarray): KL divergence for positive predictions.
+        logsum_1_p_pos (numpy.ndarray): Log-sum of positive predictions.
 
     Returns:
         list: List of formatted strings for each entry.

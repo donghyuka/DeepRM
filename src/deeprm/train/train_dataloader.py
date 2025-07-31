@@ -263,8 +263,8 @@ class NanoporeDataset(IterableDataset):
     Iterable dataset for loading Nanopore data from NPZ files.
 
     Args:
-        pos_data_path (list[str]): Paths to the directory containing positive samples.
-        neg_data_path (list[str]): Paths to the directory containing negative samples.
+        pos_data_path (list): Paths to the directory containing positive samples.
+        neg_data_path (list): Paths to the directory containing negative samples.
         batch_size (int): Batch size for loading data.
         disk_shard_size (int): Size of the disk shard.
         rank (int): Rank of the current process.
@@ -474,7 +474,7 @@ class NanoporeDataLoader(DataLoader):
         num_workers (int): Number of worker processes.
         pin_memory (bool): Whether to pin memory.
         drop_last (bool): Whether to drop the last incomplete batch.
-        collate_fn (callable): Function to collate data into batches.
+        collate_fn (typing.Callable): Function to collate data into batches.
         prefetch_factor (int): Number of batches to prefetch.
     """
 
@@ -557,19 +557,19 @@ def load_dataset(
         num_replicas (int): Number of replicas.
         shuffle_buffer_size (int): Size of the shuffle buffer.
         yield_period (int): Period for yielding data.
-        seed (int, optional): Random seed. Defaults to 0.
-        shuffle (bool, optional): Whether to shuffle the data. Defaults to True.
-        drop_last (bool, optional): Whether to drop the last incomplete batch. Defaults to True.
-        pad_to (int, optional): Padding length for sequences. Defaults to 200.
-        bq_clip (int, optional): Base quality clipping value. Defaults to 40.
-        class_ratio (float, optional): Ratio of positive to negative samples. Defaults to 1.
-        prefetch_factor (int, optional): Number of batches to prefetch. Defaults to 512.
-        pin_memory (bool, optional): Whether to pin memory. Defaults to True.
-        soft_label (bool, optional): Whether to use soft labels. Defaults to False.
-        num_workers (int, optional): Number of worker processes. Defaults to 4.
-        signal_stride (int, optional): Signal stride. Defaults to 6.
-        kmer_size (int, optional): K-mer size. Defaults to 5.
-        **kwargs: Additional keyword arguments.
+        seed (int): Random seed. Defaults to 0.  (optional)
+        shuffle (bool): Whether to shuffle the data. Defaults to True. (optional)
+        drop_last (bool): Whether to drop the last incomplete batch. Defaults to True. (optional)
+        pad_to (int): Padding length for sequences. Defaults to 200. (optional)
+        bq_clip (int): Base quality clipping value. Defaults to 40. (optional)
+        class_ratio (float): Ratio of positive to negative samples. Defaults to 1. (optional)
+        prefetch_factor (int): Number of batches to prefetch. Defaults to 512. (optional)
+        pin_memory (bool): Whether to pin memory. Defaults to True. (optional)
+        soft_label (bool): Whether to use soft labels. Defaults to False. (optional)
+        num_workers (int): Number of worker processes. Defaults to 4. (optional)
+        signal_stride (int): Signal stride. Defaults to 6. (optional)
+        kmer_size (int): K-mer size. Defaults to 5. (optional)
+        **kwargs: Additional keyword arguments. (optional)
 
 
     Returns:
@@ -639,7 +639,7 @@ def pad_collate(batch, pad_to, signal_stride, kmer_size, trim=2):
         pad_to (int): Padding length for sequences.
         signal_stride (int): Signal stride.
         kmer_size (int): K-mer size.
-        trim (int, optional): Trim length. Defaults to 2.
+        trim (int): Trim length. Defaults to 2.  (optional)
 
     Returns:
         tuple: A tuple containing the source and target tensors.

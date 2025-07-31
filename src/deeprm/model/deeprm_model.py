@@ -10,34 +10,37 @@ from deeprm.utils import check_deps
 
 check_deps.check_torch_available()
 
-import torch
-from torch import Tensor, nn
 
-from deeprm.utils.activations import get_activation_fn
+import torch  # noqa
+from torch import Tensor, nn  # noqa
+
+from deeprm.utils.activations import get_activation_fn  # noqa
 
 
 class ResNetBlock(nn.Module):
     """
     A 1D ResNet block for 1D DeepRM.
+
     Args:
         in_channels (int): Number of input channels.
         out_channels (int): Number of output channels.
-        hidden_channels (int, optional): Number of hidden channels. If None, set to out_channels.
-        kernel_size (int, optional): Kernel size for the middle convolutional layer. Default is 3.
-        stride (int, optional): Stride for the convolutional layers. Default is 1.
-        activation (str, optional): Activation function to use. Default is 'gelu'.
-        dropout (float, optional): Dropout rate. Default is 0.1.
-        groups (int, optional): Number of groups for grouped convolution. Default is 1.
+        hidden_channels (int): Number of hidden channels. If None, set to out_channels. (optional)
+        kernel_size (int): Kernel size for the middle convolutional layer. Default is 3. (optional)
+        stride (int): Stride for the convolutional layers. Default is 1. (optional)
+        activation (str): Activation function to use. Default is 'gelu'. (optional)
+        dropout (float): Dropout rate. Default is 0.1. (optional)
+        groups (int): Number of groups for grouped convolution. Default is 1.  (optional)
+
     Attributes:
-        bn1 (nn.BatchNorm1d): Batch normalization layer for the first convolution.
-        activation (callable): Activation function.
-        conv1 (nn.Conv1d): First convolutional layer with kernel size 1.
-        bn2 (nn.BatchNorm1d): Batch normalization layer for the second convolution.
-        conv2 (nn.Conv1d): Second convolutional layer with specified kernel size and groups.
-        bn3 (nn.BatchNorm1d): Batch normalization layer for the third convolution.
-        dropout (nn.Dropout): Dropout layer.
-        conv3 (nn.Conv1d): Third convolutional layer with kernel size 1.
-        shortcut (nn.Module): Shortcut connection to match input and output dimensions.
+        bn1 (torch.nn.BatchNorm1d): Batch normalization layer for the first convolution.
+        activation (typing.Callable): Activation function.
+        conv1 (torch.nn.Conv1d): First convolutional layer with kernel size 1.
+        bn2 (torch.nn.BatchNorm1d): Batch normalization layer for the second convolution.
+        conv2 (torch.nn.Conv1d): Second convolutional layer with specified kernel size and groups.
+        bn3 (torch.nn.BatchNorm1d): Batch normalization layer for the third convolution.
+        dropout (torch.nn.Dropout): Dropout layer.
+        conv3 (torch.nn.Conv1d): Third convolutional layer with kernel size 1.
+        shortcut (torch.nn.Module): Shortcut connection to match input and output dimensions.
     """
 
     def __init__(
@@ -73,10 +76,12 @@ class ResNetBlock(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through the ResNet block.
+
         Args:
-            x (Tensor): Input tensor of shape (batch_size, in_channels, sequence_length).
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, sequence_length).
+
         Returns:
-            Tensor: Output tensor of shape (batch_size, out_channels, sequence_length).
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, sequence_length).
         """
         residual = self.shortcut(x)
         out = self.bn1(x)
@@ -102,23 +107,24 @@ class TransformerModel(nn.Module):
         n_heads (int): Number of attention heads.
         d_ff (int): Dimension of the feed-forward network.
         n_layers (int): Number of encoder layers.
-        encoder_dropout (float, optional): Dropout rate for the encoder. Default is 0.1.
-        lin_dropout (float, optional): Dropout rate for the linear layers. Default is 0.1.
-        kmer_size (int, optional): Size of the k-mer. Default is 5.
-        signal_size (int, optional): Size of the signal input. Default is 25.
-        block_len (int, optional): Length of the block. Default is 17.
-        seq_len (int, optional): Length of the sequence. Default is 200.
-        t_act (str, optional): Activation function for the transformer. Default is 'gelu'.
-        lin_act (str, optional): Activation function for the linear layers. Default is 'relu'.
-        lin_depth (int, optional): Depth of the linear layers. Default is 1.
-        signal_stride (int, optional): Stride for the signal input. Default is 6.
+        encoder_dropout (float): Dropout rate for the encoder. Default is 0.1. (optional)
+        lin_dropout (float): Dropout rate for the linear layers. Default is 0.1. (optional)
+        kmer_size (int): Size of the k-mer. Default is 5. (optional)
+        signal_size (int): Size of the signal input. Default is 25. (optional)
+        block_len (int): Length of the block. Default is 17. (optional)
+        seq_len (int): Length of the sequence. Default is 200. (optional)
+        t_act (str): Activation function for the transformer. Default is 'gelu'. (optional)
+        lin_act (str): Activation function for the linear layers. Default is 'relu'. (optional)
+        lin_depth (int): Depth of the linear layers. Default is 1. (optional)
+        signal_stride (int): Stride for the signal input. Default is 6. (optional)
         **kwargs: Additional keyword arguments.
+
     Attributes:
-        kmer_embedding (nn.Embedding): Embedding layer for k-mer sequences.
-        signal_embedding (nn.Linear): Linear layer for signal input.
+        kmer_embedding (torch.nn.Embedding): Embedding layer for k-mer sequences.
+        signal_embedding (torch.nn.Linear): Linear layer for signal input.
         pos_encoding (PositionalEncoding): Positional encoding layer.
-        cnn_encoder (nn.Sequential): Sequential container for CNN encoder blocks.
-        transformer_encoder (nn.TransformerEncoder): Transformer encoder.
+        cnn_encoder (torch.nn.Sequential): Sequential container for CNN encoder blocks.
+        transformer_encoder (torch.nn.TransformerEncoder): Transformer encoder.
         regression_head (RegressionHead): Regression head for the model output.
         d_model (int): Dimension of the model.
         model_type (str): Type of the model, set to 'Transformer'.
@@ -208,8 +214,10 @@ class TransformerModel(nn.Module):
     def init_weights(self, initrange=0.1):
         """
         Initialize the weights of the model.
+
         Args:
-            initrange (float, optional): Range for uniform initialization of weights. Default is 0.1.
+            initrange (float): Range for uniform initialization of weights. Default is 0.1. (optional)
+
         Returns:
             None
         """
@@ -221,11 +229,13 @@ class TransformerModel(nn.Module):
     def process_kmer(self, src_kmer: Tensor, src_seg_len_flat: Tensor) -> Tensor:
         """
         Process the k-mer input to convert nucleotide characters to numerical indices.
+
         Args:
-            src_kmer (Tensor): Input tensor of shape (batch_size, seq_len) containing nucleotide characters.
-            src_seg_len_flat (Tensor): Flattened segment lengths for the input sequences.
+            src_kmer (torch.Tensor): Input tensor of shape (batch_size, seq_len) containing nucleotide characters.
+            src_seg_len_flat (torch.Tensor): Flattened segment lengths for the input sequences.
+
         Returns:
-            Tensor: Processed k-mer tensor of shape (batch_size, seq_len) with numerical indices.
+            torch.Tensor: Processed k-mer tensor of shape (batch_size, seq_len) with numerical indices.
         """
         batch = src_kmer.shape[0]
         src_kmer = (src_kmer - 65).clip(None, 8) % 5  ## Convert ACGTU to 01233.
@@ -244,10 +254,12 @@ class TransformerModel(nn.Module):
     def process_signal(self, src_signal: Tensor) -> Tensor:
         """
         Process the signal input by unfolding it into segments based on the signal stride and k-mer size.
+
         Args:
-            src_signal (Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
+            src_signal (torch.Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
+
         Returns:
-            Tensor: Processed signal tensor of shape (batch_size, new_seq_len, signal_size) after unfolding.
+            torch.Tensor: Processed signal tensor of shape (batch_size, new_seq_len, signal_size) after unfolding.
         """
         src_signal = src_signal.unfold(1, self.signal_stride * self.kmer_size, self.signal_stride)
         return src_signal
@@ -255,10 +267,12 @@ class TransformerModel(nn.Module):
     def flatten_seg_len(self, src_seg_len: Tensor) -> Tensor:
         """
         Flatten the segment lengths to create a single dimension for each sequence.
+
         Args:
-            src_seg_len (Tensor): Input tensor of shape (batch_size, num_segments) containing segment lengths.
+            src_seg_len (torch.Tensor): Input tensor of shape (batch_size, num_segments) containing segment lengths.
+
         Returns:
-            Tensor: Flattened segment lengths of shape (batch_size, seq_len).
+            torch.Tensor: Flattened segment lengths of shape (batch_size, seq_len).
         """
         src_seg_len_flat = torch.cat([src_seg_len, self.seq_len - src_seg_len.sum(dim=1, keepdims=True)], dim=1)
         src_seg_len_flat = src_seg_len_flat.flatten()
@@ -267,11 +281,13 @@ class TransformerModel(nn.Module):
     def create_src_pad_mask(self, src_signal: Tensor, src_seg_len: Tensor) -> Tensor:
         """
         Create a padding mask for the source signal to ignore padded values during processing.
+
         Args:
-            src_signal (Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
-            src_seg_len (Tensor): Segment lengths tensor of shape (batch_size, num_segments).
+            src_signal (torch.Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
+            src_seg_len (torch.Tensor): Segment lengths tensor of shape (batch_size, num_segments).
+
         Returns:
-            Tensor: Padding mask of shape (batch_size, seq_len) where True indicates padded positions.
+            torch.Tensor: Padding mask of shape (batch_size, seq_len) where True indicates padded positions.
         """
         batch = src_signal.shape[0]
         src_pad_mask = torch.arange(self.seq_len, device=src_signal.device)
@@ -282,11 +298,13 @@ class TransformerModel(nn.Module):
     def create_target_mask(self, src_seg_len: Tensor, src_seg_len_flat: Tensor) -> Tensor:
         """
         Create a target mask to identify the target positions in the sequence.
+
         Args:
-            src_seg_len (Tensor): Segment lengths tensor of shape (batch_size, num_segments).
-            src_seg_len_flat (Tensor): Flattened segment lengths tensor of shape (batch_size, seq_len).
+            src_seg_len (torch.Tensor): Segment lengths tensor of shape (batch_size, num_segments).
+            src_seg_len_flat (torch.Tensor): Flattened segment lengths tensor of shape (batch_size, seq_len).
+
         Returns:
-            Tensor: Target mask of shape (batch_size, seq_len) where True indicates target positions.
+            torch.Tensor: Target mask of shape (batch_size, seq_len) where True indicates target positions.
         """
         batch = src_seg_len.shape[0]
         width = src_seg_len.shape[1]
@@ -301,12 +319,14 @@ class TransformerModel(nn.Module):
     def process_dwell_bq(self, src_dwell_bq: Tensor, src_seg_len_flat: Tensor) -> Tensor:
         """
         Process the dwell time and base quality input by flattening and repeating it based on segment lengths.
+
         Args:
-            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel) containing
-                dwell time and base quality.
-            src_seg_len_flat (Tensor): Flattened segment lengths for the input sequences.
+            src_dwell_bq (torch.Tensor): Input tensor of shape (batch_size, seq_len, channel)
+                containing dwell time and base quality.
+            src_seg_len_flat (torch.Tensor): Flattened segment lengths for the input sequences.
+
         Returns:
-            Tensor: Processed dwell time and base quality tensor of shape (batch_size, seq_len, channel).
+            torch.Tensor: Processed dwell time and base quality tensor of shape (batch_size, seq_len, channel).
         """
         batch = src_dwell_bq.shape[0]
         channel = src_dwell_bq.shape[2]
@@ -321,14 +341,16 @@ class TransformerModel(nn.Module):
     def forward(self, src_kmer: Tensor, src_signal: Tensor, src_seg_len: Tensor, src_dwell_bq: Tensor) -> Tensor:
         """
         Forward pass through the Transformer model.
+
         Args:
-            src_kmer (Tensor): Input tensor of shape (batch_size, seq_len) containing k-mer sequences.
-            src_signal (Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
-            src_seg_len (Tensor): Segment lengths tensor of shape (batch_size, num_segments).
-            src_dwell_bq (Tensor): Input tensor of shape (batch_size, seq_len, channel)
+            src_kmer (torch.Tensor): Input tensor of shape (batch_size, seq_len) containing k-mer sequences.
+            src_signal (torch.Tensor): Input tensor of shape (batch_size, seq_len, signal_size) containing signal data.
+            src_seg_len (torch.Tensor): Segment lengths tensor of shape (batch_size, num_segments).
+            src_dwell_bq (torch.Tensor): Input tensor of shape (batch_size, seq_len, channel)
                 containing dwell time and base quality.
+
         Returns:
-            Tensor: Output tensor of shape (batch_size, seq_len) after processing through the model.
+            torch.Tensor: Output tensor of shape (batch_size, seq_len) after processing through the model.
         """
         with torch.no_grad():
             src_seg_len_flat = self.flatten_seg_len(src_seg_len)
@@ -369,11 +391,13 @@ class TransformerModel(nn.Module):
 class PositionalEncoding(nn.Module):
     """
     Positional Encoding for Transformer models.
+
     Args:
         d_model (int): Dimension of the model.
         seq_len (int): Length of the sequence.
+
     Attributes:
-        pe (Tensor): Positional encoding tensor of shape (1, seq_len, d_model).
+        pe (torch.Tensor): Positional encoding tensor of shape (1, seq_len, d_model).
     """
 
     def __init__(self, d_model: int, seq_len: int) -> None:
@@ -388,8 +412,11 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, batch_size) -> Tensor:
         """
+        Forward pass to repeat the positional encoding for the given batch size.
+
         Args:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+
         Returns:
             Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
@@ -402,14 +429,16 @@ class PositionalEncoding(nn.Module):
 class RegressionHead(nn.Module):
     """
     Regression head for the Transformer model.
+
     Args:
         d_model (int): Dimension of the model.
         lin_act (str): Activation function for the linear layers.
         lin_depth (int): Depth of the linear layers.
         lin_dropout (float): Dropout rate for the linear layers.
         seq_length (int): Length of the sequence.
+
     Attributes:
-        lin_layers (nn.Sequential): Sequential container for the linear layers.
+        lin_layers (torch.nn.Sequential): Sequential container for the linear layers.
     """
 
     def __init__(self, d_model: int, lin_act: str, lin_depth: int, lin_dropout: float, seq_length: int):
@@ -431,18 +460,22 @@ class RegressionHead(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through the regression head.
+
         Args:
-            x (Tensor): Input tensor of shape (batch_size, seq_length, d_model).
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_length, d_model).
+
         Returns:
-            Tensor: Output tensor of shape (batch_size, seq_length, 1) after processing through the linear layers.
+            torch.Tensor: Output tensor of shape (batch_size, seq_length, 1) after processing through the linear layers.
         """
         return self.lin_layers(x)
 
     def init_weights(self, initrange=0.1):
         """
         Initialize the weights of the linear layers in the regression head.
+
         Args:
             initrange (float): Range for uniform initialization of weights. Default is 0.1.
+
         Returns:
             None
         """

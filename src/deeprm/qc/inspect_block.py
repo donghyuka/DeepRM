@@ -29,8 +29,10 @@ plt.rcParams.update(
 def add_arguments(parser: argparse.ArgumentParser):
     """
     Adds command-line arguments.
+
     Args:
         parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+
     Returns:
         None
     """
@@ -48,8 +50,10 @@ def add_arguments(parser: argparse.ArgumentParser):
 def main(args: argparse.Namespace):
     """
     Main function to inspect block files.
+
     Args:
         args (argparse.Namespace): Command-line arguments.
+
     Returns:
         None
     """
@@ -168,7 +172,7 @@ def seq_to_onehot(seq: str):
         seq (str): Nucleotide sequence (A, C, G, T/U).
 
     Returns:
-        np.ndarray: One-hot encoded matrix of the sequence.
+        numpy.ndarray: One-hot encoded matrix of the sequence.
     """
     seq = seq.upper()
     seq = seq.replace("T", "U")
@@ -181,10 +185,12 @@ def seq_to_onehot(seq: str):
 def motif_cdf(block_df_dict, color_dict, output):
     """
     Calculate and plot the cumulative distribution function (CDF) of 5-mer motifs in the blocks.
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         output (str): Output directory to save the CDF plot and data.
+
     Returns:
         None
     """
@@ -215,10 +221,12 @@ def motif_composition(block_df_dict, output):
     """
     Plot ratio of nucleotides in each position.
     Each nucleotide is represented as a box, and the height of the box is the ratio of the nucleotide.
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         output (str): Output directory to save the motif composition plot and data.
+
     Returns:
         None
     """
@@ -247,9 +255,11 @@ def motif_composition(block_df_dict, output):
 def nucleotide_composition(block_df_dict, output):
     """
     Plot the ratio of nucleotides in each block as a pie chart.
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         output (str): Output directory to save the nucleotide composition plot.
+
     Returns:
         None
     """
@@ -279,12 +289,14 @@ def nucleotide_composition(block_df_dict, output):
 def bq_plot(block_df_dict, color_dict, output, sample=int(1e4), comment=""):
     """
     Plot the distribution of base quality. Plot position-wise mean with CI95.
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         output (str): Output directory to save the base quality plot and data.
         sample (int): Number of samples to use for plotting. If None, use all data.
         comment (str): Comment to append to the output file name.
+
     Returns:
         None
     """
@@ -324,10 +336,12 @@ def bq_plot(block_df_dict, color_dict, output, sample=int(1e4), comment=""):
 
 def block_score_distribution(block_df_dict, color_dict, output):
     """Plot the distribution of block score
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         output (str): Output directory to save the block score distribution plot.
+
     Returns:
         None
     """
@@ -359,11 +373,13 @@ def block_score_distribution(block_df_dict, color_dict, output):
 def plot_violin(block_df_dict, color_dict, cb_len, output):
     """
     Plot the distribution of base quality as a violin plot.
+
     Args:
         block_df_dict (dict): Dictionary of DataFrames, each containing block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         cb_len (int): Length of the context block.
         output (str): Output directory to save the violin plot.
+
     Returns:
         None
     """
@@ -411,11 +427,13 @@ def plot_violin(block_df_dict, color_dict, cb_len, output):
 def plot_motif(perfect_block_df_dict, color_dict, args, motif_list=["AGACU", "CGACA", "UGAUC", "GAAGC", "UCAAG"]):
     """
     Plot the distribution of motifs in the perfect blocks.
+
     Args:
         perfect_block_df_dict (dict): Dictionary of DataFrames, each containing perfect block data.
         color_dict (dict): Dictionary mapping block names to colors for plotting.
         args: Command-line arguments containing output directory and context block length.
         motif_list (list): List of motifs to plot. Default is a predefined list of motifs.
+
     Returns:
         None
     """

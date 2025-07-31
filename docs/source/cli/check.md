@@ -1,18 +1,20 @@
-# `deeprm check` – Check installation and environment
+# `deeprm check`
 
-```bash
-deeprm check --help
-```
+Environment diagnostics for Torch / metrics / GPU (prints only problems by default).
 
-```{eval-rst}
-.. argparse::
-   :module: deeprm.check
+## Usage
+
+```{argparse}
+   :module: deeprm.utils.check_installation
    :func: parser
    :prog: deeprm check
 ```
+## Examples
 
-Examples:
 ```bash
+# Show only issues
 deeprm check
+
+# Show everything (env dump)
 deeprm check --verbose
 ```

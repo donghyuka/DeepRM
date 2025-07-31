@@ -1,9 +1,10 @@
 # model package
 
-```{automodule} deeprm.model
-:members:
-:undoc-members:
-:show-inheritance:
+```{eval-rst}
+.. automodule:: deeprm.model
+    :members:
+    :undoc-members:
+    :show-inheritance:
 ```
 
 
@@ -11,8 +12,9 @@
 
 ### `model.deeprm_model`
 
-```{automodule} deeprm.model.deeprm_model
-:members:
-:undoc-members:
-:show-inheritance:
+```{eval-rst}
+.. automodule:: deeprm.model.deeprm_model
+    :members:
+    :undoc-members:
+    :show-inheritance:
 ```

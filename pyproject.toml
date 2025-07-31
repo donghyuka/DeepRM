@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeprm"
-version = "0.1.0"
+version = "1.0.0"
 description = "DeepRM – a deep learning framework for RNA modification detection from nanopore sequencing data"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -48,7 +48,9 @@ docs = [
     "myst-parser",
     "sphinx-copybutton",
     "sphinxcontrib-mermaid",
+    "sphinx-argparse",
     "sphinx-autosummary-accessors",
+    "sphinx_design",
 ]
 test = [
     "black>=23.7.0",
@@ -91,7 +93,7 @@ line_length = 120
 [tool.ruff]
 line-length = 120
 select = ["E","F","I","UP"]
-ignore = ["UP035","UP006"]
+ignore = ["UP035","UP006","E402"]
 fix = true
 
 [tool.pytest.ini_options]
