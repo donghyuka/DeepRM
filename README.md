@@ -101,9 +101,8 @@ deeprm check
 deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
 # Run inference
 deeprm inference run -i <prep_dir> -o <pred_dir>
-# Generate site-level results
-deeprm inference pileup -i <pred_dir> -o <pileup_dir> --bed
 ```
+
 ### Training
 ```bash
 # Prepare unmodified data

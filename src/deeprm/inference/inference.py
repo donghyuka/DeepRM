@@ -17,6 +17,7 @@ import numpy as np
 import tqdm
 
 from deeprm.inference.inference_dataloader import load_dataset
+from deeprm.inference.pileup_deeprm import main as pileup_main
 from deeprm.utils import check_deps
 from deeprm.utils.logging import get_logger
 
@@ -38,9 +39,10 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
+    parser.add_argument("--bam", "-a", type=str, required=True, help="BAM file path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, default=None, help="Model path")
-    parser.add_argument("--model_type", "-t", type=str, default="deeprm_model", help="Model type")
+    parser.add_argument("--model_type", "-y", type=str, default="deeprm_model", help="Model type")
     parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
@@ -51,6 +53,16 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
     parser.add_argument("--gpu_pool", "-gp", type=int, nargs="+", help="GPU pool")
     parser.add_argument("--output_id", "-id", type=int, default=None, help="Output ID for Multi-output models.")
+    parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use for pileup")
+    parser.add_argument("--threshold", "-th", type=float, default=0.98, help="Positive threshold")
+    parser.add_argument("--epsilon", "-ep", type=float, default=1e-30, help="Epsilon value")
+    parser.add_argument("--slice", "-sl", type=int, default=None, help="Slice index (for 2D predictions)")
+    parser.add_argument("--flip", "-fl", action="store_true", help="Flip label")
+    parser.add_argument(
+        "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
+    )
+    parser.add_argument("--bed", "-bed", action="store_true", help="Format output as BED-like structure")
+
     return None
 
 
@@ -85,7 +97,21 @@ def main(args: argparse.Namespace):
             args.num_gpu = len(args.gpu_pool)
     if args.gpu_pool is None:
         args.gpu_pool = list(range(args.num_gpu))
+
+    inference_output = os.path.join(args.output, "molecule-level")
+    pileup_output = os.path.join(args.output, "site-level")
+    os.makedirs(args.output, exist_ok=True)
+    os.makedirs(inference_output, exist_ok=True)
+    os.makedirs(pileup_output, exist_ok=True)
+
+    args.output = inference_output
     run_inference(args)
+    log.info("Inference Program Finished.")
+
+    args.input = inference_output
+    args.output = pileup_output
+    pileup_main(args)
+    log.info("Pileup Program Finished.")
     return None
 
 
@@ -113,7 +139,6 @@ def run_inference(args):
     args.output = output
 
     log.info(f"Output directory: {output}")
-    os.makedirs(output, exist_ok=True)
     mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(vars(args),), join=True)
     return None
 
