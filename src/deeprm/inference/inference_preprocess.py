@@ -17,6 +17,7 @@ import gc
 import glob
 import multiprocessing as mp
 import os
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -296,15 +297,16 @@ def normalise_trim_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile
     return signal
 
 
-def parse_pod5(pod5_path):
+def parse_pod5(pod5_path, read_ids):
     """
     Read signals and calibration from a POD5 file and return as DataFrame.
 
     Args:
         pod5_path (str): file path to the POD5 file.
+        read_ids (list): list of read IDs to extract signals for. (list of UUIDs)
 
     Returns:
-        pandas.DataFrame: with columns ['signal', 'offset', 'scale'], indexed by 'read_id'.
+        pd.DataFrame: with columns ['signal', 'offset', 'scale'], indexed by 'read_id'.
     """
     signal_list = []
     offset_list = []
@@ -312,12 +314,12 @@ def parse_pod5(pod5_path):
     id_list = []
 
     with pod5.Reader(pod5_path) as reader:
-        for record in reader:
+        for i, record in enumerate(reader.reads(read_ids)):
             try:
                 signal_arr = record.signal
                 offset = record.calibration.offset
                 scale = record.calibration.scale
-                rid = str(record.read_id)
+                rid = record.read_id
             except Exception:
                 continue
 
@@ -370,6 +372,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         if len(ap) == 0:
             continue
         read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
+        read_id = uuid.UUID(read_id)
         ts = read.get_tag("ts") if read.has_tag("ts") else 0
         ns = read.get_tag("ns") if read.has_tag("ns") else 0
         sp = read.get_tag("sp") if read.has_tag("sp") else 0
@@ -445,25 +448,26 @@ def segment_normalize_signal(
     output_index = 0
 
     for pod5_path in tqdm.tqdm(pod5_paths):
-        try:
-            pod5_df = parse_pod5(pod5_path)
-        except Exception as e:
-            log.warning(f"{e}")
-            log.info(f"Corrupted POD5 file: {pod5_path}")
-            continue
-        if len(pod5_df) == 0:
-            continue
-        valid_index = pod5_df.index.intersection(bam_df.index)
-        if len(valid_index) == 0:
-            continue
-        pod5_df = pd.merge(pod5_df, bam_df.loc[valid_index], left_index=True, right_index=True, how="inner")
-        if len(pod5_df) == 0:
-            continue
-        split_points = np.array_split(np.arange(len(pod5_df)), max(1, np.ceil(len(pod5_df) // process_once)))
-        pod5_df[["r_pos", "ref", "strand"]] = pod5_df[["r_pos", "ref", "strand"]].astype(np.int64)
-        for signal_df in [pod5_df.iloc[s[0] : s[-1] + 1] for s in split_points]:
+        with pod5.Reader(pod5_path) as reader:
+            read_ids = reader.read_ids
+
+        read_id_split = np.array_split(np.array(read_ids), np.ceil(len(read_ids) / process_once))
+
+        for read_ids in read_id_split:
+            try:
+                signal_df = parse_pod5(pod5_path, read_ids)
+            except Exception:
+                print(f"Corrupted POD5 file: {pod5_path}")
+                continue
             if len(signal_df) == 0:
                 continue
+            valid_index = signal_df.index.intersection(bam_df.index)
+            if len(valid_index) == 0:
+                continue
+            signal_df = pd.merge(signal_df, bam_df.loc[valid_index], left_index=True, right_index=True, how="inner")
+            if len(signal_df) == 0:
+                continue
+
             output_index += 1
             out_prefix = f"{token_output_path}/{pid}-{output_index}"
             signal_df["dwell_token"] = signal_df["mv"].apply(lambda x: move_to_dwell(x, 0.2, 0.8, 0.5, 1.5, sampling))
@@ -486,7 +490,7 @@ def segment_normalize_signal(
 
             ## Explode read-level data to base-level data
             signal_df = (
-                signal_df[["bq", "seq", "signal", "dwell_token", "ref", "ap"]].explode("ap").reset_index(drop=True)
+                signal_df[["bq", "seq", "signal", "dwell_token", "ref", "ap"]].explode("ap").reset_index(drop=False)
             )
             if len(signal_df) == 0:
                 continue
@@ -498,7 +502,7 @@ def segment_normalize_signal(
             signal_df["start_pos"] = signal_df["q_pos"] - cb_half_len
             signal_df["end_pos"] = signal_df["q_pos"] + cb_half_len + 1
             signal_df["q_len"] = signal_df["seq"].apply(len)
-            signal_df["label_id"] = (signal_df["ref"] * label_div + signal_df["r_pos"]) * signal_df["strand"]
+            signal_df["label_id"] = (signal_df["ref"] * label_div + signal_df["r_pos"] + 1) * signal_df["strand"]
 
             # filter by context
             signal_df = signal_df[
@@ -540,7 +544,16 @@ def segment_normalize_signal(
                 continue
             signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x[trim:-trim])
             signal_df = signal_df[
-                ["segment_len_arr", "signal", "motif", "dwell_motor_token", "dwell_pore_token", "bq", "label_id"]
+                [
+                    "read_id",
+                    "segment_len_arr",
+                    "signal",
+                    "motif",
+                    "dwell_motor_token",
+                    "dwell_pore_token",
+                    "bq",
+                    "label_id",
+                ]
             ].copy()
             signal_df.rename(columns={"motif": "kmer_token", "signal": "signal_token", "bq": "bq_token"}, inplace=True)
             signal_df["segment_len_arr"] = signal_df["segment_len_arr"].apply(lambda x: x.astype(np.uint16))
@@ -598,6 +611,7 @@ def save_npz(save_path, df):
     dwell_pore_token = np.stack(df["dwell_pore_token"].values)
     bq_token = np.stack(df["bq_token"].values)
     label_id = df["label_id"].values
+    read_id = np.frombuffer(b"".join(u.bytes for u in df["read_id"].values), dtype=np.int64).reshape(-1, 2)
     np.savez_compressed(
         save_path,
         segment_len_arr=segment_len_arr,
@@ -607,5 +621,6 @@ def save_npz(save_path, df):
         dwell_pore_token=dwell_pore_token,
         bq_token=bq_token,
         label_id=label_id,
+        read_id=read_id,
     )
     return None
