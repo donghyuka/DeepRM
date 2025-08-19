@@ -353,7 +353,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         None (appends DataFrame to bam_data).
     """
     bam_df = {k: [] for k in ["read_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap", "strand"]}
-    input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, thread=n_thread)
+    input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=n_thread)
     ref_index_dict = {ref: i for i, ref in enumerate(input_bam.references)}
 
     for read_idx, read in tqdm.tqdm(enumerate(input_bam), total=input_bam.mapped + input_bam.unmapped):

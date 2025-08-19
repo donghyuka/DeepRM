@@ -40,7 +40,7 @@ If you use DeepRM in your research, please cite the following paper:
 ![deeprm_architecture.png](../images/deeprm_architecture.png)
 
 ## 🏛️ Contributors
-This repositoratory is developed by the following organization:
+This repository is developed by the following organization:
 * **Laboratory of Computational Biology, School of Biological Sciences, Seoul National University**
     * Principal Investigator: Prof. Daehyun Baek
 
