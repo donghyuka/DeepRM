@@ -42,7 +42,8 @@ def add_arguments(parser: argparse.ArgumentParser):
         help="Number of threads to use",
     )
     parser.add_argument("--chunk", "-c", dest="chunk", type=int, default=4000, help="Chunk size")
-    parser.add_argument("--score", "-s", dest="score", type=float, default=[1.0], nargs="+", help="Score threshold")
+    parser.add_argument("--score", "-s", dest="score", type=float, default=1.0, help="Score threshold")
+    parser.add_argument("--val_frac", "-v", type=float, default=0.05, help="Validation set fraction")
     return None
 
 
@@ -82,9 +83,11 @@ def main(args: argparse.Namespace):
     os.makedirs(args.out_path, exist_ok=True)
 
     for set_name in ["train", "val"]:
-        for score_name in args.score:
-            for label in ["pos", "neg"]:
-                os.makedirs(f"{args.out_path}/score-{score_name}/{set_name}/{label}", exist_ok=True)
+        for label in ["pos", "neg"]:
+            os.makedirs(f"{args.out_path}/{set_name}/{label}", exist_ok=True)
+
+    assert 0.0 <= args.val_frac < 1.0, "Validation fraction must be in [0.0, 1.0)"
+    set_split_dict = {"train": 1.0 - args.val_frac, "val": args.val_frac}
 
     if args.pos_path is not None:
         sample_and_save(
@@ -93,7 +96,8 @@ def main(args: argparse.Namespace):
             args.cpu,
             label=1,
             chunk=args.chunk,
-            score_name_list=args.score,
+            set_split_dict=set_split_dict,
+            score=args.score,
         )
 
     if args.neg_path is not None:
@@ -103,7 +107,8 @@ def main(args: argparse.Namespace):
             args.cpu,
             label=0,
             chunk=args.chunk,
-            score_name_list=args.score,
+            set_split_dict=set_split_dict,
+            score=args.score,
         )
 
     return None
@@ -117,7 +122,7 @@ def sample_and_save(
     chunk,
     label_dict={0: "neg", 1: "pos"},
     set_split_dict={"train": 0.95, "val": 0.05},
-    score_name_list=[0.0, 1.0],
+    score=1.0,
     id_digit=9,
     shuffle=True,
     read_once=100,
@@ -133,7 +138,7 @@ def sample_and_save(
         chunk (int): Chunk size for saving data.
         label_dict (dict): Dictionary mapping labels to strings.
         set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
-        score_name_list (list): List of score thresholds.
+        score (float): Score threshold.
         id_digit (int): Number of digits for file IDs.
         shuffle (bool): Whether to shuffle the data.
         read_once (int): Number of files to read at once.
@@ -151,7 +156,6 @@ def sample_and_save(
         "bq_token",
         "block_score",
     ]
-
     if shuffle:
         in_file_list = np.random.permutation(in_file_list)
     in_file_list = np.array_split(in_file_list, ncpu)
@@ -161,8 +165,7 @@ def sample_and_save(
     label_str = label_dict[label]
 
     for set_name in set_split_dict:
-        for score in score_name_list:
-            remainder_dict[(set_name, score)] = man.list()
+        remainder_dict[set_name] = man.list()
 
     for pid in range(ncpu):
         proc = mp.Process(
@@ -174,7 +177,7 @@ def sample_and_save(
                 out_path,
                 label_str,
                 set_split_dict,
-                score_name_list,
+                score,
                 chunk,
                 label,
                 remainder_dict,
@@ -194,7 +197,7 @@ def sample_and_save(
     file_id = [-1]
 
     for key in remainder_dict:
-        set_name, score_name = key
+        set_name = key
         remainder_data_list = remainder_dict[key]
         if len(remainder_data_list) > 0:
             remainder_data = {}
@@ -212,7 +215,6 @@ def sample_and_save(
                 set_name,
                 buffer_dict,
                 chunk,
-                score_name,
                 id_digit,
             )
             del remainder_data
@@ -244,7 +246,7 @@ def sample_and_save_worker(
     out_path,
     label_str,
     set_split_dict,
-    score_name_list,
+    score,
     chunk,
     label,
     remainder_dict,
@@ -263,7 +265,7 @@ def sample_and_save_worker(
         out_path (str): Output directory path.
         label_str (str): Label string for the data.
         set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
-        score_name_list (list): List of score thresholds.
+        score (float): Score threshold.
         chunk (int): Chunk size for saving data.
         label (int): Label for the data (0 for negative, 1 for positive).
         remainder_dict (dict): Dictionary to store remainder data.
@@ -300,23 +302,21 @@ def sample_and_save_worker(
             data_buffer = {x: [] for x in column_keys}
             gc.collect()
 
-            for score_name in score_name_list:
-                bool_idx = data["block_score"] >= score_name
-                score_data = {key: data[key][bool_idx] for key in column_keys}
-                save_split_data(
-                    ncpu,
-                    pid,
-                    file_id,
-                    score_data,
-                    column_keys,
-                    out_path,
-                    label_str,
-                    set_split_dict,
-                    chunk,
-                    score_name,
-                    id_digit,
-                    buffer_dict,
-                )
+            bool_idx = data["block_score"] >= score
+            score_data = {key: data[key][bool_idx] for key in column_keys}
+            save_split_data(
+                ncpu,
+                pid,
+                file_id,
+                score_data,
+                column_keys,
+                out_path,
+                label_str,
+                set_split_dict,
+                chunk,
+                id_digit,
+                buffer_dict,
+            )
 
             del data
             gc.collect()
@@ -340,7 +340,6 @@ def save_split_data(
     label_str,
     set_split_dict,
     chunk,
-    score_name,
     id_digit,
     buffer_dict,
 ):
@@ -357,7 +356,6 @@ def save_split_data(
         label_str (str): Label string for the data.
         set_split_dict (dict): Dictionary defining the split ratios for train and validation sets.
         chunk (int): Chunk size for saving data.
-        score_name (float): Score threshold.
         id_digit (int): Number of digits for file IDs.
         buffer_dict (dict): Dictionary to store buffer data.
 
@@ -372,11 +370,11 @@ def save_split_data(
         set_idx_start = set_idx[idx]
         set_idx_end = set_idx[idx + 1]
         set_data = {key: data[key][set_idx_start:set_idx_end] for key in column_keys}
-        buffer = buffer_dict[(set_name, score_name)]
+        buffer = buffer_dict[set_name]
 
         if buffer is not None:
             set_data = {key: np.concatenate([buffer[key], set_data[key]]) for key in column_keys}
-            buffer_dict[(set_name, score_name)] = None
+            buffer_dict[set_name] = None
             gc.collect()
 
         chunk_save_data(
@@ -390,7 +388,6 @@ def save_split_data(
             set_name,
             buffer_dict,
             chunk,
-            score_name,
             id_digit,
         )
 
@@ -411,7 +408,6 @@ def chunk_save_data(
     set_name,
     buffer_dict,
     chunk,
-    score_name,
     id_digit,
 ):
     """
@@ -428,7 +424,6 @@ def chunk_save_data(
         set_name (str): Set name (train or val).
         buffer_dict (dict): Dictionary to store buffer data.
         chunk (int): Chunk size for saving data.
-        score_name (float): Score threshold.
         id_digit (int): Number of digits for file IDs.
 
     Returns:
@@ -443,7 +438,7 @@ def chunk_save_data(
         }
 
         if len(chunk_data[column_keys[0]]) == chunk:
-            save_path = f"{out_path}/score-{score_name}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
+            save_path = f"{out_path}/{set_name}/{label_str}/{str(out_data_id).zfill(id_digit)}.npz"
             if os.path.exists(save_path):
                 log.warning(f"File {save_path} already exists - overwriting.")
             chunk_data.pop("block_score")
@@ -452,12 +447,10 @@ def chunk_save_data(
             gc.collect()
 
         elif buffer_dict is not None:
-            buffer = buffer_dict[(set_name, score_name)]
+            buffer = buffer_dict[set_name]
             if buffer is not None:
-                buffer_dict[(set_name, score_name)] = {
-                    key: np.concatenate([buffer[key], chunk_data[key]]) for key in column_keys
-                }
+                buffer_dict[set_name] = {key: np.concatenate([buffer[key], chunk_data[key]]) for key in column_keys}
             else:
-                buffer_dict[(set_name, score_name)] = chunk_data.copy()
+                buffer_dict[set_name] = chunk_data.copy()
 
     return None

@@ -39,6 +39,7 @@ dependencies = [
     "pysam>=0.22.0",
     "matplotlib>=3.7",
     "seaborn>=0.12",
+    "tensorboard>=2.0",
 ]
 
 [project.optional-dependencies]

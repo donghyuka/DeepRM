@@ -504,7 +504,23 @@ class NanoporeDataLoader(DataLoader):
         Returns:
             int: Number of batches in the DataLoader.
         """
-        return len(self.dataset) // self.batch_size
+
+        dataset = self.dataset
+        # Total replicas = GPUs (num_gpu) * DataLoader workers
+        num_replicas = dataset.num_gpu * self.num_workers
+
+        if dataset.drop_last:
+            pos_num_shard = math.floor(len(dataset.pos_file_paths) / num_replicas)
+            neg_num_shard = math.floor(len(dataset.neg_file_paths) / num_replicas)
+        else:
+            pos_num_shard = math.ceil(len(dataset.pos_file_paths) / num_replicas)
+            neg_num_shard = math.ceil(len(dataset.neg_file_paths) / num_replicas)
+
+        pos_num_shard = min(pos_num_shard, int(neg_num_shard / dataset.class_ratio))
+        neg_num_shard = int(pos_num_shard * dataset.class_ratio)
+
+        per_rank_samples = (pos_num_shard + neg_num_shard) * dataset.disk_shard_size
+        return per_rank_samples // self.batch_size * self.num_workersl
 
     def set_epoch(self, epoch: int) -> None:
         """
@@ -535,7 +551,6 @@ def load_dataset(
     shuffle=True,
     drop_last=True,
     pad_to=200,
-    bq_clip=40,
     class_ratio=1,
     prefetch_factor=512,
     pin_memory=True,
@@ -561,7 +576,6 @@ def load_dataset(
         shuffle (bool): Whether to shuffle the data. Defaults to True. (optional)
         drop_last (bool): Whether to drop the last incomplete batch. Defaults to True. (optional)
         pad_to (int): Padding length for sequences. Defaults to 200. (optional)
-        bq_clip (int): Base quality clipping value. Defaults to 40. (optional)
         class_ratio (float): Ratio of positive to negative samples. Defaults to 1. (optional)
         prefetch_factor (int): Number of batches to prefetch. Defaults to 512. (optional)
         pin_memory (bool): Whether to pin memory. Defaults to True. (optional)

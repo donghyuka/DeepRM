@@ -37,7 +37,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output", "-o", type=str, required=True, help="Output (pileup) path")
     parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use")
     parser.add_argument("--bam", "-b", type=str, required=True, help="BAM file path")
-    parser.add_argument("--pos", "-p", type=float, default=0.98, help="Positive threshold")
+    parser.add_argument("--threshold", "-th", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-e", type=float, default=1e-30, help="Epsilon value")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Comment")
     parser.add_argument("--slice", "-s", type=int, default=None, help="Slice index (for 2D predictions)")
@@ -45,7 +45,6 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
-    parser.add_argument("--bed", "-bed", action="store_true", help="Format output as BED-like structure")
 
     return None
 
@@ -65,12 +64,6 @@ def main(args: argparse.Namespace):
     if args.thread is None:
         args.thread = max(1, int(0.95 * mp.cpu_count()))
 
-    if args.input.endswith("/"):
-        args.input = args.input[:-1]
-    if args.output.endswith("/"):
-        args.output = args.output[:-1]
-
-    args.output = os.path.join(args.output, os.path.basename(args.input) + args.postfix)
     os.makedirs(args.output, exist_ok=True)
 
     ## Define keys for shared data storage
@@ -90,7 +83,8 @@ def main(args: argparse.Namespace):
     proc_list = []
     for pid, file_paths in enumerate(file_paths_split):
         proc = mp.Process(
-            target=worker, args=(pid, file_paths, keys, shared_dict, args.slice, args.pos, args.epsilon, args.flip)
+            target=worker,
+            args=(pid, file_paths, keys, shared_dict, args.slice, args.threshold, args.epsilon, args.flip),
         )
         proc.start()
         proc_list.append(proc)
@@ -148,6 +142,22 @@ def main(args: argparse.Namespace):
     ref_pos = label_id_abs % args.label_div
     ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
 
+    ## Format results into a BED-like structure
+    path = f"{args.output}/pileup.bed"
+    bed_formatter(
+        ref_names=ref_names,
+        ref_pos=ref_pos,
+        ref_strand=ref_strand,
+        pm6a=pm6a,
+        dom=dom,
+        count_all=count_all,
+        count_pos=count_pos,
+        kl_div_neg=kl_div_neg,
+        kl_div_pos=kl_div_pos,
+        logsum_1_p_pos=logsum_1_p_pos,
+        output_path=path,
+    )
+
     ## Save results to compressed .npz
     path = f"{args.output}/pileup.npz"
     np.savez_compressed(
@@ -163,23 +173,6 @@ def main(args: argparse.Namespace):
         kl_div_pos=kl_div_pos,
         logsum_1_p_pos=logsum_1_p_pos,
     )
-
-    if args.bed:
-        ## Optionally format results into a BED-like structure
-        path = f"{args.output}/pileup.bed"
-        bed_formatter(
-            ref_names=ref_names,
-            ref_pos=ref_pos,
-            ref_strand=ref_strand,
-            pm6a=pm6a,
-            dom=dom,
-            count_all=count_all,
-            count_pos=count_pos,
-            kl_div_neg=kl_div_neg,
-            kl_div_pos=kl_div_pos,
-            logsum_1_p_pos=logsum_1_p_pos,
-            output_path=path,
-        )
 
     return None
 

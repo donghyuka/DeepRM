@@ -91,28 +91,39 @@ deeprm check
  * If everything is installed correctly, you should see the version of DeepRM and a message indicating that the installation is successful.
  * If you encounter CUDA or torch-related errors, make sure you have installed the correct version of PyTorch with CUDA support.
 
+
 ## 🚀 Quickstart
-* For demonstration purposes, DeepRM will automatically use examples POD5 and BAM files provided in the repository.
+* For demonstration purposes, you can use examples POD5 and BAM files provided in the repository.
 * You can also use your own POD5 and BAM files.
 
-### Inference
+### RNA Modification Detection
+1️⃣ **Prepare data**
 ```bash
-# Prepare data
-deeprm inference prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
-# Run inference
-deeprm inference run -i <prep_dir> -o <pred_dir>
+deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
+```
+* (Alternative) To supply your own POD5 file:
+  ```bash
+  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
+  tee >(deeprm call prep -p <pod5_dir> -b - -o <prep_dir>) >(<bam_path>)
+  ```
+2️⃣ **Run inference**
+```bash
+deeprm call run -b inference_example.bam -i <prep_dir> -o <pred_dir>
 ```
 
-### Training
+### Model Training
+1️⃣ **Prepare unmodified & modified training data**
 ```bash
-# Prepare unmodified data
 deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
- # Prepare modified data
-deeprm train prep -p training_m6a_example.pod5 -n training_a_example.bam -o <prep_dir>/m6a
-# Compile training data
-deeprm train compile -n <prep_dir>/a -p <prep_dir>/m6a -o <prep_dir>/compiled
-# Run training
-deeprm train run -d <prep_dir>/compiled -o <output_dir> --gpu
+deeprm train prep -p training_m6a_example.pod5 -b training_m6a_example.bam -o <prep_dir>/m6a
+```
+2️⃣ **Compile training data**
+```bash
+deeprm train compile -n <prep_dir>/a/data -p <prep_dir>/m6a/data -o <prep_dir>/compiled
+```
+3️⃣ **Run training**
+```bash
+deeprm train run -d <prep_dir>/compiled -o <output_dir>
 ```
 
 
@@ -121,9 +132,20 @@ deeprm train run -d <prep_dir>/compiled -o <output_dir> --gpu
 ![deeprm_inference_pipeline.png](docs/images/deeprm_inference_pipeline.png)
 
 #### Prepare Data
-* You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
+##### Accelerated preparation (recommended, default)
 ```bash
-dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 {args.pod5} > <raw_bam_path>"
+dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
+tee >(deeprm call prep -p <pod5_dir> -b - -o <prep_dir>) >(<bam_path>)
+```
+
+##### Sequential preparation
+* This method is slower than the accelerated preparation method, but is supported for cases such as:
+    * The POD5 files are already basecalled to BAM files with move tags.
+    * You want to run basecalling and preprocessing in separate machines.
+
+* Basecall the POD5 files to BAM files with move tags (skip if already done):
+```bash
+dorado basecaller --reference <reference_path> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> > <raw_bam_path>"
 ```
 * Filter, sort, and index the BAM files:
 ```bash
@@ -133,78 +155,61 @@ samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
-deeprm inference prep -p <input_POD5_dir> -b <input_BAM_dir> -o <data_dir>
+deeprm call prep --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
 ```
-* This will create:
-  * Inference dataset: /block
-  * Filtered mpileup file: /dorado_output.pileup.filtered.pkl
-  * Quality check results: /qc/*.png
+* This will create the npz files for inference.
+
 #### Run Inference
 * The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
 * For inference, run the following command:
+    * Modify the '-bs' (batch size) parameter according to your GPU memory capacity (default: 1000).
 ```bash
-deeprm inference run -i <data_dir> -o <prediction_dir>
+deeprm call run --model <model_file> --data <data_dir> --output <prediction_dir> --gpu_pool <gpu_pool>
 ```
-* This will create a directory with single-molecule level result files.
-* To get a site-level result, run the following command:
-```bash
-deeprm inference pileup --input <prediction_dir> --output <pileup_dir> --bed
-```
-* This will create a directory with site-level result files.
+* This will create a directory with the result files.
 
 ### Training usage
 ![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
 #### Prepare Data
 * You can skip this step if your POD5 files are already basecalled to BAM files with move tags.
 ```bash
-dorado basecaller --min-qscore 0 --emit-moves {args.model} {args.pod5} > <bam_path>
+dorado basecaller --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> > <bam_path>
 samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the training data (synthetic oligonucleotide), run the following command:
 ```bash
-deeprm train prep -p <input_POD5_dir> -b <input_BAM_dir> -o <data_dir>
+deeprm train prep --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
-  * Training dataset: /block
+    * Training dataset: /block
 * To compile the training dataset, run the following command:
 ```bash
-deeprm train compile -p <modified_data_dir> -n <unmodified_data_dir> -o <dataset_dir>
+deeprm train compile --input <input_POD5_dir> --output <output_file>
 ```
 * This will create:
-  * Training dataset: /block
+    * Training dataset: /block
 #### Run Training
 * To train the model, run the following command:
 ```bash
-deeprm train run --model deeprm_model --data <dataset_dir> --output <output_dir> --gpu_pool <gpu_pool>
+deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --gpu_pool <gpu_pool>
 ```
 * This will create a directory with the trained model file.
+
 
 ## 📐 Architecture
 ![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
-## 📝 Citation
-If you use DeepRM in your research, please cite the following paper:
-```bibtex
-@article{
-  title={Comprehensive discovery of RNA modification sites in the human transcriptome},
-  author={Gihyeon Kang, Hyeonseo Hwang, Hyeonseong Jeon, Heejin Choi, Hee Ryung Chang, Junehee Park, Narae Son, Eunkyeong Jeon, Jungmin Lim, Jaeung Yun, Nagyeong Yeo, Yoon Ki Kim, Daehyun Baek},
-  journal={In review},
-  year={In review},
-  publisher={In review}
-}
-```
-
-## 📝 License
-see [LICENSE](LICENSE) file for details.
 
 ## 🏛️ Contributors
-This repository is developed by the following organization:
+This repository is developed and maintained by the following organization:
 * **Laboratory of Computational Biology, School of Biological Sciences, Seoul National University**
-  * Principal Investigator: Prof. Daehyun Baek
+    * Principal Investigator: Prof. Daehyun Baek
+* **Genome4me, Inc., Seoul, Republic of Korea**
+
 
 This repository is maintained by the following authors:
-* **Hyeonseo Hwang**
+* Hyeonseo Hwang
 
 
 ## 🏛️ Acknowledgements
-This work was supported by the National Research Foundation of Korea (NRF) funded by the Ministry of Science and ICT, Republic of Korea (MSIT) (NRF-2019M3E5D3073104, NRF-2020R1A2C3007032, NRF-2020R1A5A1018081, and NRF-2022M3A9I2082294), by Artificial Intelligence Industrial Convergence Cluster Development Project funded by MSIT and Gwangju Metropolitan City, by National IT Industry Promotion Agency (NIPA) funded by MSIT, and by Korea Research Environment Open Network (KREONET) managed and operated by Korea Institute of Science and Technology Information (KISTI).
+This study was supported by the National Research Foundation of Korea (NRF) funded by the Ministry of Science and ICT, Republic of Korea (MSIT) (RS-2019-NR037866, RS-2020-NR049252, RS-2020-NR049538, and RS-2022-NR067483), by a grant of Korean ARPA-H Project through the Korea Health Industry Development Institute (KHIDI), funded by the Ministry of Health & Welfare, Republic of Korea (RS-2025-25422732), by Artificial Intelligence Industrial Convergence Cluster Development Project funded by MSIT and Gwangju Metropolitan City, by National IT Industry Promotion Agency (NIPA) funded by MSIT, and by Korea Research Environment Open Network (KREONET) managed and operated by Korea Institute of Science and Technology Information (KISTI).

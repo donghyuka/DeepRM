@@ -1,0 +1,4 @@
+[submodule "htscodecs"]
+	path = htscodecs
+	url = ssh://192.168.0.52:29418/public/htscodecs.git
+	fetchRecurseSubmodules = true

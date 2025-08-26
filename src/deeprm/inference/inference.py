@@ -39,15 +39,15 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
-    parser.add_argument("--bam", "-a", type=str, required=True, help="BAM file path")
+    parser.add_argument("--bam", "-b", type=str, required=True, help="BAM file path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, default=None, help="Model path")
     parser.add_argument("--model_type", "-y", type=str, default="deeprm_model", help="Model type")
-    parser.add_argument("--batch", "-b", type=int, default=10000, help="Batch size")
+    parser.add_argument("--batch", "-bs", type=int, default=10000, help="Batch size")
     parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
     parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
-    parser.add_argument("--prefetch", "-p", type=int, default=16, help="Number of files to load")
-    parser.add_argument("--worker", "-w", type=int, default=8, help="Number of workers per GPU")
+    parser.add_argument("--prefetch", "-p", type=int, default=4, help="Number of files to load")
+    parser.add_argument("--worker", "-w", type=int, default=4, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
     parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
@@ -82,8 +82,8 @@ def main(args: argparse.Namespace):
     """
     if args.model is None:
         ## Get directory of the current file
-        deeprm_root = pathlib.Path(__file__).parent.parent.parent.parent
-        args.model = f"{deeprm_root}/weight/deeprm_weights.pt"
+        deeprm_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
+        args.model = os.path.join(deeprm_root, "weight", "deeprm_weights.pt")
     if not args.model.endswith(".pt"):
         raise ValueError("Invalid model path. It should be a .pt file.")
     if args.data.endswith("/"):
@@ -97,6 +97,11 @@ def main(args: argparse.Namespace):
             args.num_gpu = len(args.gpu_pool)
     if args.gpu_pool is None:
         args.gpu_pool = list(range(args.num_gpu))
+
+    output = f"{args.output}/{os.path.basename(args.data)}"
+    if len(args.postfix) > 0:
+        output = f"{output}-{args.postfix}"
+    args.output = output
 
     inference_output = os.path.join(args.output, "molecule-level")
     pileup_output = os.path.join(args.output, "site-level")
@@ -132,13 +137,8 @@ def run_inference(args):
         log.info("Using CPU.")
 
     ## make tensorboard directory
-    log.info(f"Running inference: {args.model}")
-    output = f"{args.output}/{args.model.split('/')[-1][:-3]}-{args.data.split('/')[-1]}"
-    if len(args.postfix) > 0:
-        output = f"{output}-{args.postfix}"
-    args.output = output
-
-    log.info(f"Output directory: {output}")
+    log.info(f"Model path: {args.model}")
+    log.info(f"Output directory: {args.output}")
     mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(vars(args),), join=True)
     return None
 
@@ -189,7 +189,6 @@ def inference_worker(rank, args_dict):
         for name, parameter in model.named_parameters():
             params = parameter.numel()
             total_params += params
-        log.info(f"Total Params: {total_params:,}")
     if args_dict["num_gpu"] > 0:
         model.to(gpu_id)
     model.load_state_dict(state_dict=save_dict["model_state_dict"], strict=False)
@@ -208,7 +207,6 @@ def inference_worker(rank, args_dict):
 
     data_loader = load_dataset(
         args_dict["data"],
-        args_dict["batch"],
         args_dict["shard"],
         gpu_id,
         max(1, args_dict["num_gpu"]),
@@ -268,40 +266,53 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             flush_idx = -1
             idx = -1
 
-            for batch_data_cpu in tqdm.tqdm(data_loader, total=len(data_loader), smoothing=0):
+            batch_data_buffer = None
 
-                if idx == -1:
-                    ## First batch
-                    batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
+            for chunk_data_cpu in tqdm.tqdm(data_loader, total=len(data_loader), smoothing=0):
+
+                if batch_data_buffer is not None:
+                    chunk_data_cpu = {k: torch.cat((batch_data_buffer[k], v), dim=0) for k, v in chunk_data_cpu.items()}
+                    batch_data_buffer = None
+                batch_data_split_cpu = {k: torch.split(v, args_dict["batch"]) for k, v in chunk_data_cpu.items()}
+
+                for bidx in range(len(batch_data_split_cpu["label_id"])):
+                    batch_data_cpu = {k: v[bidx] for k, v in batch_data_split_cpu.items()}
+
+                    if len(batch_data_cpu["label_id"]) < args_dict["batch"]:
+                        batch_data_buffer = batch_data_cpu
+
+                    if idx == -1:
+                        ## First batch
+                        batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
+                        label = batch_data_cpu["label_id"]
+                        idx += 1
+                        flush_idx += 1
+                        continue
+
+                    to_gpu_proc = executor.submit(to_gpu, batch_data_cpu, gpu_id, copy_stream)
+                    pred = model(*batch_data_gpu)
+
+                    if args_dict["output_id"] is not None:
+                        pred = pred[args_dict["output_id"]]
+
+                    id_buffer.append(label)
+                    pred_buffer.append(pred)
+
+                    if flush_idx == args_dict["flush"] - 1:
+                        preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
+                        ids = torch.cat(list(id_buffer), axis=0).numpy()
+                        id_buffer.clear()
+                        pred_buffer.clear()
+                        out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
+                        np.savez_compressed(out_path, label_id=ids, pred=preds)
+                        flush_idx = 0
+                    else:
+                        flush_idx += 1
+
+                    torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
+                    batch_data_gpu = to_gpu_proc.result()
                     label = batch_data_cpu["label_id"]
                     idx += 1
-                    flush_idx += 1
-                    continue
-
-                to_gpu_proc = executor.submit(to_gpu, batch_data_cpu, gpu_id, copy_stream)
-                pred = model(*batch_data_gpu)
-
-                if args_dict["output_id"] is not None:
-                    pred = pred[args_dict["output_id"]]
-
-                id_buffer.append(label)
-                pred_buffer.append(pred)
-
-                if flush_idx == args_dict["flush"] - 1:
-                    preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-                    ids = np.concatenate(list(id_buffer), axis=0)
-                    id_buffer.clear()
-                    pred_buffer.clear()
-                    out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
-                    np.savez_compressed(out_path, label_id=ids, pred=preds)
-                    flush_idx = 0
-                else:
-                    flush_idx += 1
-
-                torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
-                batch_data_gpu = to_gpu_proc.result()
-                label = batch_data_cpu["label_id"]
-                idx += 1
 
             ## Last batch
             pred = model(*batch_data_gpu)
@@ -313,7 +324,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             pred_buffer.append(pred)
 
             preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-            ids = np.concatenate(list(id_buffer), axis=0)
+            ids = torch.cat(list(id_buffer), axis=0).numpy()
             id_buffer.clear()
             pred_buffer.clear()
             out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"

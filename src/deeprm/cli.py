@@ -13,7 +13,7 @@ from typing import Dict, List
 # This keeps top-level help detailed without importing heavy modules.
 # -------------------------------------------------------------------
 _HELP_REGISTRY: Dict[str, dict] = {
-    "inference": {
+    "call": {
         "desc": "Inference helpers",
         "module": "deeprm.inference.cli",
         "subcommands": [

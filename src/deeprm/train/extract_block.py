@@ -658,7 +658,7 @@ def extract_block(
                             np.array(record.query_qualities),
                             int(read_length),
                         )
-                    record_list.append(record_tuple)
+                        record_list.append(record_tuple)
                 pbar.update(1)
 
     if sample is not None:

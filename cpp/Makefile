@@ -1,0 +1,104 @@
+CXX = g++
+CXXFLAGS = -std=c++20 -O2 -Wall -Wextra -pthread -ftree-vectorize # -fopt-info-vec
+LDFLAGS = -pthread
+
+# Project directories
+SRC_DIR = src
+INC_DIR = include
+OBJ_DIR = obj
+
+# External libraries
+HTSLIB_DIR = htslib
+CNPY_DIR = cnpy
+POD5_DIR = pod5-file-format
+
+# Include paths
+INCLUDES = -I$(INC_DIR) \
+           -I$(SRC_DIR) \
+           -I$(HTSLIB_DIR) \
+           -I$(CNPY_DIR) \
+           -I$(POD5_DIR)/include
+
+# Library paths and libraries
+LIBS = -lz -lbz2 -llzma -lcurl -lssl -lcrypto -ldl -luuid
+LIBA = $(HTSLIB_DIR)/libhts.a \
+       $(CNPY_DIR)/build/libcnpy.a \
+       $(POD5_DIR)/libpod5_format.a \
+       $(POD5_DIR)/libarrow.a \
+       $(POD5_DIR)/libjemalloc_pic.a \
+       $(POD5_DIR)/libzstd.a
+
+# Target executable
+TARGET = bin/deeprm_preprocess
+
+# Source files
+SOURCES = $(shell find $(SRC_DIR) -name "*.cpp")
+OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+
+# making 'git submodule ..' command executed only once in the beginning
+PRECMD:=$(shell git submodule update --init --recursive)
+
+# Default target
+all: $(TARGET)
+
+mpfr: mpfr_build
+mpfr_build: CXXFLAGS += -DUSE_MPFR
+mpfr_build: LIBS += -lmpfr -lgmp
+mpfr_build: all
+
+# Build htslib first
+$(HTSLIB_DIR)/libhts.a:
+	@echo "Building htslib..."
+	autoreconf -i $(HTSLIB_DIR)
+	cd $(HTSLIB_DIR) && ./configure CC=gcc --disable-ref-cache --disable-s3 && make -j 20
+
+$(CNPY_DIR)/build/libcnpy.a:
+	@echo "Building cnpy..."
+	mkdir -p $(CNPY_DIR)/build && cd $(CNPY_DIR)/build && cmake .. && make && cd -
+
+# Create object directory structure
+$(OBJ_DIR):
+	@mkdir -p $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)/args
+	@mkdir -p $(OBJ_DIR)/bam
+	@mkdir -p $(OBJ_DIR)/pod5
+	@mkdir -p $(OBJ_DIR)/processor
+	@mkdir -p $(OBJ_DIR)/merger
+	@mkdir -p $(OBJ_DIR)/npz
+	@mkdir -p $(OBJ_DIR)/utils
+	@mkdir -p $(OBJ_DIR)/sam
+
+# Build target
+$(TARGET): $(HTSLIB_DIR)/libhts.a $(CNPY_DIR)/build/libcnpy.a $(OBJ_DIR) $(OBJECTS)
+	@echo "Linking $(TARGET)..."
+	mkdir -p bin
+	$(CXX) $(OBJECTS) -o $(TARGET) $(LIBA) $(LIBS) $(LDFLAGS)
+
+# Compile source files
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@echo "Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean compiled objects and target (not external libraries)
+clean:
+	@echo "Cleaning project files..."
+	rm -rf $(OBJ_DIR)
+	rm -f $(TARGET)
+
+# Clean all including external libraries
+clean_all: clean
+	@echo "Cleaning all including external libraries..."
+	cd $(HTSLIB_DIR) && make clean
+	rm -rf $(CNPY_DIR)/build
+
+# Install dependencies (if needed)
+install-deps:
+	@echo "Please ensure the following are installed:"
+	@echo "- cnpy library in ./cnpy/"
+	@echo "- pod5-file-format library in ./pod5-file-format/"
+
+# Test build (compile only, don't link)
+test-compile: $(OBJ_DIR) $(OBJECTS)
+	@echo "Compilation test completed successfully"
+
+.PHONY: all clean clean_all install-deps test-compile

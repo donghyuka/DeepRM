@@ -110,7 +110,6 @@ class NanoporeDataset(IterableDataset):
 
     Args:
         data_path (str): Path to the directory containing NPZ files.
-        batch_size (int): Batch size for loading data.
         disk_shard_size (int): Size of the disk shard.
         rank (int): Rank of the current process.
         num_replicas (int): Number of replicas.
@@ -120,14 +119,12 @@ class NanoporeDataset(IterableDataset):
         kmer_len (int): K-mer length.
         sampling (int): Sampling rate.
         sig_window (int): Signal window size.
-        num_workers (int): Number of worker processes.
         resume_from (int): Number of files to skip from the start.
     """
 
     def __init__(
         self,
         data_path,
-        batch_size,
         disk_shard_size,
         rank,
         num_replicas,
@@ -137,13 +134,11 @@ class NanoporeDataset(IterableDataset):
         kmer_len=5,
         sampling=6,
         sig_window=5,
-        num_workers=1,
         resume_from=0,
     ):
 
         super().__init__()
         self.data_path = data_path
-        self.batch_size = batch_size
         self.disk_shard_size = disk_shard_size
         self.rank = rank
         self.num_replicas = num_replicas
@@ -204,7 +199,6 @@ class NanoporeDataLoader(DataLoader):
 
     Args:
         dataset (NanoporeDataset): The dataset to load data from.
-        batch_size (int): Batch size for loading data.
         num_workers (int): Number of worker processes.
         pin_memory (bool): Whether to pin memory.
         drop_last (bool): Whether to drop the last incomplete batch.
@@ -212,9 +206,7 @@ class NanoporeDataLoader(DataLoader):
         prefetch_factor (int): Number of batches to prefetch.
     """
 
-    def __init__(
-        self, dataset: NanoporeDataset, batch_size, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor
-    ):
+    def __init__(self, dataset: NanoporeDataset, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
         shuffle = False
         sampler = None
         batch_size = None
@@ -235,12 +227,9 @@ class NanoporeDataLoader(DataLoader):
 
 def load_dataset(
     data_path,
-    batch_size,
     disk_shard_size,
     rank,
     num_replicas,
-    pad_to=200,
-    bq_clip=40,
     num_files_read_once=1,
     prefetch_factor=100000,
     worker=16,
@@ -274,10 +263,8 @@ def load_dataset(
         NanoporeDataLoader: DataLoader for loading the dataset.
     """
 
-    batch_size = None
     dataset = NanoporeDataset(
         data_path,
-        batch_size,
         disk_shard_size,
         rank,
         num_replicas,
@@ -286,12 +273,10 @@ def load_dataset(
         kmer_len=kmer_len,
         sampling=sampling,
         sig_window=sig_window,
-        num_workers=worker,
         resume_from=resume_from,
     )
     dataloader = NanoporeDataLoader(
         dataset,
-        batch_size=batch_size,
         num_workers=worker,
         pin_memory=True,
         drop_last=False,
@@ -312,7 +297,7 @@ def collate_fn(batch):
         dict: Dictionary containing processed data ready for model input.
     """
     source = {}
-    source["label_id"] = batch["label_id"]
+    source["label_id"] = torch.tensor(batch["label_id"].astype(np.int64))  ## TODO: REMOVE astype BEFORE PRODUCTION!!!!!
     source["segment_len"] = torch.tensor(batch["segment_len"], dtype=torch.int32)
     source["signal_token"] = torch.tensor(batch["signal_token"], dtype=torch.float32)
     source["kmer_token"] = torch.tensor(batch["kmer_token"], dtype=torch.int32)

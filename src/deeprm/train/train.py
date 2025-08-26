@@ -46,7 +46,7 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
-    parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
+    parser.add_argument("--batch", dest="batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument(
         "--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation"
     )
@@ -59,7 +59,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--es_delta", type=float, default=1e-5, help="Early stopping delta")
     parser.add_argument("--es_patience", type=int, default=50, help="Early stopping patience")
     parser.add_argument("--es_start", type=int, default=1000, help="Epoch to start early stopping")
-    parser.add_argument("--disk_shard_size", type=int, default=4000, help="Disk shard size")
+    parser.add_argument("--disk_shard_size", type=int, default=None, help="Disk shard size")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--enc_dim", type=int, default=512, help="Encoder dimension")
     parser.add_argument("--lin_dim", type=int, default=1024, help="Linear layer dimension")
@@ -117,13 +117,25 @@ def main(args: argparse.Namespace):
         None
     """
     strfttime = time.strftime("%Y%m%d-%H%M%S")
+
     if args.num_gpu is None:
         if args.gpu_pool is None:
             args.num_gpu = torch.cuda.device_count()
         else:
             args.num_gpu = len(args.gpu_pool)
+
     if args.gpu_pool is None:
         args.gpu_pool = list(range(args.num_gpu))
+    else:
+        if len(args.gpu_pool) < args.num_gpu:
+            raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
+
+    if args.disk_shard_size is None:
+        sample_file = os.listdir(os.path.join(args.data_path, "train", "pos"))[0]
+        with np.load(os.path.join(args.data_path, "train", "pos", sample_file)) as f:
+            args.disk_shard_size = f["kmer_token"].shape[0]
+        log.info(f"Setting disk shard size to {args.disk_shard_size}.")
+
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size * 4
     if args.model_name is None:
@@ -132,17 +144,18 @@ def main(args: argparse.Namespace):
         args.yield_period = args.disk_shard_size
     if args.save_interval is None:
         args.save_interval = args.eval_interval
+
+    args.output = os.path.join(args.output, args.model_name)
+
+    if args.tb_path is None:
+        args.tb_path = os.path.join(args.output, "tensorboard_log")
     else:
-        if len(args.gpu_pool) < args.num_gpu:
-            raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
+        args.tb_path = os.path.join(args.tb_path, args.model_name)
 
     args_dict = vars(args)
-
     torch.multiprocessing.set_sharing_strategy("file_system")
-    os.makedirs(os.path.join(args_dict["output"], args_dict["model_name"]), exist_ok=True)
-    os.makedirs(os.path.join(args_dict["tb_path"], args_dict["model_name"]), exist_ok=True)
-    args_dict["output"] = os.path.join(args_dict["output"], args_dict["model_name"])
-    args_dict["tb_path"] = os.path.join(args_dict["tb_path"], args_dict["model_name"])
+    os.makedirs(args_dict["output"], exist_ok=True)
+    os.makedirs(args_dict["tb_path"], exist_ok=True)
     if args_dict["seed"] is None:
         args_dict["seed"] = np.random.randint(0, 10000000)
     log.info("Training Program Started.")
@@ -360,7 +373,7 @@ class Trainer:
         dist.barrier()
         time.sleep(0.03 * self.gpu_id)
         with tqdm.tqdm(
-            total=len(self.train_loader) // self.num_gpu,
+            total=len(self.train_loader),
             desc=f"[GPU {self.gpu_id}] Epoch {self.current_epoch}",
             position=self.rank,
             colour=colour_choice[self.rank % len(colour_choice)],
@@ -595,7 +608,7 @@ def main_worker(rank, args_dict):
     """
     gpu_id = args_dict["gpu_pool"][rank]
     setup_ddp(rank, args_dict["num_gpu"], gpu_id)
-    TransformerModel = importlib.import_module(f"model.{args_dict['model_type']}").TransformerModel
+    TransformerModel = importlib.import_module(f"deeprm.model.{args_dict['model_type']}").TransformerModel
     model = TransformerModel(
         d_model=args_dict["enc_dim"],
         n_heads=args_dict["head"],

@@ -14,7 +14,6 @@ import json
 import multiprocessing as mp
 import os
 import pickle
-import shutil
 import sys
 import time
 
@@ -22,7 +21,7 @@ import numpy as np
 import pandas as pd
 import pod5
 import pysam
-from tqdm import tqdm
+import tqdm
 
 from deeprm.train.extract_block import extract_block
 from deeprm.utils.logging import get_logger
@@ -40,10 +39,10 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     num_cpu = os.cpu_count()
-    parser.add_argument("--bam", dest="input", type=str, required=True, help="Input BAM file")
+    parser.add_argument("--bam", "-b", dest="input", type=str, required=True, help="Input BAM file")
     parser.add_argument("--pod5", "-p", type=str, required=True, help="POD5 Input directory")
-    parser.add_argument("--output", dest="output directory", type=str, required=True)
-    parser.add_argument("--cpu", dest="ncpu", type=int, default=int(num_cpu * 0.9))
+    parser.add_argument("--output", "-o", dest="output", type=str, required=True)
+    parser.add_argument("--threads", "-t", dest="ncpu", type=int, default=int(num_cpu * 0.9))
 
     ## DAG extraction parameters
     parser.add_argument("--it", dest="indel_tolerance", type=int, default=3)
@@ -92,7 +91,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
     parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
     parser.add_argument("--keep", action="store_true", help="Keep intermediate files", default=True)
-    parser.add_argument("--postfix", "-x", type=str, default="training_dataset", help="Output file postfix")
+    parser.add_argument("--postfix", "-x", type=str, default="data", help="Output file postfix")
     return None
 
 
@@ -126,13 +125,12 @@ def main(args: argparse.Namespace):
         raise FileNotFoundError(f"Input POD5 directory {args.pod5} does not exist")
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"Input BAM file {args.input} does not exist")
-    if not os.path.exists(args.block):
-        raise FileNotFoundError(f"Context Block file {args.block} does not exist")
     if os.path.exists(args.output):
         raise FileExistsError(
             f"Output directory {args.output} already exists. \
-            Please choose a different output directory or remove the existing one."
+        Please choose a different output directory or remove the existing one."
         )
+
     os.makedirs(args.output, exist_ok=True)
 
     norm_factor = get_norm_factor()
@@ -148,9 +146,7 @@ def main(args: argparse.Namespace):
     os.makedirs(signal_raw_path, exist_ok=True)
     os.makedirs(f"{intermediate_path}/move_df_split", exist_ok=True)
     os.makedirs(f"{intermediate_path}/block_df_split", exist_ok=True)
-
-    if not args.keep_intermediate:
-        atexit.register(lambda: os.system(f"rm -r {intermediate_path}"))
+    atexit.register(lambda: os.system(f"rm -r {intermediate_path}"))
 
     index_dict = preprocess_pod5(args.pod5, signal_raw_path, args.ncpu, args.chunk, args.max_size, args.min_size)
     signal_path_arr = list(index_dict.keys())
@@ -180,13 +176,10 @@ def main(args: argparse.Namespace):
     else:
         flush_path = f"{args.output}/block_flush_{time.strftime('%Y%m%d%H%M%S')}/"
         os.makedirs(flush_path, exist_ok=True)
-        if not args.keep_intermediate:
-            atexit.register(os.system, f"rm -r {flush_path}")
+        atexit.register(os.system, f"rm -r {flush_path}")
 
     args_dict = vars(args)
     block_df = extract_block(**args_dict, flush_path=flush_path)
-
-    shutil.rmtree(flush_path, ignore_errors=True)
 
     split_block_df(signal_path_dict, signal_name_arr, intermediate_path, block_df)
     del block_df
