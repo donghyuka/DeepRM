@@ -1,6 +1,13 @@
 # DeepRM
 Deep learning for RNA Modification
 
+![GitHub](https://img.shields.io/github/license/vadanamu/DeepRM)
+![GitHub Repo stars](https://img.shields.io/github/stars/vadanamu/DeepRM?style=social)
+![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/DeepRM)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/vadanamu/DeepRM)
+![GitHub contributors](https://img.shields.io/github/contributors/vadanamu/DeepRM)
+![GitHub language count](https://img.shields.io/github/languages/count/vadanamu/DeepRM)
+
 ```{toctree}
 :maxdepth: 1
 installation
@@ -8,9 +15,8 @@ quickstart
 usage
 cli/index
 api/index
-advanced-usage
+advanced-installation
 license
-
 ```
 
 ## ✨ Introduction

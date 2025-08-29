@@ -91,9 +91,13 @@ deeprm check
  * If everything is installed correctly, you should see the version of DeepRM and a message indicating that the installation is successful.
  * If you encounter CUDA or torch-related errors, make sure you have installed the correct version of PyTorch with CUDA support.
 
+### Build from Source
+* DeepRM can use a C++-based preprocessing tool for acceleration, which is both provided as a precompiled binary and source code.
+* Depending on your system configuration, you may need to build the C++ preprocessing tool from source, located in the `cpp` directory of the DeepRM repository.
+* Please refer to the [cpp/README.md](cpp/README.md) page for detailed build instructions.
 
 ## 🚀 Quickstart
-* For demonstration purposes, you can use examples POD5 and BAM files provided in the repository.
+* For demonstration purposes, you can use examples POD5 and BAM files provided in the `examples` directory of the repository.
 * You can also use your own POD5 and BAM files.
 
 ### RNA Modification Detection

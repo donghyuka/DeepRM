@@ -82,7 +82,7 @@ def main(args: argparse.Namespace):
     """
     if args.model is None:
         ## Get directory of the current file
-        deeprm_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
+        deeprm_root = pathlib.Path(__file__).parent.parent.resolve()
         args.model = os.path.join(deeprm_root, "weight", "deeprm_weights.pt")
     if not args.model.endswith(".pt"):
         raise ValueError("Invalid model path. It should be a .pt file.")

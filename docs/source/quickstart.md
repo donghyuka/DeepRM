@@ -1,5 +1,5 @@
 # 🚀 Quickstart
-* For demonstration purposes, you can use examples POD5 and BAM files provided in the repository.
+* For demonstration purposes, you can use examples POD5 and BAM files provided in the `examples` directory of the repository.
 * You can also use your own POD5 and BAM files.
 
 ## RNA Modification Detection

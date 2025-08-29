@@ -48,3 +48,10 @@ deeprm check
 ```
 * If everything is installed correctly, you should see the version of DeepRM and a message indicating that the installation is successful.
 * If you encounter CUDA or torch-related errors, make sure you have installed the correct version of PyTorch with CUDA support.
+
+## Build from Source
+* DeepRM uses a C++ preprocessing tool for acceleration.
+* The C++ preprocessing tool is both provided as a precompiled binary and source code.
+* Depending on your system configuration, you may need to build the C++ preprocessing tool from source.
+* The C++ source code is located in the `cpp` directory of the DeepRM repository.
+* Please refer to the [advanced installtion](advanced-installation.md) page for detailed build instructions.
