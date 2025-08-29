@@ -61,7 +61,6 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
-    parser.add_argument("--bed", "-bed", action="store_true", help="Format output as BED-like structure")
 
     return None
 
@@ -262,7 +261,8 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             copy_stream = torch.cuda.Stream(device=gpu_id)
 
             pred_buffer = deque(maxlen=args_dict["flush"])
-            id_buffer = deque(maxlen=args_dict["flush"])
+            label_id_buffer = deque(maxlen=args_dict["flush"])
+            read_id_buffer = deque(maxlen=args_dict["flush"])
             flush_idx = -1
             idx = -1
 
@@ -284,7 +284,8 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     if idx == -1:
                         ## First batch
                         batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
-                        label = batch_data_cpu["label_id"]
+                        label_id = batch_data_cpu["label_id"]
+                        read_id = batch_data_cpu["read_id"]
                         idx += 1
                         flush_idx += 1
                         continue
@@ -295,23 +296,27 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     if args_dict["output_id"] is not None:
                         pred = pred[args_dict["output_id"]]
 
-                    id_buffer.append(label)
+                    label_id_buffer.append(label_id)
+                    read_id_buffer.append(read_id)
                     pred_buffer.append(pred)
 
                     if flush_idx == args_dict["flush"] - 1:
                         preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-                        ids = torch.cat(list(id_buffer), axis=0).numpy()
-                        id_buffer.clear()
+                        label_ids = torch.cat(list(label_id_buffer), axis=0).numpy()
+                        label_id_buffer.clear()
+                        read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
+                        read_id_buffer.clear()
                         pred_buffer.clear()
                         out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
-                        np.savez_compressed(out_path, label_id=ids, pred=preds)
+                        np.savez_compressed(out_path, label_id=label_ids, read_id=read_ids, pred=preds)
                         flush_idx = 0
                     else:
                         flush_idx += 1
 
                     torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
                     batch_data_gpu = to_gpu_proc.result()
-                    label = batch_data_cpu["label_id"]
+                    label_id = batch_data_cpu["label_id"]
+                    read_id = batch_data_cpu["read_id"]
                     idx += 1
 
             ## Last batch
@@ -320,15 +325,18 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             if args_dict["output_id"] is not None:
                 pred = pred[args_dict["output_id"]]
 
-            id_buffer.append(label)
+            label_id_buffer.append(label_id)
+            read_id_buffer.append(read_id)
             pred_buffer.append(pred)
 
             preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-            ids = torch.cat(list(id_buffer), axis=0).numpy()
-            id_buffer.clear()
+            ids = torch.cat(list(label_id_buffer), axis=0).numpy()
+            label_id_buffer.clear()
+            read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
+            read_id_buffer.clear()
             pred_buffer.clear()
             out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
-            np.savez_compressed(out_path, label_id=ids, pred=preds)
+            np.savez_compressed(out_path, label_id=ids, read_id=read_ids, pred=preds)
 
             executor.shutdown(wait=True)
 

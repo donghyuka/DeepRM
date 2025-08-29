@@ -58,6 +58,7 @@ class NanoporeDatasetIterator:
         """
         npz = np.load(path)
         data = {
+            "read_id": npz["read_id"],
             "label_id": npz["label_id"],
             "segment_len": npz["segment_len_arr"],
             "signal_token": npz["signal_token"],
@@ -297,7 +298,8 @@ def collate_fn(batch):
         dict: Dictionary containing processed data ready for model input.
     """
     source = {}
-    source["label_id"] = torch.tensor(batch["label_id"].astype(np.int64))  ## TODO: REMOVE astype BEFORE PRODUCTION!!!!!
+    source["read_id"] = torch.tensor(batch["read_id"])
+    source["label_id"] = torch.tensor(batch["label_id"])
     source["segment_len"] = torch.tensor(batch["segment_len"], dtype=torch.int32)
     source["signal_token"] = torch.tensor(batch["signal_token"], dtype=torch.float32)
     source["kmer_token"] = torch.tensor(batch["kmer_token"], dtype=torch.int32)

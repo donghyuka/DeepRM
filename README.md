@@ -204,15 +204,25 @@ deeprm train run --model deeprm_model --data <data_dir> --output <output_dir> --
 ![deeprm_architecture.png](docs/images/deeprm_architecture.png)
 
 
+## 📝 Citation
+If you use DeepRM in your research, please cite the following paper:
+```{code-block} text
+:class: nohighlight
+@article{
+  title={Comprehensive single-molecule resolution discovery of m6A RNA modification sites in the human transcriptome},
+  author={Gihyeon Kang, Hyeonseo Hwang, Hyeonseong Jeon, Heejin Choi, Hee Ryung Chang, Nagyeong Yeo, Junehee Park, Narae Son, Eunkyeong Jeon, Jungmin Lim, Jaeung Yun, Wook Choi, Jae-Yoon Jo, Jong-Seo Kim, Sangho Park, Yoon Ki Kim, Daehyun Baek},
+  journal={In review},
+  year={In review},
+  publisher={In review}
+}
+```
+
+
 ## 🏛️ Contributors
 This repository is developed and maintained by the following organization:
 * **Laboratory of Computational Biology, School of Biological Sciences, Seoul National University**
     * Principal Investigator: Prof. Daehyun Baek
 * **Genome4me, Inc., Seoul, Republic of Korea**
-
-
-This repository is maintained by the following authors:
-* Hyeonseo Hwang
 
 
 ## 🏛️ Acknowledgements
