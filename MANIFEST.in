@@ -57,8 +57,7 @@ recursive-exclude tests **/__pycache__ *.pyc *.pyo
 # Examples
 # Ship scripts/configs, but exclude large binary assets
 # =========================
-graft example
-# prune example
+prune example
 
 # =========================
 # CI/dev/VCS clutter
