@@ -25,13 +25,7 @@
 python -m pip install deeprm
 ```
 
-2. Install via Conda
-
-```bash
-conda install -c conda-forge deeprm
-```
-
-3. Install from source (GitHub)
+2. Install from source (GitHub)
 
 ```bash
 git clone https://github.com/vadanamu/deeprm
