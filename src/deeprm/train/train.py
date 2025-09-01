@@ -7,6 +7,7 @@ It includes the Trainer class, which handles the training loop, evaluation, and 
 
 import argparse
 import gc
+import glob
 import importlib
 import os
 import time
@@ -46,7 +47,7 @@ def add_arguments(parser: argparse.ArgumentParser):
         None
     """
     parser.add_argument("--gpu", dest="num_gpu", type=int, default=None, help="Number of GPUs to use")
-    parser.add_argument("--batch", dest="batch_size", type=int, default=16, help="Batch size for training")
+    parser.add_argument("--batch", dest="batch_size", type=int, default=1024, help="Batch size for training")
     parser.add_argument(
         "--eval_batch", dest="eval_batch_size", type=int, default=None, help="Batch size for evaluation"
     )
@@ -56,53 +57,53 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output", type=str, required=True, help="Output directory for saving models and logs")
     parser.add_argument("--tb", dest="tb_path", type=str, default=None, help="TensorBoard log directory")
     parser.add_argument("--model", dest="model_type", type=str, default="deeprm_model", help="Model type")
-    parser.add_argument("--es_delta", type=float, default=1e-5, help="Early stopping delta")
-    parser.add_argument("--es_patience", type=int, default=50, help="Early stopping patience")
-    parser.add_argument("--es_start", type=int, default=1000, help="Epoch to start early stopping")
-    parser.add_argument("--disk_shard_size", type=int, default=None, help="Disk shard size")
+    parser.add_argument("--es-delta", type=float, default=1e-5, help="Early stopping delta")
+    parser.add_argument("--es-patience", type=int, default=50, help="Early stopping patience")
+    parser.add_argument("--es-start", type=int, default=1000, help="Epoch to start early stopping")
+    parser.add_argument("--disk-shard-size", type=int, default=None, help="Disk shard size")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
-    parser.add_argument("--enc_dim", type=int, default=512, help="Encoder dimension")
-    parser.add_argument("--lin_dim", type=int, default=1024, help="Linear layer dimension")
+    parser.add_argument("--enc-dim", type=int, default=512, help="Encoder dimension")
+    parser.add_argument("--lin-dim", type=int, default=1024, help="Linear layer dimension")
     parser.add_argument("--head", type=int, default=8, help="Number of attention heads")
-    parser.add_argument("--enc_layer", type=int, default=6, help="Number of encoder layers")
-    parser.add_argument("--lin_layer", type=int, default=4, help="Number of linear layers")
-    parser.add_argument("--enc_dropout", type=float, default=0.1, help="Dropout rate for encoder")
-    parser.add_argument("--lin_dropout", type=float, default=0.1, help="Dropout rate for linear layers")
+    parser.add_argument("--enc-layer", type=int, default=6, help="Number of encoder layers")
+    parser.add_argument("--lin-layer", type=int, default=4, help="Number of linear layers")
+    parser.add_argument("--enc-dropout", type=float, default=0.1, help="Dropout rate for encoder")
+    parser.add_argument("--lin-dropout", type=float, default=0.1, help="Dropout rate for linear layers")
     parser.add_argument("--period", type=int, default=30, help="Period for logging")
     parser.add_argument(
         "--buffer_size", dest="shuffle_buffer_size", type=int, default=160000, help="Shuffle buffer size"
     )
-    parser.add_argument("--kmer_size", type=int, default=5, help="K-mer size")
-    parser.add_argument("--signal_size", type=int, default=30, help="Signal size")
-    parser.add_argument("--block_len", type=int, default=17, help="Block length")
-    parser.add_argument("--seq_len", type=int, default=200, help="Sequence length")
-    parser.add_argument("--t_act", type=str, default="gelu", help="Activation function for transformer")
-    parser.add_argument("--lin_act", type=str, default="gelu", help="Activation function for linear layers")
-    parser.add_argument("--lr_step", type=int, default=4000, help="Learning rate step size")
-    parser.add_argument("--lr_interval", type=int, default=100, help="Learning rate interval")
-    parser.add_argument("--weight_decay", type=float, default=0.1, help="Weight decay for optimizer")
-    parser.add_argument("--class_ratio", type=int, default=None, help="Class ratio for balancing")
-    parser.add_argument("--log_interval", type=int, default=10, help="Interval for logging")
-    parser.add_argument("--eval_interval", type=int, default=1000, help="Interval for evaluation")
-    parser.add_argument("--save_interval", type=int, default=None, help="Interval for saving checkpoints")
-    parser.add_argument("--grad_clip", type=float, default=1.0, help="Gradient clipping value")
+    parser.add_argument("--kmer-size", type=int, default=5, help="K-mer size")
+    parser.add_argument("--signal-size", type=int, default=30, help="Signal size")
+    parser.add_argument("--block-len", type=int, default=17, help="Block length")
+    parser.add_argument("--seq-len", type=int, default=200, help="Sequence length")
+    parser.add_argument("--t-act", type=str, default="gelu", help="Activation function for transformer")
+    parser.add_argument("--lin-act", type=str, default="gelu", help="Activation function for linear layers")
+    parser.add_argument("--lr-step", type=int, default=4000, help="Learning rate step size")
+    parser.add_argument("--lr-interval", type=int, default=100, help="Learning rate interval")
+    parser.add_argument("--weight-decay", type=float, default=0.1, help="Weight decay for optimizer")
+    parser.add_argument("--class-ratio", type=int, default=None, help="Class ratio for balancing")
+    parser.add_argument("--log-interval", type=int, default=10, help="Interval for logging")
+    parser.add_argument("--eval-interval", type=int, default=1000, help="Interval for evaluation")
+    parser.add_argument("--save-interval", type=int, default=None, help="Interval for saving checkpoints")
+    parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient clipping value")
     parser.add_argument("--profiler", type=int, default=0, help="Profiler flag")
-    parser.add_argument("--pin_memory", type=int, default=1, help="Pin memory flag")
+    parser.add_argument("--pin-memory", type=int, default=1, help="Pin memory flag")
     parser.add_argument("--yield_period", type=int, default=None, help="Yield period for data loading")
     parser.add_argument("--rlrop", type=float, default=None, help="ReduceLROnPlateau threshold")
     parser.add_argument("--loss", type=str, default="BCE", help="Loss function")
-    parser.add_argument("--score_feature", type=bool, default=False, help="Score feature flag")
-    parser.add_argument("--gpu_pool", type=int, nargs="+", default=None, help="GPU pool")
-    parser.add_argument("--cut_overlap", type=bool, default=False, help="Cut overlap flag")
-    parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to load checkpoint")
+    parser.add_argument("--score-feature", type=bool, default=False, help="Score feature flag")
+    parser.add_argument("--gpu-pool", type=int, nargs="+", default=None, help="GPU pool")
+    parser.add_argument("--cut-overlap", type=bool, default=False, help="Cut overlap flag")
+    parser.add_argument("--load-checkpoint", type=str, default=None, help="Path to load checkpoint")
     parser.add_argument("--workers", dest="num_workers", type=int, default=8, help="Number of workers")
     parser.add_argument("--prefetch", type=int, default=512, help="Prefetch factor")
     parser.add_argument("--stride", dest="signal_stride", type=int, default=6, help="Signal stride")
-    parser.add_argument("--no_bq", action="store_true", default=False, help="No base quality flag")
-    parser.add_argument("--load_weight_only", action="store_true", default=False, help="Load weights only flag")
-    parser.add_argument("--override_lr", action="store_true", default=False, help="Override learning rate flag")
+    parser.add_argument("--no-bq", action="store_true", default=False, help="No base quality flag")
+    parser.add_argument("--load-weight-only", action="store_true", default=False, help="Load weights only flag")
+    parser.add_argument("--override-lr", action="store_true", default=False, help="Override learning rate flag")
     parser.add_argument("--comment", type=str, default="None", help="Comment for the run")
-    parser.add_argument("--model_name", type=str, default=None, help="Model name")
+    parser.add_argument("--model-name", type=str, default=None, help="Model name")
     return None
 
 
@@ -131,8 +132,8 @@ def main(args: argparse.Namespace):
             raise ValueError("GPU Pool should be the same or larger than the number of GPUs to use.")
 
     if args.disk_shard_size is None:
-        sample_file = os.listdir(os.path.join(args.data_path, "train", "pos"))[0]
-        with np.load(os.path.join(args.data_path, "train", "pos", sample_file)) as f:
+        sample_file = glob.glob(os.path.join(args.data_path, "train", "pos", "*.npz"))[0]
+        with np.load(sample_file) as f:
             args.disk_shard_size = f["kmer_token"].shape[0]
         log.info(f"Setting disk shard size to {args.disk_shard_size}.")
 

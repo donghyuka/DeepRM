@@ -39,10 +39,30 @@
 ```
 
 
+### `inference.inference_preprocess_python`
+
+```{eval-rst}
+.. automodule:: deeprm.inference.inference_preprocess_python
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+
 ### `inference.pileup_deeprm`
 
 ```{eval-rst}
 .. automodule:: deeprm.inference.pileup_deeprm
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+
+### `inference.pileup_genomic`
+
+```{eval-rst}
+.. automodule:: deeprm.inference.pileup_genomic
     :members:
     :undoc-members:
     :show-inheritance:

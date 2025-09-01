@@ -36,14 +36,14 @@ def add_arguments(parser: argparse.ArgumentParser):
     Returns:
         None
     """
-    parser.add_argument("--input", "-k", type=str, required=True, nargs="+", help="Input block file")
+    parser.add_argument("--input", "-i", type=str, required=True, nargs="+", help="Input block file")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output prefix")
     parser.add_argument("--intermediate", "-m", type=str, nargs="+", default=None, help="Intermediate files prefix")
     parser.add_argument("--score", "-p", type=int, default=100, help="Score cutoff")
     parser.add_argument("--name", "-n", type=str, default=None, nargs="+", help="Block name")
     parser.add_argument("--type", "-t", type=str, required=True, nargs="+", help="Block type")
     parser.add_argument("--sample", "-s", type=int, default=int(1e6), help="Sampling fraction")
-    parser.add_argument("--cb_len", "-c", type=int, default=41, help="Context block length")
+    parser.add_argument("--cb-len", "-c", type=int, default=41, help="Context block length")
     return None
 
 

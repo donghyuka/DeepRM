@@ -16,6 +16,7 @@ usage
 cli/index
 api/index
 advanced-installation
+troubleshooting
 license
 ```
 

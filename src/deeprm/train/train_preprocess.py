@@ -88,8 +88,8 @@ def add_arguments(parser: argparse.ArgumentParser):
 
     ## Signal preprocessing parameters
     parser.add_argument("--chunk", "-n", type=int, default=500, help="POD5 Chunk size")
-    parser.add_argument("--max_size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
-    parser.add_argument("--min_size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
+    parser.add_argument("--max-size", "-m", type=int, default=20, help="Maximum POD5 dataframe size in MB")
+    parser.add_argument("--min-size", "-i", type=int, default=10, help="Minimum POD5 dataframe size in MB")
     parser.add_argument("--keep", action="store_true", help="Keep intermediate files", default=True)
     parser.add_argument("--postfix", "-x", type=str, default="data", help="Output file postfix")
     return None

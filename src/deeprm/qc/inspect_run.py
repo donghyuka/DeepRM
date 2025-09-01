@@ -47,7 +47,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--threads", "-t", dest="threads", type=int, default=4, help="Number of threads")
     parser.add_argument("--bq", "-q", dest="bq_thres", type=int, default=7, help="Base quality threshold")
-    parser.add_argument("--bb", "-b", dest="bb_length", type=int, default=71, help="BB length")
+    parser.add_argument("--bb", "-b", dest="bb_length", type=int, default=87, help="BB length")
     parser.add_argument("--mrna", "-m", action="store_true", help="mRNA mode")
     parser.add_argument("--len", "-l", dest="len_cutoff", type=int, default=200, help="Length cutoff")
     return None

@@ -42,17 +42,16 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--bam", "-b", type=str, required=True, help="BAM file path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, default=None, help="Model path")
-    parser.add_argument("--model_type", "-y", type=str, default="deeprm_model", help="Model type")
-    parser.add_argument("--batch", "-bs", type=int, default=10000, help="Batch size")
-    parser.add_argument("--shard", "-s", type=int, default=10000, help="Shard size")
+    parser.add_argument("--model-type", "-y", type=str, default="deeprm_model", help="Model type")
+    parser.add_argument("--batch", "-s", type=int, default=10000, help="Batch size")
     parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
     parser.add_argument("--prefetch", "-p", type=int, default=4, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=4, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
     parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
-    parser.add_argument("--gpu_pool", "-gp", type=int, nargs="+", help="GPU pool")
-    parser.add_argument("--output_id", "-id", type=int, default=None, help="Output ID for Multi-output models.")
+    parser.add_argument("--gpu-pool", "-gp", type=int, nargs="+", help="GPU pool")
+    parser.add_argument("--output-id", "-id", type=int, default=None, help="Output ID for Multi-output models.")
     parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use for pileup")
     parser.add_argument("--threshold", "-th", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-ep", type=float, default=1e-30, help="Epsilon value")
@@ -61,6 +60,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
+    parser.add_argument("--annot", "-a", type=str, default=None, help="Annotation file (e.g., refFlat.txt)")
 
     return None
 
@@ -109,7 +109,7 @@ def main(args: argparse.Namespace):
     os.makedirs(pileup_output, exist_ok=True)
 
     args.output = inference_output
-    run_inference(args)
+    # run_inference(args)
     log.info("Inference Program Finished.")
 
     args.input = inference_output
@@ -206,7 +206,6 @@ def inference_worker(rank, args_dict):
 
     data_loader = load_dataset(
         args_dict["data"],
-        args_dict["shard"],
         gpu_id,
         max(1, args_dict["num_gpu"]),
         prefetch_factor=args_dict["prefetch"],

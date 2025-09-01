@@ -5,8 +5,8 @@ This script performs post-processing on DeepRM prediction files to generate a pi
 It reads .npz prediction arrays, groups statistics by label IDs, and computes metrics.
 
 The two metrics calculated are:
-1. PM6A: A score reflecting the site-level modification probability. (arbitrary units)
-2. DOM: Estimated modification stoichiometry of the site. (0-1 range)
+1. modscore: A score reflecting the site-level modification probability. (arbitrary units)
+2. stoichiometry: Estimated modification stoichiometry of the site. (0-1 range)
 
 Finally, it writes a .npz file containing the results.
 """
@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 import pysam
 import tqdm
+
+from deeprm.inference.pileup_genomic import pileup_genomic
 
 mp.set_start_method("fork", force=True)
 
@@ -45,6 +47,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
+    parser.add_argument("--annot", "-a", type=str, default=None, help="Annotation file (e.g., refFlat.txt)")
 
     return None
 
@@ -124,10 +127,11 @@ def main(args: argparse.Namespace):
     kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
     kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
 
-    ## Calculate PM6A and DOM metrics
-    dom = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
-    pm6a = -(2 - dom) * logsum_1_p_pos / count_all + (
-        (1 - dom) * np.log10(np.clip(1 - dom, 1e-30, 1)) + dom * np.log10(np.clip(dom, 1e-30, 1))
+    ## Calculate modscore and stoichiometry metrics
+    stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
+    modscore = -(2 - stoichiometry) * logsum_1_p_pos / count_all + (
+        (1 - stoichiometry) * np.log10(np.clip(1 - stoichiometry, 1e-30, 1))
+        + stoichiometry * np.log10(np.clip(stoichiometry, 1e-30, 1))
     ) * (count_pos / count_all)
 
     ## Read BAM Header to get reference names
@@ -137,7 +141,7 @@ def main(args: argparse.Namespace):
 
     ## Convert label_id to ref_names, ref_pos, and ref_strand
     ref_strand = np.sign(label_id)
-    label_id_abs = np.abs(label_id)
+    label_id_abs = np.abs(label_id - 1)  ## 1 was added during preprocessing to avoid zero label_id
     transcript_id = label_id_abs // args.label_div
     ref_pos = label_id_abs % args.label_div
     ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
@@ -148,13 +152,10 @@ def main(args: argparse.Namespace):
         ref_names=ref_names,
         ref_pos=ref_pos,
         ref_strand=ref_strand,
-        pm6a=pm6a,
-        dom=dom,
+        modscore=modscore,
+        stoichiometry=stoichiometry,
         count_all=count_all,
         count_pos=count_pos,
-        kl_div_neg=kl_div_neg,
-        kl_div_pos=kl_div_pos,
-        logsum_1_p_pos=logsum_1_p_pos,
         output_path=path,
     )
 
@@ -165,14 +166,50 @@ def main(args: argparse.Namespace):
         ref_names=ref_names,
         ref_pos=ref_pos,
         ref_strand=ref_strand,
-        pm6a=pm6a,
-        dom=dom,
+        modscore=modscore,
+        stoichiometry=stoichiometry,
         count_all=count_all,
         count_pos=count_pos,
-        kl_div_neg=kl_div_neg,
-        kl_div_pos=kl_div_pos,
-        logsum_1_p_pos=logsum_1_p_pos,
     )
+
+    if args.annot:
+        ## Generate genomic pileup if annotation is provided
+        input_df = {
+            "ref_names": ref_names,
+            "ref_pos": ref_pos,
+            "count_all": count_all,
+            "count_pos": count_pos,
+            "kl_div_pos": kl_div_pos,
+            "kl_div_neg": kl_div_neg,
+            "logsum_1_p_pos": logsum_1_p_pos,
+        }
+        input_df = pd.DataFrame(input_df)
+        genomic_df = pileup_genomic(args, input_df)
+
+        path = f"{args.output}/genomic_pileup{args.postfix}.bed"
+        bed_formatter(
+            ref_names=genomic_df["chrom"].values,
+            ref_pos=genomic_df["pos"].values,
+            ref_strand=genomic_df["strand"].values,
+            modscore=genomic_df["modscore"].values,
+            stoichiometry=genomic_df["stoichiometry"].values,
+            count_all=genomic_df["count_all"].values,
+            count_pos=genomic_df["count_pos"].values,
+            output_path=path,
+        )
+
+        path = f"{args.output}/genomic_pileup{args.postfix}.npz"
+        np.savez_compressed(
+            path,
+            ref_names=genomic_df["chrom"].values,
+            ref_pos=genomic_df["pos"].values,
+            ref_strand=genomic_df["strand"].values,
+            modscore=genomic_df["modscore"].values,
+            stoichiometry=genomic_df["stoichiometry"].values,
+            count_all=genomic_df["count_all"].values,
+            count_pos=genomic_df["count_pos"].values,
+        )
+    ##############
 
     return None
 
@@ -315,7 +352,14 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
 
 
 def bed_formatter(
-    ref_names, ref_pos, ref_strand, pm6a, dom, count_all, count_pos, kl_div_neg, kl_div_pos, logsum_1_p_pos, output_path
+    ref_names,
+    ref_pos,
+    ref_strand,
+    modscore,
+    stoichiometry,
+    count_all,
+    count_pos,
+    output_path,
 ):
     """
     Formats the results into a BED-like structure.
@@ -324,13 +368,10 @@ def bed_formatter(
         ref_names (numpy.ndarray): Array of reference names.
         ref_pos (numpy.ndarray): Array of reference positions.
         ref_strand (numpy.ndarray): Array of reference strands.
-        pm6a (numpy.ndarray): PM6A scores.
-        dom (numpy.ndarray): DOM scores.
+        modscore (numpy.ndarray): modscore scores.
+        stoichiometry (numpy.ndarray): stoichiometry scores.
         count_all (numpy.ndarray): Total counts.
         count_pos (numpy.ndarray): Positive counts.
-        kl_div_neg (numpy.ndarray): KL divergence for negative predictions.
-        kl_div_pos (numpy.ndarray): KL divergence for positive predictions.
-        logsum_1_p_pos (numpy.ndarray): Log-sum of positive predictions.
 
     Returns:
         list: List of formatted strings for each entry.
@@ -338,18 +379,12 @@ def bed_formatter(
     col1 = ref_names
     col2 = ref_pos
     col3 = ref_pos + 1  # BED format requires end position to be exclusive
-    col4 = pm6a
-    col5 = dom
-    col6 = ref_strand
-    col7 = ref_pos
-    col8 = ref_pos + 1
-    col9 = ["255,0,0"] * len(ref_names)  # Color for BED format
-    col10 = count_all
-    col11 = count_pos
-    col12 = count_all - count_pos
-    col13 = kl_div_neg
-    col14 = kl_div_pos
-    col15 = logsum_1_p_pos
+    col4 = ref_strand
+    col5 = modscore
+    col6 = stoichiometry
+    col7 = count_all
+    col8 = count_pos
+    col9 = count_all - count_pos
 
     df = pd.DataFrame(
         {
@@ -362,12 +397,6 @@ def bed_formatter(
             "col7": col7,
             "col8": col8,
             "col9": col9,
-            "col10": col10,
-            "col11": col11,
-            "col12": col12,
-            "col13": col13,
-            "col14": col14,
-            "col15": col15,
         }
     )
 

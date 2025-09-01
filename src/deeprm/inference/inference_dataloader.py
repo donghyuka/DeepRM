@@ -111,7 +111,6 @@ class NanoporeDataset(IterableDataset):
 
     Args:
         data_path (str): Path to the directory containing NPZ files.
-        disk_shard_size (int): Size of the disk shard.
         rank (int): Rank of the current process.
         num_replicas (int): Number of replicas.
         seed (int): Random seed.
@@ -126,7 +125,6 @@ class NanoporeDataset(IterableDataset):
     def __init__(
         self,
         data_path,
-        disk_shard_size,
         rank,
         num_replicas,
         seed=0,
@@ -140,7 +138,6 @@ class NanoporeDataset(IterableDataset):
 
         super().__init__()
         self.data_path = data_path
-        self.disk_shard_size = disk_shard_size
         self.rank = rank
         self.num_replicas = num_replicas
         self.file_paths = sorted(glob.glob(f"{self.data_path}/*.npz"))
@@ -228,7 +225,6 @@ class NanoporeDataLoader(DataLoader):
 
 def load_dataset(
     data_path,
-    disk_shard_size,
     rank,
     num_replicas,
     num_files_read_once=1,
@@ -246,7 +242,6 @@ def load_dataset(
     Args:
         data_path (str): Path to the directory containing NPZ files.
         batch_size (int): Batch size for loading data.
-        disk_shard_size (int): Size of the disk shard.
         rank (int): Rank of the current process.
         num_replicas (int): Number of replicas.
         pad_to (int): Padding length for sequences.
@@ -266,7 +261,6 @@ def load_dataset(
 
     dataset = NanoporeDataset(
         data_path,
-        disk_shard_size,
         rank,
         num_replicas,
         num_files_read_once=num_files_read_once,

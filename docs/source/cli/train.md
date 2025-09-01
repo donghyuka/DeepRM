@@ -19,11 +19,6 @@ deeprm train prep --in train_raw/ --out train_prep/
 # Compile dataset shards
 deeprm train compile --in train_prep/ --out ds/
 
-# Launch training (DDP optional)
+# Launch training
 deeprm train run --config configs/train.yaml --out runs/exp1
 ```
-
-## Notes
-
-- Install training extras (CPU): `pip install "deeprm[torch,train]"`.
-- GPU/ROCm: install PyTorch from the official index URL first, then `pip install "deeprm[train]"`.

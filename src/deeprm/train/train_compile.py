@@ -43,7 +43,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--chunk", "-c", dest="chunk", type=int, default=4000, help="Chunk size")
     parser.add_argument("--score", "-s", dest="score", type=float, default=1.0, help="Score threshold")
-    parser.add_argument("--val_frac", "-v", type=float, default=0.05, help="Validation set fraction")
+    parser.add_argument("--val-frac", "-v", type=float, default=0.05, help="Validation set fraction")
     return None
 
 

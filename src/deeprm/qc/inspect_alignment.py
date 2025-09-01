@@ -48,7 +48,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--thread", "-t", type=int, dest="thread", help="Number of threads per process", default=4)
     parser.add_argument("--mapq", "-m", type=int, dest="mapq", help="MAPQ cutoff", default=30)
     parser.add_argument("--bq", "-b", type=int, dest="bq", help="BQ cutoff", default=7)
-    parser.add_argument("--min_len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
+    parser.add_argument("--min-len", "-l", type=int, dest="len_cutoff", help="Length cutoff", default=0)
 
     return None
 

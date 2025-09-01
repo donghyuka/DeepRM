@@ -6,7 +6,7 @@ Use `--help` at any level to see available options.
 ```bash
 deeprm --help
 deeprm check --help
-deeprm inference --help
+deeprm call --help
 deeprm train --help
 deeprm qc --help
 ```
@@ -16,7 +16,7 @@ deeprm qc --help
 :caption: Commands
 
 check
-inference
+call
 train
 qc
 ```
