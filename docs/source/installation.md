@@ -19,6 +19,7 @@
 * Python package requirements are listed in `requirements.txt` and will be installed automatically when you install DeepRM.
 
 ## Installation options
+* Estimated time: ~10 minutes
 1. Install via PIP (recommended)
 
 ```bash

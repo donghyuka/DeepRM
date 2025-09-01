@@ -3,6 +3,7 @@
 * You can also use your own POD5 and BAM files.
 
 ## RNA Modification Detection
+* Estimated time: ~1 hours
 1️⃣ **Prepare data**
 ```bash
 deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
@@ -19,8 +20,12 @@ deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir
 deeprm call run -b inference_example.bam -i <prep_dir> -o <pred_dir> -s 1000
 ```
 * Adjust the `-s` (batch size) parameter according to your GPU memory capacity (default: 10000).
+* Expected output file:
+    *  Site-level detection result file (.bed)
+    *  Molecule-level detection result file (.npz)
 
 ## Model Training
+* Estimated time: ~1 hours
 1️⃣ **Prepare unmodified & modified training data**
 ```bash
 deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
@@ -37,4 +42,6 @@ deeprm train compile -n <prep_dir>/a/data -p <prep_dir>/m6a/data -o <prep_dir>/c
 deeprm train run -d <prep_dir>/compiled -o <output_dir> --batch 64
 ```
 * Adjust the `--batch` parameter according to your GPU memory capacity (default: 1024).
+* Expected output file:
+  *  Trained DeepRM model file (.pt)
 
