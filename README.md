@@ -96,6 +96,7 @@ deeprm check
 
 ### RNA Modification Detection
 * Estimated time: ~1 hours
+
 1️⃣ **Prepare data**
 ```bash
 deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir>
@@ -119,6 +120,7 @@ deeprm call run -b inference_example.bam -i <prep_dir> -o <pred_dir> -s 1000
 
 ### Model Training
 * Estimated time: ~1 hours
+
 1️⃣ **Prepare unmodified & modified training data**
 ```bash
 deeprm train prep -p training_a_example.pod5 -b training_a_example.bam -o <prep_dir>/a
