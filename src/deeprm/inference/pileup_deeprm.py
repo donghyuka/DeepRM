@@ -73,7 +73,7 @@ def main(args: argparse.Namespace):
     keys = ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos", "count_all", "count_pos", "label_id"]
 
     ## Gather all prediction files and split them for multiprocessing
-    file_paths = glob.glob(f"{args.input}/*.pkl") + glob.glob(f"{args.input}/*.tsv") + glob.glob(f"{args.input}/*.npz")
+    file_paths = glob.glob(os.path.join(args.input, "*.npz"))
     file_paths_split = np.array_split(file_paths, min(args.thread, len(file_paths)))
 
     ## Create a shared dictionary to store results from all processes

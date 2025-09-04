@@ -146,7 +146,7 @@ def sample_and_save(
     Returns:
         None
     """
-    in_file_list = [x for in_path in in_path_list for x in glob.glob(f"{in_path}/*.npz")]
+    in_file_list = [x for in_path in in_path_list for x in glob.glob(os.path.join(in_path, "*.npz"))]
     column_keys = [
         "segment_len_arr",
         "signal_token",

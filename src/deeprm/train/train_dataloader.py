@@ -13,6 +13,7 @@ import functools
 import gc
 import glob
 import math
+import os
 
 import numpy as np
 
@@ -130,10 +131,16 @@ class BinaryClassDatasetIterator:
             self.current_df_index[self.current_class] < self.paths_len[self.current_class] - 1
         ):
             self.current_df_index[self.current_class] += 1
-            with np.load(self.paths[self.current_class][self.current_df_index[self.current_class]]) as npz:
-                for key_idx, key in enumerate(self.keys):
-                    current_buffer[key_idx].append(npz[key])
-                len_buffer += len(npz[self.keys[0]])
+            try:
+                with np.load(self.paths[self.current_class][self.current_df_index[self.current_class]]) as npz:
+                    for key_idx, key in enumerate(self.keys):
+                        current_buffer[key_idx].append(npz[key])
+                    len_buffer += len(npz[self.keys[0]])
+            except Exception as e:
+                log.warning(
+                    f"Skipping file {self.paths[self.current_class][self.current_df_index[self.current_class]]} due to error: {e}"
+                )
+                continue
 
         ## Concat and shuffle the data
         if self.shuffle:
@@ -592,8 +599,8 @@ def load_dataset(
 
     pad_collate_func = functools.partial(pad_collate, pad_to=pad_to, signal_stride=signal_stride, kmer_size=kmer_size)
     ## Use DataLoader to load the dataset
-    pos_data_paths = glob.glob(f"{pos_data_path}/*.npz")
-    neg_data_paths = glob.glob(f"{neg_data_path}/*.npz")
+    pos_data_paths = glob.glob(os.path.join(pos_data_path, "*.npz"))
+    neg_data_paths = glob.glob(os.path.join(neg_data_path, "*.npz"))
 
     if class_ratio is None:
         class_ratio = len(neg_data_paths) / len(pos_data_paths)

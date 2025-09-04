@@ -304,7 +304,7 @@ def preprocess_pod5(pod5_path, save_path, ncpu, chunk, max_mb, min_mb):
     Returns:
         dict: Dictionary mapping file paths to read IDs.
     """
-    pod5_path_list = glob.glob(pod5_path + "/*.pod5")
+    pod5_path_list = glob.glob(os.path.join(pod5_path, "*.pod5"))
     proc_list = []
     np.random.shuffle(pod5_path_list)
     pod5_path_list_split = np.array_split(pod5_path_list, ncpu)

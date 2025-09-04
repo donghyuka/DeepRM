@@ -109,7 +109,7 @@ def main(args: argparse.Namespace):
     os.makedirs(pileup_output, exist_ok=True)
 
     args.output = inference_output
-    # run_inference(args)
+    run_inference(args)
     log.info("Inference Program Finished.")
 
     args.input = inference_output
@@ -195,7 +195,7 @@ def inference_worker(rank, args_dict):
     model.eval()
 
     if args_dict["resume"]:
-        saved = glob.glob(f"{args_dict['output']}/inference_{rank}_*.pkl")
+        saved = glob.glob(os.path.join(args_dict["output"], f"inference_{rank}_*.pkl"))
         if len(saved) > 0:
             saved = [int(x.split("/")[-1].split("_")[-1].split(".")[0]) for x in saved]
             saved = max(saved)

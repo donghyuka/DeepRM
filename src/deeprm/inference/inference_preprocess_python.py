@@ -112,7 +112,7 @@ def main(args: argparse.Namespace):
         pod5_paths_split = [[args.pod5]]
 
     else:
-        pod5_file_list = glob.glob(f"{args.pod5}/*.pod5")
+        pod5_file_list = glob.glob(os.path.join(args.pod5, "/*.pod5"))
         pod5_paths_split = np.array_split(pod5_file_list, min(args.thread, len(pod5_file_list)))
 
     proc_list = []

@@ -13,6 +13,7 @@ import gc
 import glob
 import itertools as it
 import multiprocessing as mp
+import os
 from collections import defaultdict
 
 import networkx as nx
@@ -463,7 +464,7 @@ def extract_blocks_from_read_list_mp_worker(
 
     if resume is not None:
         ## search for last flush file
-        flush_file_list = glob.glob(f"{resume}/df_{pid}_*.pkl")
+        flush_file_list = glob.glob(os.path.join(resume, f"df_{pid}_*.pkl"))
         if len(flush_file_list) > 0:
             flush_idx = [int(x.split("_")[-1].split(".")[0]) for x in flush_file_list]
             last_flush_idx = max(flush_idx)

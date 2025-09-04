@@ -8,16 +8,21 @@ and batching of data for efficient processing in PyTorch.
 
 import glob
 import math
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from deeprm.utils import check_deps
+from deeprm.utils.logging import get_logger
 
 check_deps.check_torch_available()
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset
+
+log = get_logger(__name__)
+check_deps.check_torch_available()
 
 
 class NanoporeDatasetIterator:
@@ -56,18 +61,22 @@ class NanoporeDatasetIterator:
         Returns:
             dict: Dictionary containing the data from the NPZ file.
         """
-        npz = np.load(path)
-        data = {
-            "read_id": npz["read_id"],
-            "label_id": npz["label_id"],
-            "segment_len": npz["segment_len_arr"],
-            "signal_token": npz["signal_token"],
-            "kmer_token": npz["kmer_token"],
-            "dwell_motor_token": npz["dwell_motor_token"],
-            "dwell_pore_token": npz["dwell_pore_token"],
-            "bq_token": npz["bq_token"],
-        }
-        npz.close()
+        try:
+            npz = np.load(path)
+            data = {
+                "read_id": npz["read_id"],
+                "label_id": npz["label_id"],
+                "segment_len": npz["segment_len_arr"],
+                "signal_token": npz["signal_token"],
+                "kmer_token": npz["kmer_token"],
+                "dwell_motor_token": npz["dwell_motor_token"],
+                "dwell_pore_token": npz["dwell_pore_token"],
+                "bq_token": npz["bq_token"],
+            }
+            npz.close()
+        except Exception:
+            log.warning(f"Failed to read {path}, skipping.")
+            return None
         return data
 
     def __iter__(self):
@@ -93,6 +102,7 @@ class NanoporeDatasetIterator:
             end_index = min(self._file_index + self.max_workers, len(self.file_paths))
             paths_batch = self.file_paths[self._file_index : end_index]
             self._futures = [self.executor.submit(self._read_df, p) for p in paths_batch]
+            self._futures = [f for f in self._futures if f is not None]
             self._file_index = end_index
 
         if not self._futures:
@@ -140,7 +150,7 @@ class NanoporeDataset(IterableDataset):
         self.data_path = data_path
         self.rank = rank
         self.num_replicas = num_replicas
-        self.file_paths = sorted(glob.glob(f"{self.data_path}/*.npz"))
+        self.file_paths = sorted(glob.glob(os.path.join(self.data_path, "*.npz")))
         self.epoch = 0
         self.seed = seed
         self.num_shard = math.ceil(len(self.file_paths) / num_replicas)
