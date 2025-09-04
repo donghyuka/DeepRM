@@ -1,6 +1,7 @@
 # DeepRM
 #### Deep learning for RNA Modification
-![GitHub](https://img.shields.io/github/license/vadanamu/DeepRM)
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-red?logo=github)](https://github.com/vadanamu/DeepRM)
+[![CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vadanamu/DeepRM?style=social)
 ![GitHub last commit](https://img.shields.io/github/last-commit/vadanamu/DeepRM)
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/vadanamu/DeepRM)
