@@ -44,6 +44,19 @@ def _args_to_cmd(args: argparse.Namespace) -> List[str]:
 
 def main(args: argparse.Namespace) -> int:
     bin_path = args.preprocess_bin or os.environ.get("DEEPRM_PREPROCESS_BIN") or DEFAULT_BIN
+
+    ## Check executable permissions
+    if not os.path.isfile(bin_path):
+        log.warning("Preprocessing binary not found at %s", bin_path)
+    else:
+        if not os.access(bin_path, os.X_OK):
+            log.warning("Preprocessing binary at %s is not executable", bin_path)
+            try:
+                os.chmod(bin_path, os.stat(bin_path).st_mode | 0o111)
+                log.info("Setting executable permissions for %s", bin_path)
+            except Exception as exc:
+                log.warning("Failed to set executable permissions: %s", exc)
+
     cmd = [str(bin_path)] + _args_to_cmd(args)
     try:
         log.info("Attempting to use accelerated preprocessing binary: %s", bin_path)
