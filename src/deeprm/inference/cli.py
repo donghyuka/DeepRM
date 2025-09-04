@@ -16,8 +16,8 @@ _LEAVES = {
 
 def parser() -> argparse.ArgumentParser:
     gp = argparse.ArgumentParser(
-        prog="deeprm inference",
-        description="DeepRM Inference Module",
+        prog="deeprm call",
+        description="DeepRM Call (inference) Module",
         add_help=True,
     )
     sub = gp.add_subparsers(dest="cmd", metavar="{prep,run,pileup}")
@@ -76,15 +76,15 @@ def entry(argv: List[str] | None = None) -> int:
     if ns.cmd not in _LEAVES:
         gp.error(f"Unknown subcommand '{ns.cmd}'")
 
-    # If leaf help requested (e.g., `deeprm inference run --help`), import only that leaf
+    # If leaf help requested (e.g., `deeprm call run --help`), import only that leaf
     if not rest or any(h in rest for h in ("-h", "--help")):
-        lp = _build_leaf_parser(ns.cmd, prog=f"deeprm inference {ns.cmd}")
+        lp = _build_leaf_parser(ns.cmd, prog=f"deeprm call {ns.cmd}")
         lp.parse_args(["--help"])  # prints help and exits(0)
         return 0
 
     # Normal execution path: import only the requested leaf, parse its flags, run it
     mod = import_module(_LEAVES[ns.cmd])
-    lp = _build_leaf_parser(ns.cmd, prog=f"deeprm inference {ns.cmd}")
+    lp = _build_leaf_parser(ns.cmd, prog=f"deeprm call {ns.cmd}")
     leaf_args = lp.parse_args(rest)
 
     # Run

@@ -14,7 +14,7 @@ from typing import Dict, List
 # -------------------------------------------------------------------
 _HELP_REGISTRY: Dict[str, dict] = {
     "call": {
-        "desc": "Inference helpers",
+        "desc": "Call (inference) helpers",
         "module": "deeprm.inference.cli",
         "subcommands": [
             ("prep", "Preprocess raw inputs for inference"),
