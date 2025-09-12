@@ -203,8 +203,37 @@ deeprm call run --model <model_file> --data <data_dir> --output <prediction_dir>
     8. Number of reads called as modified
     9. Number of reads called as unmodified
     ```
-  
 
+#### Molecule-level NPZ file format
+* The output NPZ file contains the following arrays:
+```text
+    1. read_id
+    2. label_id
+    3. pred: modification score (between 0 and 1)
+```
+* Read ID specification:
+    * The UUID4 format read ID (128 bits) is converted to two 64-bit integers for NumPy compatibility.
+    * You can convert the two 64-bit integers back to UUID4 using the following Python code:
+      ```python
+      import numpy as np
+      import uuid
+      def int_to_uuid(high, low):
+          return uuid.UUID(bytes=b"".join([high.tobytes(),low.tobytes()]))
+      ```
+* Label ID specification:
+    * Label ID contains the reference, position, and strand information.
+    * You can decode the label ID using the following Python code:
+    ```python
+    import numpy as np
+    def decode_label_id(label_id, label_div = 10**9):
+        strand = np.sign(label_id)
+        label_id_abs = np.abs(label_id - 1)
+        ref_id = label_id_abs // label_div
+        pos = label_id_abs % label_div
+        return ref_id, pos, strand
+    ```
+    * Reference ID is extracted from the input BAM file header.
+  
 ### Training usage
 ![deeprm_train_pipeline.png](docs/images/deeprm_train_pipeline.png)
 #### Prepare Data
