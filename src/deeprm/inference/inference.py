@@ -1,5 +1,5 @@
 """
-DeeepRM Inference Module
+DeespRM Inference Module
 
 This program handles the inference process for DeepRM models, including loading the model,
 processing input data, and saving the output predictions.
@@ -43,7 +43,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
     parser.add_argument("--model", "-m", type=str, default=None, help="Model path")
     parser.add_argument("--model-type", "-y", type=str, default="deeprm_model", help="Model type")
-    parser.add_argument("--batch", "-s", type=int, default=10000, help="Batch size")
+    parser.add_argument("--batch", "-s", type=int, default=16000, help="Batch size")
     parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
     parser.add_argument("--prefetch", "-p", type=int, default=4, help="Number of files to load")
     parser.add_argument("--worker", "-w", type=int, default=4, help="Number of workers per GPU")
@@ -262,8 +262,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             pred_buffer = deque(maxlen=args_dict["flush"])
             label_id_buffer = deque(maxlen=args_dict["flush"])
             read_id_buffer = deque(maxlen=args_dict["flush"])
-            flush_idx = -1
-            idx = -1
+            processed_batches = -1
 
             batch_data_buffer = None
 
@@ -278,15 +277,22 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     batch_data_cpu = {k: v[bidx] for k, v in batch_data_split_cpu.items()}
 
                     if len(batch_data_cpu["label_id"]) < args_dict["batch"]:
-                        batch_data_buffer = batch_data_cpu
+                        # Buffer the smaller batch for next read
+                        if batch_data_buffer is not None:
+                            log.warning("Error in data batching - more than one smaller batch occured in a read.")
+                            batch_data_buffer = {
+                                k: torch.cat((batch_data_buffer[k], v), dim=0) for k, v in batch_data_cpu.items()
+                            }
+                        else:
+                            batch_data_buffer = batch_data_cpu
+                        continue
 
-                    if idx == -1:
+                    if processed_batches == -1:
                         ## First batch
                         batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
                         label_id = batch_data_cpu["label_id"]
                         read_id = batch_data_cpu["read_id"]
-                        idx += 1
-                        flush_idx += 1
+                        processed_batches += 1
                         continue
 
                     to_gpu_proc = executor.submit(to_gpu, batch_data_cpu, gpu_id, copy_stream)
@@ -299,24 +305,22 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
                     read_id_buffer.append(read_id)
                     pred_buffer.append(pred)
 
-                    if flush_idx == args_dict["flush"] - 1:
+                    processed_batches += 1
+
+                    if processed_batches % args_dict["flush"] == 0 and processed_batches > 0:
                         preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
                         label_ids = torch.cat(list(label_id_buffer), axis=0).numpy()
-                        label_id_buffer.clear()
                         read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
-                        read_id_buffer.clear()
                         pred_buffer.clear()
-                        out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
+                        label_id_buffer.clear()
+                        read_id_buffer.clear()
+                        out_path = f"{args_dict['output']}/inference_{rank}_{processed_batches}.npz"
                         np.savez_compressed(out_path, label_id=label_ids, read_id=read_ids, pred=preds)
-                        flush_idx = 0
-                    else:
-                        flush_idx += 1
 
                     torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
                     batch_data_gpu = to_gpu_proc.result()
                     label_id = batch_data_cpu["label_id"]
                     read_id = batch_data_cpu["read_id"]
-                    idx += 1
 
             ## Last batch
             pred = model(*batch_data_gpu)
@@ -334,7 +338,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
             read_id_buffer.clear()
             pred_buffer.clear()
-            out_path = f"{args_dict['output']}/inference_{rank}_{idx}.npz"
+            out_path = f"{args_dict['output']}/inference_{rank}_{processed_batches}.npz"
             np.savez_compressed(out_path, label_id=ids, read_id=read_ids, pred=preds)
 
             executor.shutdown(wait=True)
