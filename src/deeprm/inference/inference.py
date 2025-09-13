@@ -331,6 +331,7 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
             label_id_buffer.append(label_id)
             read_id_buffer.append(read_id)
             pred_buffer.append(pred)
+            processed_batches += 1
 
             preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
             ids = torch.cat(list(label_id_buffer), axis=0).numpy()
