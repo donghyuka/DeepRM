@@ -227,7 +227,7 @@ deeprm call run --model <model_file> --data <data_dir> --output <prediction_dir>
     import numpy as np
     def decode_label_id(label_id, label_div = 10**9):
         strand = np.sign(label_id)
-        label_id_abs = np.abs(label_id - 1)
+        label_id_abs = np.abs(label_id) - 1
         ref_id = label_id_abs // label_div
         pos = label_id_abs % label_div
         return ref_id, pos, strand
