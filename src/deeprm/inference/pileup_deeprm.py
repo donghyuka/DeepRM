@@ -141,7 +141,7 @@ def main(args: argparse.Namespace):
 
     ## Convert label_id to ref_names, ref_pos, and ref_strand
     ref_strand = np.sign(label_id)
-    label_id_abs = np.abs(label_id - 1)  ## 1 was added during preprocessing to avoid zero label_id
+    label_id_abs = np.abs(label_id) - 1  ## 1 was added during preprocessing to avoid zero label_id
     transcript_id = label_id_abs // args.label_div
     ref_pos = label_id_abs % args.label_div
     ref_names = ref_arr[transcript_id]  ## Map transcript_id to reference names with vectorized operation
