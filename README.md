@@ -176,12 +176,12 @@ samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
-deeprm call prep --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
+deeprm call prep -p <input_POD5_dir> -b <bam_path> -o <prep_dir>
 ```
 * This will create the npz files for inference.
 
 #### Run Inference
-* The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
+* The trained DeepRM model file is attached in the repository: `weight/deeprm_weights.pt`.
 * For inference, run the following command:
     * Adjust the `-s` (batch size) parameter according to your GPU memory capacity (default: 10000).
 ```bash

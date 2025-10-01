@@ -17,7 +17,7 @@ Run the inference workflow (prep → run → pileup). Heavy deps (pysam, pod5, t
 deeprm call prep -i raw/ -o prep/ --threads 8
 
 # 2) Run model inference
-deeprm call run -m model/deeprm_model.pt -d prep/ -o pred/
+deeprm call run -m weight/deeprm_weights.pt -d prep/ -o pred/
 
 # 3) Aggregate site-level metrics
 deeprm call pileup -i pred/ -o pileup/ -b mpileup.filtered.pkl

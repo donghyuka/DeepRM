@@ -6,8 +6,8 @@
 #### Accelerated preparation (recommended, default)
 * This method uses precompiled C++ binary for accelerating the preprocessing step.
 ```bash
-=dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
-=tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
+tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
 ```
 * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 * If the precompiled binary does not work on your system, please refer to the [advanced-installation](advanced-installation) page for detailed build instructions.
@@ -32,12 +32,12 @@ samtools index -@ <threads> <bam_path>
 ```
 * To preprocess the inference data (transcriptome), run the following command:
 ```bash
-deeprm call prep --input <input_POD5_dir> --output <output_file> --dorado <dorado_dir>
+deeprm call prep -p <input_POD5_dir> -b <bam_path> -o <prep_dir>
 ```
 * This will create the npz files for inference.
 
 ### Run Inference
-* The trained DeepRM model file is attached in the repository: `model/deeprm_model.pt`.
+* The trained DeepRM model file is attached in the repository: `weight/deeprm_weights.pt`.
 * For inference, run the following command:
   * Modify the '-s' (batch size) parameter according to your GPU memory capacity (default: 1000).
 ```bash
