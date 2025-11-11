@@ -7,6 +7,7 @@
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/vadanamu/DeepRM)
 ![GitHub contributors](https://img.shields.io/github/contributors/vadanamu/DeepRM)
 ![GitHub language count](https://img.shields.io/github/languages/count/vadanamu/DeepRM)
+![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17577862.svg)
 
 ![deeprm.png](docs/images/deeprm.png)
 
