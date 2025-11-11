@@ -191,18 +191,8 @@ deeprm call run --model <model_file> --data <data_dir> --output <prediction_dir>
 * Optionally, if you used a transcriptomic reference for alignment, you can convert the result to genomic coordinates by supplying a RefFlat/GenePred/RefGene file (`--annot <annotation_file>`).
 
 #### BED file format
-* The output BED file contains the following columns:
-* ```text
-    1. Reference name (chromosome or transcript ID)
-    2. Start position (0-based)
-    3. End position (start position + 1)
-    4. Strand (-1 for reverse, 1 for forward)
-    5. DeepRM modification score
-    6. DeepRM modification stoichiometry
-    7. Number of total reads called as modified or unmodified
-    8. Number of reads called as modified
-    9. Number of reads called as unmodified
-    ```
+* The output BED file follows the standard bedMethyl format. Please see https://genome.ucsc.edu/goldenpath/help/bedMethyl.html for description.
+* Please note that columns 14 to 18 are zero-filled for compatibility. These columns will be used for a planned future update.
 
 #### Molecule-level NPZ file format
 * The output NPZ file contains the following arrays:

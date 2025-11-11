@@ -376,15 +376,25 @@ def bed_formatter(
     Returns:
         list: List of formatted strings for each entry.
     """
+
     col1 = ref_names
     col2 = ref_pos
-    col3 = ref_pos + 1  # BED format requires end position to be exclusive
-    col4 = ref_strand
-    col5 = modscore
-    col6 = stoichiometry
-    col7 = count_all
-    col8 = count_pos
-    col9 = count_all - count_pos
+    col3 = ref_pos + 1
+    col4 = ["m"] * len(ref_names)
+    col5 = np.clip((modscore * 100).astype(int), 0, 1000)
+    col6 = ref_strand
+    col7 = ref_pos
+    col8 = ref_pos + 1
+    col9 = ["255,0,0"] * len(ref_names)
+    col10 = count_all
+    col11 = stoichiometry * 100
+    col12 = (count_all * stoichiometry).astype(int)
+    col13 = count_all - stoichiometry
+    col14 = np.zeros(len(ref_names))
+    col15 = np.zeros(len(ref_names))
+    col16 = np.zeros(len(ref_names))
+    col17 = np.zeros(len(ref_names))
+    col18 = np.zeros(len(ref_names))
 
     df = pd.DataFrame(
         {
@@ -397,9 +407,18 @@ def bed_formatter(
             "col7": col7,
             "col8": col8,
             "col9": col9,
+            "col10": col10,
+            "col11": col11,
+            "col12": col12,
+            "col13": col13,
+            "col14": col14,
+            "col15": col15,
+            "col16": col16,
+            "col17": col17,
+            "col18": col18,
         }
     )
 
-    df.to_csv(output_path, sep="\t", header=False, index=False, float_format="%.6f")
+    df.to_csv(output_path, sep="\t", header=False, index=False, float_format="%.2f")
 
     return None
