@@ -46,11 +46,14 @@ deeprm call run --model <model_file> --data <data_dir> --output <prediction_dir>
 * This will create a directory with the result files.
 * Optionally, if you used a transcriptomic reference for alignment, you can convert the result to genomic coordinates by supplying a RefFlat/GenePred/RefGene file (`--annot <annotation_file>`).
 
-### BED file format
+### Site-level BED file format
 * The output BED file follows the standard bedMethyl format. Please see https://genome.ucsc.edu/goldenpath/help/bedMethyl.html for description.
 * Please note that columns 14 to 18 are zero-filled for compatibility. These columns will be used for a planned future update.
 
-### Molecule-level NPZ file format
+### Molecule-level BAM file format
+* The output BAM file contains modification information in MM and ML tags. Please see https://samtools.github.io/hts-specs/SAMtags.pdf for description.
+
+### Molecule-level NPZ file format (advanced usage)
 * The output NPZ file contains the following arrays:
 ```text
     1. read_id
