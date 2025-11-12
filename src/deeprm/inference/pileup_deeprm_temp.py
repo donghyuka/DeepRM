@@ -485,13 +485,13 @@ def get_mm_tag(q_pos, preds, seq, base="A", mod="a"):
 
 
 def write_modbam(in_path, out_path, data, threads):
-    intermediate_dir = out_path + ".shard"
+    intermediate_dir = out_path + ".tmp"
     os.makedirs(intermediate_dir, exist_ok=True)
 
     proc_list = []
     for i, sub_data in enumerate(np.array_split(data, threads)):
         out_path_proc = os.path.join(intermediate_dir, f"{i}.bam")
-        proc = mp.Process(target=write_modbam_worker, args=(in_path, out_path_proc, sub_data))
+        proc = mp.Process(target=write_modbam_worker, args=(in_path, out_path_proc, sub_data, threads))
         proc_list.append(proc)
     for proc in proc_list:
         proc.start()
@@ -499,8 +499,8 @@ def write_modbam(in_path, out_path, data, threads):
         proc.join()
 
     unsorted_path = out_path + ".unsorted.bam"
-    pysam.merge(f"-@ {threads} -f", unsorted_path, *glob.glob(os.path.join(intermediate_dir, "*.bam")))
-    pysam.sort(f"-@ {threads}", "-m 4G", "-o", out_path, unsorted_path)
+    pysam.merge(f"-@ {threads} -f -o {unsorted_path}", *glob.glob(os.path.join(intermediate_dir, "*.bam")))
+    pysam.sort(f"-@ {threads} -o {out_path}", unsorted_path)
     pysam.index(out_path)
 
     shutil.rmtree(intermediate_dir)
@@ -509,24 +509,26 @@ def write_modbam(in_path, out_path, data, threads):
     return None
 
 
-def write_modbam_worker(in_path, out_path, data):
-    in_bam = pysam.AlignmentFile(in_path, "rb")
-    out_bam = pysam.AlignmentFile(out_path, "wb", template=in_bam)
-    for read in tqdm.tqdm(in_bam, total=in_bam.mapped + in_bam.unmapped):
-        read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
-        read_id_high, read_id_low = np.frombuffer(uuid.UUID(read_id).bytes, dtype=np.int64)
-        ref_id = read.reference_id
-        try:
-            data_read = data.loc[ref_id, read_id_high, read_id_low]
-        except KeyError:
-            continue
-        mapping = read.get_aligned_pairs()
-        mapping = {i[1]: i[0] for i in mapping if i[1] is not None}
-        q_pos = [mapping.get(i, None) for i in data_read["pos"]]
-        mm_tag, ml_tag = get_mm_tag(q_pos, data_read["pred"], str(read.query_sequence))
-        read.set_tag("MM", mm_tag, "Z")
-        read.set_tag("ML", ml_tag)
-        out_bam.write(read)
-    in_bam.close()
+def write_modbam_worker(in_path, out_path, data, threads=1):
+    in_bam = pysam.AlignmentFile(in_path, "rb", threads=threads, check_sq=False)
+    out_bam = pysam.AlignmentFile(out_path, "wb", threads=threads, template=in_bam)
+    refs = data.index.get_level_values(0)
+    for ref in tqdm.tqdm(refs, desc="writing output files"):
+        for read in in_bam.fetch(tid=ref):
+            read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
+            read_id_high, read_id_low = np.frombuffer(uuid.UUID(read_id).bytes, dtype=np.int64)
+            ref_id = read.reference_id
+            try:
+                data_read = data.loc[read_id_high, read_id_low, ref_id]
+                mapping = read.get_aligned_pairs()
+                mapping = {i[1]: i[0] for i in mapping if i[1] is not None}
+                q_pos = [mapping.get(i, None) for i in data_read["pos"]]
+                mm_tag, ml_tag = get_mm_tag(q_pos, data_read["pred"], str(read.query_sequence))
+                read.set_tag("MM", mm_tag, "Z")
+                read.set_tag("ML", ml_tag)
+                out_bam.write(read)
+            except Exception:
+                continue
     out_bam.close()
+    in_bam.close()
     return None
