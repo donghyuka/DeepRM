@@ -16,6 +16,8 @@ import gc
 import glob
 import multiprocessing as mp
 import os
+import shutil
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -63,7 +65,9 @@ def main(args: argparse.Namespace):
     Returns:
         None: Results are saved to a .npz file in the specified output directory.
     """
+    import time
 
+    start = time.time()
     if args.thread is None:
         args.thread = max(1, int(0.95 * mp.cpu_count()))
 
@@ -71,6 +75,7 @@ def main(args: argparse.Namespace):
 
     ## Define keys for shared data storage
     keys = ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos", "count_all", "count_pos", "label_id"]
+    modbam_keys = ["read_id_high", "read_id_low", "ref_id", "pos", "pred"]
 
     ## Gather all prediction files and split them for multiprocessing
     file_paths = glob.glob(os.path.join(args.input, "*.npz"))
@@ -81,19 +86,37 @@ def main(args: argparse.Namespace):
     shared_dict = manager.dict()
     for key in keys:
         shared_dict[key] = manager.dict()
+    shared_dict["modbam_data"] = manager.dict()
 
     ## Start worker processes to process each chunk of files
     proc_list = []
     for pid, file_paths in enumerate(file_paths_split):
         proc = mp.Process(
             target=worker,
-            args=(pid, file_paths, keys, shared_dict, args.slice, args.threshold, args.epsilon, args.flip),
+            args=(
+                pid,
+                file_paths,
+                keys,
+                shared_dict,
+                args.label_div,
+                args.slice,
+                args.threshold,
+                args.epsilon,
+                args.flip,
+            ),
         )
         proc.start()
         proc_list.append(proc)
     for proc in proc_list:
         proc.join()
     gc.collect()
+    modbam_data = (
+        pd.concat([shared_dict["modbam_data"][pid] for pid in range(len(file_paths_split))], axis=0)
+        .groupby(["ref_id", "read_id_high", "read_id_low"])
+        .agg({"pos": "sum", "pred": "sum"})
+    )
+    modbam_out_path = os.path.join(args.output, "modbam_" + os.path.basename(args.bam))
+    write_modbam(args.bam, modbam_out_path, modbam_data, args.thread)
 
     ## find unique label across all chunks
     all_ids = np.concatenate([shared_dict["label_id"][pid] for pid in range(len(file_paths_split))])
@@ -210,7 +233,8 @@ def main(args: argparse.Namespace):
             count_pos=genomic_df["count_pos"].values,
         )
     ##############
-
+    elapsed = time.time() - start
+    print(f"Finished in {elapsed:.2f} seconds.")
     return None
 
 
@@ -231,7 +255,7 @@ def grouped_sum(n_unique, idx, vals):
     return group_sums
 
 
-def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, epsilon=1e-30, flip=False):
+def worker(pid, file_paths, keys, shared_dict, label_div, slice=None, threshold_pos=0.98, epsilon=1e-30, flip=False):
     """
     Worker function to process a subset of prediction files.
     Computes per-label statistics and stores results in a shared dictionary.
@@ -251,13 +275,25 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
     """
 
     ## Initialize container dictionary for this process
-    data_dict = {keys: [] for keys in keys}
+    data_dict = {k: [] for k in keys}
+    modbam_data = []
 
     ## Iterate over prediction files
     for idx, path in enumerate(tqdm.tqdm(file_paths, desc="Reading input files", leave=False)):
+        modbam_chunk = {}
         with np.load(path) as data:
             pred = data["pred"]  # prediction probabilities
             label_id = data["label_id"]  # integer labels for each prediction
+            read_id = data["read_id"]
+        label_id_abs = np.abs(label_id) - 1
+        modbam_chunk["read_id_high"] = read_id[:, 0]
+        modbam_chunk["read_id_low"] = read_id[:, 1]
+        modbam_chunk["ref_id"] = label_id_abs // label_div
+        modbam_chunk["pos"] = label_id_abs % label_div
+        modbam_chunk["pred"] = (pred * 256).astype(np.uint8).clip(0, 255)
+        modbam_chunk = pd.DataFrame(modbam_chunk)
+        modbam_chunk = modbam_chunk.groupby(["ref_id", "read_id_high", "read_id_low"]).agg({"pos": list, "pred": list})
+        modbam_data.append(modbam_chunk)
 
         ## Ensure correct dtypes
         assert pred.dtype == np.float32, f"Expected pred to be int32, but got {pred.dtype} in {path}"
@@ -309,6 +345,17 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
         data_dict["kl_div_neg"].append(grouped_sum(n_unique, id_idx, kl_div_neg))
         data_dict["kl_div_pos"].append(grouped_sum(n_unique, id_idx, kl_div_pos))
 
+    modbam_data = (
+        pd.concat(modbam_data, axis=0)
+        .groupby(["ref_id", "read_id_high", "read_id_low"])
+        .agg({"pos": "sum", "pred": "sum"})
+    )
+
+    shared_dict["modbam_data"][pid] = modbam_data
+
+    del modbam_data
+    gc.collect()
+
     ## Combine chunked results for this process
     all_ids = np.concatenate(data_dict["label_id"])
     global_ids = np.unique(all_ids)
@@ -348,6 +395,7 @@ def worker(pid, file_paths, keys, shared_dict, slice=None, threshold_pos=0.98, e
     shared_dict["logsum_1_p_pos"][pid] = logsum_1_p_pos
     shared_dict["kl_div_neg"][pid] = kl_div_neg
     shared_dict["kl_div_pos"][pid] = kl_div_pos
+
     return None
 
 
@@ -420,5 +468,65 @@ def bed_formatter(
     )
 
     df.to_csv(output_path, sep="\t", header=False, index=False, float_format="%.2f")
+    return None
 
+
+def get_mm_tag(q_pos, preds, seq, base="A", mod="a"):
+    pred_dict = dict(zip(q_pos, preds))
+    base_positions = np.where(np.array(list(seq)) == base)[0]
+    pred_values = np.array([pred_dict.get(pos, 0) for pos in base_positions])
+    run_lengths = np.ediff1d(np.concatenate(([True], pred_values > 0, [True])).nonzero()[0]) - 1
+    mm_tag = f"{base}+{mod},{','.join(map(str, run_lengths))}"
+    preds = np.array(preds)
+    ml_tag = preds[preds > 0].tolist()
+    if not ml_tag:
+        ml_tag = [0]
+    return mm_tag, ml_tag
+
+
+def write_modbam(in_path, out_path, data, threads):
+    intermediate_dir = out_path + ".shard"
+    os.makedirs(intermediate_dir, exist_ok=True)
+
+    proc_list = []
+    for i, sub_data in enumerate(np.array_split(data, threads)):
+        out_path_proc = os.path.join(intermediate_dir, f"{i}.bam")
+        proc = mp.Process(target=write_modbam_worker, args=(in_path, out_path_proc, sub_data))
+        proc_list.append(proc)
+    for proc in proc_list:
+        proc.start()
+    for proc in proc_list:
+        proc.join()
+
+    unsorted_path = out_path + ".unsorted.bam"
+    pysam.merge(f"-@ {threads} -f", unsorted_path, *glob.glob(os.path.join(intermediate_dir, "*.bam")))
+    pysam.sort(f"-@ {threads}", "-m 4G", "-o", out_path, unsorted_path)
+    pysam.index(out_path)
+
+    shutil.rmtree(intermediate_dir)
+    os.remove(unsorted_path)
+
+    return None
+
+
+def write_modbam_worker(in_path, out_path, data):
+    in_bam = pysam.AlignmentFile(in_path, "rb")
+    out_bam = pysam.AlignmentFile(out_path, "wb", template=in_bam)
+    for read in tqdm.tqdm(in_bam, total=in_bam.mapped + in_bam.unmapped):
+        read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
+        read_id_high, read_id_low = np.frombuffer(uuid.UUID(read_id).bytes, dtype=np.int64)
+        ref_id = read.reference_id
+        try:
+            data_read = data.loc[ref_id, read_id_high, read_id_low]
+        except KeyError:
+            continue
+        mapping = read.get_aligned_pairs()
+        mapping = {i[1]: i[0] for i in mapping if i[1] is not None}
+        q_pos = [mapping.get(i, None) for i in data_read["pos"]]
+        mm_tag, ml_tag = get_mm_tag(q_pos, data_read["pred"], str(read.query_sequence))
+        read.set_tag("MM", mm_tag, "Z")
+        read.set_tag("ML", ml_tag)
+        out_bam.write(read)
+    in_bam.close()
+    out_bam.close()
     return None
