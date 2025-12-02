@@ -3,7 +3,7 @@
 ## Prerequisites
 * Linux x86_64
 * Python 3.9+
-* Pytorch 2.0+ (with CUDA support for GPU inference)
+* Pytorch 2.3+ (with CUDA support for GPU inference)
     * https://pytorch.org/get-started/locally/
 * Torchmetrics 0.9.0+ (for training)
     * ```bash

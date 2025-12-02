@@ -41,7 +41,7 @@ This repository contains the source code for training and running DeepRM.
 ### Prerequisites
 * Linux x86_64
 * Python 3.9+
-* Pytorch 2.0+
+* Pytorch 2.3+
   * https://pytorch.org/get-started/locally/
   * Please ensure that you have installed the correct version of PyTorch with CUDA support if you want to use GPU for inference or training.
 
