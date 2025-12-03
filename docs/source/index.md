@@ -40,9 +40,10 @@ If you use DeepRM in your research, please cite the following paper:
 @article{
   title={Comprehensive single-molecule resolution discovery of m6A RNA modification sites in the human transcriptome},
   author={Gihyeon Kang, Hyeonseo Hwang, Hyeonseong Jeon, Heejin Choi, Hee Ryung Chang, Nagyeong Yeo, Junehee Park, Narae Son, Eunkyeong Jeon, Jungmin Lim, Jaeung Yun, Wook Choi, Jae-Yoon Jo, Jong-Seo Kim, Sangho Park, Yoon Ki Kim, Daehyun Baek},
-  journal={In review},
-  year={In review},
-  publisher={In review}
+  journal={Nature Communications},
+  year={2025},
+  volume={In press},
+  publisher={Springer Nature}
 }
 ```
 
