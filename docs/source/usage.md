@@ -8,6 +8,7 @@
 ```bash
 dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
 tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+samtools index -@ <threads> <bam_path>
 ```
 * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 * If the precompiled binary does not work on your system, please refer to the [advanced-installation](advanced-installation) page for detailed build instructions.
