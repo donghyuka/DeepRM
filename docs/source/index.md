@@ -44,8 +44,11 @@ If you use DeepRM in your research, please cite the following paper:
   year={2025},
   volume={In press},
   publisher={Springer Nature}
+  doi={10.1038/s41467-025-67417-w}
 }
 ```
+The article is fully open access and available at https://doi.org/10.1038/s41467-025-67417-w
+
 
 ## 📐 Architecture
 ![deeprm_architecture.png](../images/deeprm_architecture.png)

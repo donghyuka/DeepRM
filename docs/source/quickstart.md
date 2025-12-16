@@ -11,8 +11,9 @@ deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir
 ```
 * (Alternative) To supply your own POD5 file:
   ```bash
-  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
-  tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> \
+  | tee >(samtools sort -@ <threads> -O BAM -o <bam_path> - && samtools index -@ <threads> <bam_path>) \
+  | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
   ```
     * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 
