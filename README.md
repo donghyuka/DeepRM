@@ -105,8 +105,9 @@ deeprm call prep -p inference_example.pod5 -b inference_example.bam -o <prep_dir
 ```
 * (Alternative) To supply your own POD5 file:
   ```bash
-  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
-  tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> \
+  | tee >(samtools sort -@ <threads> -O BAM -o <bam_path> - && samtools index -@ <threads> <bam_path>) \
+  | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
   ```
     * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 
@@ -150,11 +151,11 @@ deeprm train run -d <prep_dir>/compiled -o <output_dir> --batch 64
 #### Prepare Data
 ##### Accelerated preparation (recommended, default)
 * This method uses precompiled C++ binary for accelerating the preprocessing step.
-```bash
-dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
-tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
-samtools index -@ <threads> <bam_path>
-```
+  ```bash
+  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> \
+  | tee >(samtools sort -@ <threads> -O BAM -o <bam_path> - && samtools index -@ <threads> <bam_path>) \
+  | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+  ```
 * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 * If the precompiled binary does not work on your system, please refer to the [cpp/README.md](cpp/README.md) page for detailed build instructions.
 * Adjust the `-g (--filter-flag)` parameter according to your needs. If using a genomic reference, you may want to use `-g 260`.
@@ -295,8 +296,9 @@ If you use DeepRM in your research, please cite the following paper:
   year={2025},
   volume={In press},
   publisher={Springer Nature}
-}
+  doi={10.1038/s41467-025-67417-w}
 ```
+The article is fully open access and available at https://doi.org/10.1038/s41467-025-67417-w
 
 ## 📝 License
 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png" /></a>

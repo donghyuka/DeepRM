@@ -5,11 +5,11 @@
 ### Prepare Data
 #### Accelerated preparation (recommended, default)
 * This method uses precompiled C++ binary for accelerating the preprocessing step.
-```bash
-dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> | \
-tee <bam_path> | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
-samtools index -@ <threads> <bam_path>
-```
+  ```bash
+  dorado basecaller --reference <ref_fasta> --min-qscore 0 --emit-moves rna004_130bps_sup@v5.0.0 <pod5_dir> \
+  | tee >(samtools sort -@ <threads> -O BAM -o <bam_path> - && samtools index -@ <threads> <bam_path>) \
+  | deeprm call prep -p <pod5_dir> -b - -o <prep_dir>
+  ```
 * If Dorado fails due to "illegal memory access", try adding `--chunksize <chunk_size>` option (e.g., chunk_size=12000).
 * If the precompiled binary does not work on your system, please refer to the [advanced-installation](advanced-installation) page for detailed build instructions.
 * Adjust the `-g (--filter-flag)` parameter according to your needs. If using a genomic reference, you may want to use `-g 260`.
