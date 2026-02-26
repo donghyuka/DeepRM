@@ -472,15 +472,35 @@ def bed_formatter(
 
 
 def get_mm_tag(q_pos, preds, seq, base="A", mod="a"):
-    pred_dict = dict(zip(q_pos, preds))
-    base_positions = np.where(np.array(list(seq)) == base)[0]
-    pred_values = np.array([pred_dict.get(pos, 0) for pos in base_positions])
-    run_lengths = np.ediff1d(np.concatenate(([True], pred_values > 0, [True])).nonzero()[0]) - 1
-    mm_tag = f"{base}+{mod},{','.join(map(str, run_lengths))}"
-    preds = np.array(preds)
-    ml_tag = preds[preds > 0].tolist()
-    if not ml_tag:
-        ml_tag = [0]
+    q_pos = np.asarray(q_pos)
+    preds = np.asarray(preds)
+
+    base_positions = np.fromiter(
+        (i for i, b in enumerate(seq) if b == base),
+        dtype=int,
+    )
+
+    idx = np.searchsorted(base_positions, q_pos)
+    run_lengths = np.empty_like(idx)
+    run_lengths[0] = idx[0]
+    run_lengths[1:] = np.diff(idx) - 1
+    mm_tag = f"{base}+{mod}?,{','.join(map(str, run_lengths))};"
+
+    # Get the ml tag for the modified bases
+    ml_tag = preds.tolist()
+
+    # Sanity check: all q_pos should be positions of base in the read sequence
+    assert all(i in base_positions for i in q_pos), (
+        f"All q_pos should be positions of base {base} in the read sequence, "
+        f"but got q_pos {q_pos} and base_positions {base_positions}"
+    )
+
+    # Sanity check: length of run_lengths should be the same as length of ml_tag
+    assert len(run_lengths) == len(ml_tag), (
+        f"Length of MM tag should be the same as length of ML tag, "
+        f"but got MM tag {len(run_lengths)} and ML tag {len(ml_tag)}"
+    )
+
     return mm_tag, ml_tag
 
 
@@ -516,14 +536,24 @@ def write_modbam_worker(in_path, out_path, data):
         read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
         read_id_high, read_id_low = np.frombuffer(uuid.UUID(read_id).bytes, dtype=np.int64)
         ref_id = read.reference_id
+
         try:
             data_read = data.loc[ref_id, read_id_high, read_id_low]
         except KeyError:
             continue
-        mapping = read.get_aligned_pairs()
-        mapping = {i[1]: i[0] for i in mapping if i[1] is not None}
-        q_pos = [mapping.get(i, None) for i in data_read["pos"]]
-        mm_tag, ml_tag = get_mm_tag(q_pos, data_read["pred"], str(read.query_sequence))
+
+        mapping_rpos_to_qpos = {r: q for q, r in read.get_aligned_pairs() if r is not None and q is not None}
+
+        qpos = []
+        pred = []
+
+        for r, p in zip(data_read["pos"], data_read["pred"]):
+            q = mapping_rpos_to_qpos.get(r)
+            if q is not None:
+                qpos.append(q)
+                pred.append(p)
+
+        mm_tag, ml_tag = get_mm_tag(qpos, pred, str(read.query_sequence))
         read.set_tag("MM", mm_tag, "Z")
         read.set_tag("ML", ml_tag)
         out_bam.write(read)
