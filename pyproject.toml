@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeprm"
-version = "1.0.8"
+version = "1.0.9"
 description = "DeepRM: Deep Learning for RNA Modification Detection using Nanopore Direct RNA Sequencing"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -31,8 +31,8 @@ dependencies = [
     "tqdm",
     "psutil",
     "networkx>=3.1",
-    "numpy>=1.24,<3.0",
-    "pandas>=2.0",
+    "numpy>=2.0,<3.0",
+    "pandas>=2.0,<3.0",
     "polyleven>=0.8",
     "pod5>=0.3.2",
     "pysam>=0.22.0",
