@@ -102,7 +102,7 @@ def main(args: argparse.Namespace):
         proc.join()
 
     bam_df = pd.concat(list(bam_df), ignore_index=True)
-    bam_df.set_index("read_id", inplace=True)
+    bam_df.set_index("parent_id", inplace=True)
     manager.shutdown()
     gc.collect()
 
@@ -378,8 +378,9 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         ap = ap[ap[:, 2] == boi][:, :2].astype(np.int32)
         if len(ap) == 0:
             continue
-        read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
-        read_id = uuid.UUID(read_id)
+        read_id = uuid.UUID(str(read.query_name))
+        parent_id = uuid.UUID(str(read.get_tag("pi"))) if read.has_tag("pi") else read_id
+
         ts = read.get_tag("ts") if read.has_tag("ts") else 0
         ns = read.get_tag("ns") if read.has_tag("ns") else 0
         sp = read.get_tag("sp") if read.has_tag("sp") else 0
@@ -387,6 +388,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         seq = np.array(list(read.query_sequence)).view(np.int32).astype(np.uint8)
         strand = -1 if read.is_reverse else 1
         bam_df["read_id"].append(read_id)
+        bam_df["parent_id"].append(parent_id)
         bam_df["ts"].append(ts)
         bam_df["ns"].append(ns)
         bam_df["sp"].append(sp)
