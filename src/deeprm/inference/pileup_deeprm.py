@@ -157,7 +157,7 @@ def main(args: argparse.Namespace):
         np.digitize(
             1 - np.power(10, -logsum_1_p_pos / count_all * (1 + np.exp(7 * (stoichiometry - 0.92)))),
             np.linspace(0, 1, digitization + 1),
-            right=False,
+            right=True,
         )
         / digitization
     )

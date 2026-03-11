@@ -410,7 +410,7 @@ def pileup_genomic(args, input_df):
         np.digitize(
             1 - np.power(10, -df["logsum_1_p_pos"] / df["count_all"] * (1 + np.exp(8 * (df["stoichiometry"] - 0.92)))),
             np.linspace(0, 1, digitization + 1),
-            right=False,
+            right=True,
         )
         / digitization
     )
