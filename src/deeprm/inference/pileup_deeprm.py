@@ -152,10 +152,15 @@ def main(args: argparse.Namespace):
 
     ## Calculate modscore and stoichiometry metrics
     stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
-    modscore = -(2 - stoichiometry) * logsum_1_p_pos / count_all + (
-        (1 - stoichiometry) * np.log10(np.clip(1 - stoichiometry, 1e-30, 1))
-        + stoichiometry * np.log10(np.clip(stoichiometry, 1e-30, 1))
-    ) * (count_pos / count_all)
+    digitization = 1000
+    modscore = (
+        np.digitize(
+            1 - np.power(10, -logsum_1_p_pos / count_all * (1 + np.exp(7 * (stoichiometry - 0.92)))),
+            np.linspace(0, 1, digitization + 1),
+            right=False,
+        )
+        / digitization
+    )
 
     ## Read BAM Header to get reference names
     input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)
