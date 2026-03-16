@@ -153,7 +153,7 @@ def main(args: argparse.Namespace):
     ## Calculate modscore and stoichiometry metrics
     digitization = 1000
     stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
-    modscore = 1 - np.power(10, -logsum_1_p_pos / count_all * (1 + np.pow(10, 2 * (stoichiometry - 1))))
+    modscore = 1 - np.power(10, logsum_1_p_pos / count_all * (1 + np.power(10, 2 * (stoichiometry - 1))))
     modscore = np.digitize(modscore, np.linspace(0, 1, digitization + 1), right=True) / digitization
     stoichiometry = stoichiometry * ((np.log10(1 - args.threshold) * stoichiometry) > (logsum_1_p_pos / count_all))
 
