@@ -5,7 +5,7 @@ This script performs post-processing on DeepRM prediction files to generate a pi
 It reads .npz prediction arrays, groups statistics by label IDs, and computes metrics.
 
 The two metrics calculated are:
-1. modscore: A score reflecting the site-level modification probability. (arbitrary units)
+1. modscore: A score reflecting the site-level modification probability. (0-1 range)
 2. stoichiometry: Estimated modification stoichiometry of the site. (0-1 range)
 
 Finally, it writes a .npz file containing the results.
