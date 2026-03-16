@@ -336,8 +336,8 @@ def parse_pod5(pod5_path, read_ids):
             id_list.append(rid)
 
     signal_df = pd.DataFrame(
-        {"signal": signal_list, "read_id": id_list, "offset": offset_list, "scale": scale_list}
-    ).set_index("read_id")
+        {"signal": signal_list, "parent_id": id_list, "offset": offset_list, "scale": scale_list}
+    ).set_index("parent_id")
     del signal_list, offset_list, scale_list, id_list
     gc.collect()
     return signal_df
@@ -359,7 +359,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
     Returns:
         None (appends DataFrame to bam_data).
     """
-    bam_df = {k: [] for k in ["read_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap", "strand"]}
+    bam_df = {k: [] for k in ["read_id", "parent_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap", "strand"]}
     input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=n_thread)
     ref_index_dict = {ref: i for i, ref in enumerate(input_bam.references)}
 
@@ -429,7 +429,7 @@ def segment_normalize_signal(
     Segment and normalize signals per read, and save token chunks.
 
     Args:
-        bam_df (pandas.DataFrame): alignment metadata indexed by read_id.
+        bam_df (pandas.DataFrame): alignment metadata indexed by parent_id.
         pod5_paths (list): list of POD5 file paths.
         norm_factor (dict): normalization parameters.
         pid (int): process ID for naming outputs.
@@ -499,7 +499,9 @@ def segment_normalize_signal(
 
             ## Explode read-level data to base-level data
             signal_df = (
-                signal_df[["bq", "seq", "signal", "dwell_token", "ref", "ap"]].explode("ap").reset_index(drop=False)
+                signal_df[["read_id", "strand", "bq", "seq", "signal", "dwell_token", "ref", "ap"]]
+                .explode("ap")
+                .reset_index(drop=True)
             )
             if len(signal_df) == 0:
                 continue

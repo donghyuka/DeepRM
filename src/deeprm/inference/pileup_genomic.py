@@ -406,13 +406,13 @@ def pileup_genomic(args, input_df):
     )
 
     digitization = 1000
-    df["modscore"] = (
-        np.digitize(
-            1 - np.power(10, -df["logsum_1_p_pos"] / df["count_all"] * (1 + np.exp(8 * (df["stoichiometry"] - 0.92)))),
-            np.linspace(0, 1, digitization + 1),
-            right=True,
-        )
-        / digitization
+    df["stoichiometry"] = df["kl_div_pos"] / (df["kl_div_neg"] + df["kl_div_pos"])
+    df["modscore"] = 1 - np.power(
+        10, -df["logsum_1_p_pos"] / df["count_all"] * (1 + np.pow(10, 2 * (df["stoichiometry"] - 1)))
+    )
+    df["modscore"] = np.digitize(df["modscore"], np.linspace(0, 1, digitization + 1), right=True) / digitization
+    df["stoichiometry"] = df["stoichiometry"] * (
+        (np.log10(1 - args.threshold) * df["stoichiometry"]) > (df["logsum_1_p_pos"] / df["count_all"])
     )
     df = df.reset_index()
     df = df[["chrom", "strand", "pos", "modscore", "stoichiometry", "count_all", "count_pos"]]

@@ -15,13 +15,94 @@
 
 #pragma once
 
-#include <vector>
-#include <cstdint>
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <ctime>
+#include <iomanip>
 #include <iostream>
-#include <bits/ostream.tcc>
+#include <mutex>
+#include <sstream>
+#include <vector>
 
 using namespace std;
+
+// Global mutex for thread-safe logging
+inline mutex& get_log_mutex()
+{
+  static mutex log_mtx;
+  return log_mtx;
+}
+
+// Timestamp logging utility
+inline string get_timestamp()
+{
+  auto now = chrono::system_clock::now();
+  auto time_t_now = chrono::system_clock::to_time_t(now);
+  struct tm tm_buf;
+  if (!localtime_r(&time_t_now, &tm_buf)) {
+    return "[unknown]";
+  }
+
+  ostringstream oss;
+  oss << "[" << put_time(&tm_buf, "%Y-%m-%dT%H:%M:%S");
+
+  // Insert colon into timezone offset for ISO 8601 (+0900 -> +09:00)
+  char tz_buf[8];
+  if (strftime(tz_buf, sizeof(tz_buf), "%z", &tm_buf) == 0) {
+    return "[unknown]";
+  }
+  string tz(tz_buf);
+  if (tz.size() >= 5) {
+    tz.insert(3, ":");
+  }
+  oss << tz << "]";
+  return oss.str();
+}
+
+// Thread-safe logger that buffers output and writes atomically
+class ThreadSafeLogger
+{
+private:
+  ostringstream buffer_;
+  ostream& out_;
+
+public:
+  explicit ThreadSafeLogger(ostream& os) : out_(os)
+  {
+    buffer_ << get_timestamp() << " ";
+  }
+
+  ThreadSafeLogger(const ThreadSafeLogger&) = delete;
+  ThreadSafeLogger& operator=(const ThreadSafeLogger&) = delete;
+  ThreadSafeLogger(ThreadSafeLogger&&) = delete;
+  ThreadSafeLogger& operator=(ThreadSafeLogger&&) = delete;
+
+  ~ThreadSafeLogger()
+  {
+    lock_guard<mutex> lock(get_log_mutex());
+    out_ << buffer_.str();
+    out_.flush();
+  }
+
+  template<typename T>
+  ThreadSafeLogger& operator<<(const T& val)
+  {
+    buffer_ << val;
+    return *this;
+  }
+
+  // Handle stream manipulators like endl
+  ThreadSafeLogger& operator<<(ostream& (*manip)(ostream&))
+  {
+    manip(buffer_);
+    return *this;
+  }
+};
+
+// Inline functions for timestamped logging (thread-safe)
+inline ThreadSafeLogger log_info() { return ThreadSafeLogger(cout); }
+inline ThreadSafeLogger log_err() { return ThreadSafeLogger(cerr); }
 
 struct NormalizationFactors {
   double quantile_a = 0.2;

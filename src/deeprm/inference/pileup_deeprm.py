@@ -151,16 +151,11 @@ def main(args: argparse.Namespace):
     kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
 
     ## Calculate modscore and stoichiometry metrics
-    stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
     digitization = 1000
-    modscore = (
-        np.digitize(
-            1 - np.power(10, -logsum_1_p_pos / count_all * (1 + np.exp(7 * (stoichiometry - 0.92)))),
-            np.linspace(0, 1, digitization + 1),
-            right=True,
-        )
-        / digitization
-    )
+    stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
+    modscore = 1 - np.power(10, -logsum_1_p_pos / count_all * (1 + np.pow(10, 2 * (stoichiometry - 1))))
+    modscore = np.digitize(modscore, np.linspace(0, 1, digitization + 1), right=True) / digitization
+    stoichiometry = stoichiometry * ((np.log10(1 - args.threshold) * stoichiometry) > (logsum_1_p_pos / count_all))
 
     ## Read BAM Header to get reference names
     input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)

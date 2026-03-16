@@ -43,7 +43,7 @@ struct Arguments {
   // Default values
   Arguments()
   {
-    cpu_count = max(1, static_cast<int>(thread::hardware_concurrency() * 0.95));
+    cpu_count = max(1, static_cast<int>(thread::hardware_concurrency()));
     qcut = 0;
     chunk_size = 16000;
     max_token_len = 200;
@@ -51,7 +51,7 @@ struct Arguments {
     base_of_interest = 'A';
     kmer_len = 5;
     cb_len = 21;
-    bam_threads = 4;
+    bam_threads = 16;
     process_once = 1000;
     dwell_shift = 10;
     sig_window = 5;

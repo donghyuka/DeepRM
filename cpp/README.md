@@ -1,6 +1,6 @@
 # DeepRM Preprocessing (C++)
 
-Preprocesses Oxford Nanopore signal data and DORADO BAM reads prior to DeepRM ML inference
+Preprocesses Oxford Nanopore signal data and Dorado BAM reads prior to DeepRM ML inference
 
 ## Features
 
@@ -142,7 +142,9 @@ deeprm_preprocess/
 └── README.md                 # This file
 ```
 
-### Features summary
+## References
+
+### Implementations
 
 1. **POD5 File Reading**
    - **Uses actual pod5-file-format C API**
