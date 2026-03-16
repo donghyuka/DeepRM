@@ -37,6 +37,7 @@ namespace deeprm {
     string bam_path;
     int bq_cutoff;
     char base_of_interest;
+    int bam_threads;
 
     queue<bam1_t*> internal_queue;
     mutex queue_mutex;
@@ -56,7 +57,6 @@ namespace deeprm {
 
     void read_loop();
     void dispatch_loop();
-    static string get_read_id(bam1_t* read);
 
   public:
     SamDispatcher(const Arguments& args);

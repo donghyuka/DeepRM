@@ -27,6 +27,7 @@ using namespace std;
 namespace deeprm {
   struct BamRecord {
     string read_id; // 32 bytes
+    string parent_id; // 32 bytes
     int32_t ts; // 4 bytes
     int32_t ns; // 4 bytes
     int32_t sp; // 4 bytes

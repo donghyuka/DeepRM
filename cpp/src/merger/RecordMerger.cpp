@@ -173,7 +173,8 @@ namespace deeprm {
       }
 
       // Create label ID: (reference * label_div + position + 1) * strand
-      proc_rec.label_id = static_cast<int64_t>(bam_rec.ref * label_div + r_pos + 1) * bam_rec.strand;
+      proc_rec.label_id = static_cast<int64_t>(bam_rec.ref * label_div + r_pos + 1) *
+                          bam_rec.strand;
 
       output.push_back(move(proc_rec));
     }
@@ -197,9 +198,9 @@ namespace deeprm {
       const Pod5RecordMeta& pod5_rec_meta = pod5_meta_records[i];
 
       // Verify read_id match for safety
-      if (bam_rec.read_id != pod5_rec_meta.read_id) {
-        cerr << "Error: read_id mismatch at index " << i
-            << ": BAM=" << bam_rec.read_id
+      if (bam_rec.parent_id != pod5_rec_meta.read_id) {
+        cerr << "Error: parent_id mismatch at index " << i
+            << ": BAM=" << bam_rec.parent_id
             << ", POD5_META=" << pod5_rec_meta.read_id << endl;
         return results;
       }

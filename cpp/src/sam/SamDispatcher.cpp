@@ -14,13 +14,17 @@
  **************************************************************************************************/
 
 #include "SamDispatcher.h"
-#include "../merger/MergedDataWorker.h"
+
 #include <iostream>
 #include <utility>
+
+#include "../merger/MergedDataWorker.h"
+#include "../utils/Utils.h"
 
 namespace deeprm {
   SamDispatcher::SamDispatcher(const Arguments& args)
     : bam_path(args.bam_path), bq_cutoff(args.qcut), base_of_interest(args.base_of_interest),
+      bam_threads(args.bam_threads),
       is_running(false), workers_ready(false), reading_complete(false),
       bam_file(nullptr), header(nullptr), merged_workers(nullptr), pod5_index(nullptr)
   {
@@ -41,7 +45,8 @@ namespace deeprm {
   {
     is_running = true;
 
-    cout << "Starting SAM dispatcher for " << bam_path << endl;
+    log_info() << "Starting SAM dispatcher for " << bam_path
+        << " with " << bam_threads << " decompression threads" << endl;
     read_thread = thread(&SamDispatcher::read_loop, this);
   }
 
@@ -60,7 +65,7 @@ namespace deeprm {
       dispatch_thread.join();
     }
 
-    cout << "SAM dispatcher fully stopped" << endl;
+    log_info() << "SAM dispatcher fully stopped" << endl;
   }
 
   void SamDispatcher::set_workers(vector<MergedDataWorker*>* workers,
@@ -85,14 +90,21 @@ namespace deeprm {
     // Open BAM file (supports stdin with "-")
     bam_file = sam_open(bam_path.c_str(), "r");
     if (!bam_file) {
-      cerr << "Failed to open BAM file: " << bam_path << endl;
+      log_err() << "Failed to open BAM file: " << bam_path << endl;
       is_running = false;
       return;
     }
 
+    // Enable multi-threaded BAM decompression
+    if (bam_threads > 1) {
+      if (hts_set_threads(bam_file, bam_threads) < 0) {
+        log_err() << "Failed to set BAM decompression threads" << endl;
+      }
+    }
+
     header = sam_hdr_read(bam_file);
     if (!header) {
-      cerr << "Failed to read BAM header" << endl;
+      log_err() << "Failed to read BAM header" << endl;
       sam_close(bam_file);
       bam_file = nullptr;
       is_running = false;
@@ -118,7 +130,7 @@ namespace deeprm {
     reading_complete = true;
     queue_cv.notify_all(); // Notify dispatch_to_workers that reading is done
 
-    cout << "SAM dispatcher finished reading BAM file" << endl;
+    log_info() << "SAM dispatcher finished reading BAM file" << endl;
   }
 
   void SamDispatcher::dispatch_loop()
@@ -144,19 +156,17 @@ namespace deeprm {
       internal_queue.pop();
       lock.unlock();
 
-      // Get read ID
-      string read_id;
-      // Check pi tag first
+      // Get parent ID for POD5 lookup
+      string parent_id;
       uint8_t* pi_tag = bam_aux_get(read, "pi");
       if (pi_tag) {
-        read_id = bam_aux2Z(pi_tag);
+        parent_id = bam_aux2Z(pi_tag);
       } else {
-        // Fall back to query name
-        read_id = bam_get_qname(read);
+        parent_id = bam_get_qname(read);
       }
 
       // Find which worker should process this read
-      auto it = pod5_index->find(read_id);
+      auto it = pod5_index->find(parent_id);
       if (it != pod5_index->end()) {
         int worker_idx = it->second;
         if (worker_idx >= 0 && cmp_less(worker_idx, merged_workers->size())) {
@@ -170,17 +180,6 @@ namespace deeprm {
       }
     }
 
-    cout << "SAM dispatcher finished dispatching to workers" << endl;
-  }
-
-  string SamDispatcher::get_read_id(bam1_t* read)
-  {
-    // Check pi tag first
-    uint8_t* pi_tag = bam_aux_get(read, "pi");
-    if (pi_tag) {
-      return {bam_aux2Z(pi_tag)};
-    }
-    // Fall back to query name
-    return {bam_get_qname(read)};
+    log_info() << "SAM dispatcher finished dispatching to workers" << endl;
   }
 }

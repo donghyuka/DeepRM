@@ -371,6 +371,7 @@ namespace deeprm {
   void BamReader::process_read(bam1_t* read, vector<BamRecord>& records)
   {
     if (read->core.flag & BAM_FUNMAP) return;
+    if (read->core.l_qseq == 0) return;
 
     // Check for mv tag
     uint8_t* mv_tag = bam_aux_get(read, "mv");
@@ -392,13 +393,10 @@ namespace deeprm {
 
     BamRecord record;
 
-    // Get read ID
+    // Get read ID and parent ID
+    record.read_id = string(bam_get_qname(read));
     uint8_t* pi_tag = bam_aux_get(read, "pi");
-    if (pi_tag) {
-      record.read_id = string(bam_aux2Z(pi_tag));
-    } else {
-      record.read_id = string(bam_get_qname(read));
-    }
+    record.parent_id = pi_tag ? string(bam_aux2Z(pi_tag)) : record.read_id;
 
     // Get tags
     uint8_t* ts_tag = bam_aux_get(read, "ts");

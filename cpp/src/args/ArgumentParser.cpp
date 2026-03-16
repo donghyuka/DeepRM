@@ -21,6 +21,8 @@
 #include <getopt.h>
 #include <cstring>
 
+#include "build_time.h"
+
 ArgumentParser::ArgumentParser()
 {
 }
@@ -62,7 +64,7 @@ void ArgumentParser::print_help(const char* program_name)
 
 void ArgumentParser::print_version()
 {
-  cout << "DeepRM Preprocessing v1.0.0\n";
+  cout << "DeepRM Preprocessing v1.1.0 " << DEEPRM_BUILD_TIME << "-" << DEEPRM_GIT_HASH << endl;
 }
 
 Arguments ArgumentParser::parse(int argc, char* argv[])

@@ -23,8 +23,8 @@
 
 namespace deeprm {
   MergedDataWorker::MergedDataWorker(int id, const Arguments& args,
-                                     const vector<vector<Pod5RecordMeta>>& pod5_meta)
-    : worker_id(id), args(args), pod5_file_meta_records(pod5_meta),
+                                     const vector<Pod5RecordMeta>& pod5_meta)
+    : worker_id(id), args(args), pod5_meta_records(pod5_meta),
       bam_header(nullptr), is_running(false), writer(nullptr),
       output_index(0), current_file_index(0)
   {
@@ -45,9 +45,9 @@ namespace deeprm {
     // Create NPZ writer
     writer = new NpzWriter(args.output_path, args.chunk_size, worker_id);
 
-    cout << "merged data worker " << worker_id << " starting with records from " <<
-        pod5_file_meta_records.size()
-        << " POD5 files" << endl;
+    log_info() << "merged data worker " << worker_id
+        << " starting with " << pod5_meta_records.size()
+        << " POD5 records" << endl;
     worker_thread = thread(&MergedDataWorker::process_loop, this);
   }
 
@@ -86,15 +86,13 @@ namespace deeprm {
 
     unordered_map<string, Pod5RecordMeta> pod5_index;
     // Build POD5 index for this worker
-    size_t total_pod5_records = 0;
-    for (const auto& file_records : pod5_file_meta_records) {
-      for (const auto& record : file_records) {
-        pod5_index[record.read_id] = record;
-        total_pod5_records++;
-      }
+    pod5_index.reserve(pod5_meta_records.size());
+    for (const auto& record : pod5_meta_records) {
+      pod5_index[record.read_id] = record;
     }
-    cout << "merged data worker " << worker_id << " indexed " << total_pod5_records <<
-        " POD5 records" << endl;
+    log_info() << "merged data worker " << worker_id
+        << " indexed " << pod5_meta_records.size()
+        << " POD5 records" << endl;
 
     vector<pair<Pod5RecordMeta, BamRecord>> batch_merged;
 
@@ -118,14 +116,15 @@ namespace deeprm {
         continue;
 
       // Find matching POD5 record
-      auto pod5_it = pod5_index.find(bam_record.read_id);
+      auto pod5_it = pod5_index.find(bam_record.parent_id);
       if (pod5_it != pod5_index.end()) {
         batch_merged.emplace_back(pod5_it->second, bam_record);
 
         // Process batch when it reaches process_once size
         if (batch_merged.size() >= static_cast<size_t>(args.process_once)) {
           output_index++;
-          cout << "merged data worker " << worker_id << " processing batch " << output_index
+          log_info() << "merged data worker " << worker_id
+              << " processing batch " << output_index
               << " with " << batch_merged.size() << " records" << endl;
 
           // Create merger and process
@@ -163,7 +162,8 @@ namespace deeprm {
     // Process remaining records
     if (!batch_merged.empty()) {
       output_index++;
-      cout << "merged data worker " << worker_id << " processing final batch " << output_index
+      log_info() << "merged data worker " << worker_id
+          << " processing final batch " << output_index
           << " with " << batch_merged.size() << " records" << endl;
 
       RecordMerger merger(norm_factors, args.cb_len, args.kmer_len, args.max_token_len,
@@ -193,11 +193,12 @@ namespace deeprm {
 
     // Flush remaining records in the worker thread
     if (writer) {
-      cout << "merged data worker " << worker_id << " flushing remaining records" << endl;
+      log_info() << "merged data worker " << worker_id << " flushing remaining records" << endl;
       writer->flush();
     }
 
-    cout << "merged data worker " << worker_id << " completed processing. Total batches: "
+    log_info() << "merged data worker " << worker_id
+        << " completed processing. Total batches: "
         << output_index << endl;
   }
 
@@ -227,13 +228,10 @@ namespace deeprm {
     if (record.ap.empty())
       return false;
 
-    // Get read ID
+    // Get read ID and parent ID
+    record.read_id = bam_get_qname(read);
     uint8_t* pi_tag = bam_aux_get(read, "pi");
-    if (pi_tag) {
-      record.read_id = bam_aux2Z(pi_tag);
-    } else {
-      record.read_id = bam_get_qname(read);
-    }
+    record.parent_id = pi_tag ? string(bam_aux2Z(pi_tag)) : record.read_id;
 
     // Get tags
     uint8_t* ts_tag = bam_aux_get(read, "ts");

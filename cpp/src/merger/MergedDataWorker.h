@@ -35,7 +35,7 @@ namespace deeprm {
   private:
     int worker_id;
     const Arguments& args;
-    const vector<vector<Pod5RecordMeta>>& pod5_file_meta_records;
+    const vector<Pod5RecordMeta>& pod5_meta_records;
     sam_hdr_t* bam_header;
 
     queue<bam1_t*> bam_queue;
@@ -59,7 +59,7 @@ namespace deeprm {
 
   public:
     MergedDataWorker(int id, const Arguments& args,
-                     const vector<vector<Pod5RecordMeta>>& pod5_meta);
+                     const vector<Pod5RecordMeta>& pod5_meta);
     ~MergedDataWorker();
 
     void start();
