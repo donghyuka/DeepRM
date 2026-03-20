@@ -482,8 +482,9 @@ def get_mm_tag(q_pos, preds, seq, base="A", mod="a"):
 
     idx = np.searchsorted(base_positions, q_pos)
     run_lengths = np.empty_like(idx)
-    run_lengths[0] = idx[0]
-    run_lengths[1:] = np.diff(idx) - 1
+    if len(idx) > 0:
+        run_lengths[0] = idx[0]
+        run_lengths[1:] = np.diff(idx) - 1
     mm_tag = f"{base}+{mod}?,{','.join(map(str, run_lengths))};"
 
     # Get the ml tag for the modified bases
