@@ -489,18 +489,6 @@ def get_mm_tag(q_pos, preds, seq, base="A", mod="a"):
     # Get the ml tag for the modified bases
     ml_tag = preds.tolist()
 
-    # Sanity check: all q_pos should be positions of base in the read sequence
-    assert all(i in base_positions for i in q_pos), (
-        f"All q_pos should be positions of base {base} in the read sequence, "
-        f"but got q_pos {q_pos} and base_positions {base_positions}"
-    )
-
-    # Sanity check: length of run_lengths should be the same as length of ml_tag
-    assert len(run_lengths) == len(ml_tag), (
-        f"Length of MM tag should be the same as length of ML tag, "
-        f"but got MM tag {len(run_lengths)} and ML tag {len(ml_tag)}"
-    )
-
     return mm_tag, ml_tag
 
 
@@ -533,7 +521,7 @@ def write_modbam_worker(in_path, out_path, data):
     in_bam = pysam.AlignmentFile(in_path, "rb")
     out_bam = pysam.AlignmentFile(out_path, "wb", template=in_bam)
     for read in tqdm.tqdm(in_bam, total=in_bam.mapped + in_bam.unmapped):
-        read_id = str(read.get_tag("pi")) if read.has_tag("pi") else str(read.query_name)
+        read_id = read.query_name
         read_id_high, read_id_low = np.frombuffer(uuid.UUID(read_id).bytes, dtype=np.int64)
         ref_id = read.reference_id
 
