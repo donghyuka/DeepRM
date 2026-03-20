@@ -544,7 +544,8 @@ def write_modbam_worker(in_path, out_path, data):
 
         mm_tag, ml_tag = get_mm_tag(qpos, pred, str(read.query_sequence))
         read.set_tag("MM", mm_tag, "Z")
-        read.set_tag("ML", ml_tag)
+        if len(ml_tag) > 0:
+            read.set_tag("ML", ml_tag)
         out_bam.write(read)
     in_bam.close()
     out_bam.close()
