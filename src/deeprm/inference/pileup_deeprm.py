@@ -50,7 +50,7 @@ def add_arguments(parser: argparse.ArgumentParser):
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
     parser.add_argument("--annot", "-a", type=str, default=None, help="Annotation file (e.g., refFlat.txt)")
-    parser.add_argument("--skip_modbam", "-k", action="store_true", help="Skip modBAM writing and only output BED")
+    parser.add_argument("--skip-modbam", "-sm", action="store_true", help="Skip modBAM writing and only output BED")
 
     return None
 
