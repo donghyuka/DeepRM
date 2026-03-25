@@ -57,6 +57,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--epsilon", "-ep", type=float, default=1e-30, help="Epsilon value")
     parser.add_argument("--slice", "-sl", type=int, default=None, help="Slice index (for 2D predictions)")
     parser.add_argument("--flip", "-fl", action="store_true", help="Flip label")
+    parser.add_argument("--skip-modbam", "-sm", action="store_true", help="Skip modBAM writing and only output BED")
     parser.add_argument(
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )

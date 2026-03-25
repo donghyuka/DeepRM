@@ -50,6 +50,7 @@ def add_arguments(parser: argparse.ArgumentParser):
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
     parser.add_argument("--annot", "-a", type=str, default=None, help="Annotation file (e.g., refFlat.txt)")
+    parser.add_argument("--skip_modbam", "-k", action="store_true", help="Skip modBAM writing and only output BED")
 
     return None
 
@@ -110,13 +111,15 @@ def main(args: argparse.Namespace):
     for proc in proc_list:
         proc.join()
     gc.collect()
-    modbam_data = (
-        pd.concat([shared_dict["modbam_data"][pid] for pid in range(len(file_paths_split))], axis=0)
-        .groupby(["ref_id", "read_id_high", "read_id_low"])
-        .agg({"pos": "sum", "pred": "sum"})
-    )
-    modbam_out_path = os.path.join(args.output, "modbam_" + os.path.basename(args.bam))
-    write_modbam(args.bam, modbam_out_path, modbam_data, args.thread)
+
+    if not args.skip_modbam:
+        modbam_data = (
+            pd.concat([shared_dict["modbam_data"][pid] for pid in range(len(file_paths_split))], axis=0)
+            .groupby(["ref_id", "read_id_high", "read_id_low"])
+            .agg({"pos": "sum", "pred": "sum"})
+        )
+        modbam_out_path = os.path.join(args.output, "modbam_" + os.path.basename(args.bam))
+        write_modbam(args.bam, modbam_out_path, modbam_data, args.thread)
 
     ## find unique label across all chunks
     all_ids = np.concatenate([shared_dict["label_id"][pid] for pid in range(len(file_paths_split))])
