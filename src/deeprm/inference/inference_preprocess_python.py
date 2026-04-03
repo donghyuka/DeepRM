@@ -60,6 +60,30 @@ def add_arguments(parser: argparse.ArgumentParser):
     return None
 
 
+def wait_for_processes(proc_list, stage_name):
+    """
+    Join a list of processes and raise if any subprocess failed.
+
+    Args:
+        proc_list (list[multiprocessing.Process]): child processes to join.
+        stage_name (str): human-readable pipeline stage name.
+
+    Returns:
+        None
+    """
+    failed = []
+    for proc in proc_list:
+        proc.join()
+        if proc.exitcode != 0:
+            failed.append((proc.pid, proc.exitcode))
+
+    if failed:
+        failed_str = ", ".join([f"pid={pid}, exitcode={exitcode}" for pid, exitcode in failed])
+        raise RuntimeError(f"{stage_name} failed in subprocess(es): {failed_str}")
+
+    return None
+
+
 def main(args: argparse.Namespace):
     """
     Run the full preprocessing pipeline with multiprocessing.
@@ -82,6 +106,15 @@ def main(args: argparse.Namespace):
         raise FileNotFoundError(f"Input directory {args.pod5} does not exist")
     if not os.path.exists(args.bam):
         raise FileNotFoundError(f"BAM file {args.bam} does not exist")
+    if args.thread < 1:
+        raise ValueError("--thread must be >= 1")
+    if args.bam_thread < 1:
+        raise ValueError("--bam-thread must be >= 1")
+    if args.sampling < 1:
+        raise ValueError("--sampling must be >= 1")
+    if args.process_once < 1:
+        raise ValueError("--process-once must be >= 1")
+
     os.makedirs(args.output, exist_ok=True)
 
     log.info("Started DeepRM Preprocessing")
@@ -90,18 +123,21 @@ def main(args: argparse.Namespace):
 
     manager = mp.Manager()
     bam_df = manager.list()
-    n_bam_procs = args.thread // args.bam_thread
+    n_bam_procs = max(1, args.thread // args.bam_thread)
     proc_list = []
     for pid in range(n_bam_procs):
         proc = mp.Process(
-            target=parse_bam, args=(pid, n_bam_procs, args.bam_thread, bam_df, args.bam, args.qcut, args.boi)
+            target=parse_bam,
+            args=(pid, n_bam_procs, args.bam_thread, bam_df, args.bam, args.qcut, args.boi, args.sampling),
         )
         proc_list.append(proc)
         proc.start()
-    for proc in proc_list:
-        proc.join()
+    wait_for_processes(proc_list, "BAM parsing")
 
-    bam_df = pd.concat(list(bam_df), ignore_index=True)
+    bam_frames = list(bam_df)
+    if len(bam_frames) == 0:
+        raise RuntimeError("BAM parsing produced no worker outputs")
+    bam_df = pd.concat(bam_frames, ignore_index=True)
     bam_df.set_index("parent_id", inplace=True)
     manager.shutdown()
     gc.collect()
@@ -113,6 +149,8 @@ def main(args: argparse.Namespace):
 
     else:
         pod5_file_list = glob.glob(os.path.join(args.pod5, "*.pod5"))
+        if len(pod5_file_list) == 0:
+            raise FileNotFoundError(f"No POD5 files found in directory: {args.pod5}")
         pod5_paths_split = np.array_split(pod5_file_list, min(args.thread, len(pod5_file_list)))
 
     proc_list = []
@@ -140,8 +178,7 @@ def main(args: argparse.Namespace):
         proc.start()
 
     gc.collect()
-    for proc in proc_list:
-        proc.join()
+    wait_for_processes(proc_list, "Signal segmentation/normalization")
 
     log.info("Finished DeepRM Preprocessing")
     return None
@@ -191,15 +228,31 @@ def segmented_signal_to_block(signal_segmented, segment_len_arr, kmer, sampling,
     try:
         kmer_pad = (kmer - 1) // 2
         lr_pad = (sig_window - 1) // 2
-        l_skip = (np.sum(segment_len_arr[:kmer_pad]) - lr_pad) * sampling
-        r_skip = (np.sum(segment_len_arr[-kmer_pad:]) - lr_pad) * sampling
+
+        l_skip_units = np.sum(segment_len_arr[:kmer_pad]) - lr_pad
+        r_skip_units = np.sum(segment_len_arr[-kmer_pad:]) - lr_pad
+        if l_skip_units < 0 or r_skip_units < 0:
+            return None
+
+        l_skip = int(l_skip_units * sampling)
+        r_skip = int(r_skip_units * sampling)
+
         signal_segmented = np.concatenate(signal_segmented)
         if len(signal_segmented) % sampling != 0:
             return None
+        if l_skip > len(signal_segmented):
+            return None
+        if r_skip > 0 and (l_skip + r_skip) > len(signal_segmented):
+            return None
+
         if r_skip > 0:
             signal_segmented = signal_segmented[l_skip:-r_skip]
         else:
             signal_segmented = signal_segmented[l_skip:]
+
+        if len(signal_segmented) == 0:
+            return None
+
         padding = (pad_to + kmer - 1) * sampling - len(signal_segmented)
         if padding > 0:
             signal_segmented = np.pad(signal_segmented, (0, padding), mode="constant", constant_values=0)
@@ -235,23 +288,35 @@ def move_to_dwell(move, quantile_a, quantile_b, shift_mult, scale_mult, sampling
         sampling (int): samples per signal unit.
 
     Returns:
-        numpy.ndarray: standardized dwell-time values.
+        numpy.ndarray or None: standardized dwell-time values, or None for invalid input.
 
     Notes:
         1. Convert boolean moves into positions and compute deltas.
         2. Log-transform dwell durations.
         3. Scale and shift based on quantiles and multipliers.
     """
-    move = np.arange(1, len(move) + 1, dtype=np.int32)[np.flip(move)]
-    move = np.concatenate([np.zeros(1, dtype=np.int32), move])
-    move = move[1:] - move[:-1]
-    move = np.log10((move * sampling).astype(np.float32))
-    quantile_a_value = np.quantile(move, quantile_a)
-    quantile_b_value = np.quantile(move, quantile_b)
+    move = np.asarray(move, dtype=bool)
+    if move.ndim != 1 or move.size == 0:
+        return None
+
+    dwell = np.arange(1, len(move) + 1, dtype=np.int32)[np.flip(move)]
+    dwell = np.concatenate([np.zeros(1, dtype=np.int32), dwell])
+    dwell = dwell[1:] - dwell[:-1]
+    if dwell.size == 0 or np.any(dwell <= 0):
+        return None
+
+    dwell = np.log10((dwell * sampling).astype(np.float32))
+    if dwell.size == 0 or not np.all(np.isfinite(dwell)):
+        return None
+
+    quantile_a_value = np.quantile(dwell, quantile_a)
+    quantile_b_value = np.quantile(dwell, quantile_b)
     q_shift = max(0.1, shift_mult * (quantile_a_value + quantile_b_value))
     q_scale = max(0.1, scale_mult * (quantile_b_value - quantile_a_value))
-    move = (move - q_shift) / q_scale
-    return move
+    dwell = (dwell - q_shift) / q_scale
+    if not np.all(np.isfinite(dwell)):
+        return None
+    return dwell
 
 
 def normalise_trim_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile_b, shift_mult, scale_mult, sampling=6):
@@ -279,27 +344,35 @@ def normalise_trim_segment_signal(signal, move, sp, ts, ns, quantile_a, quantile
         3. Shift and scale signal by quantile multipliers.
         4. Split by dwell move indices to segment per-base.
     """
-    signal = signal[sp:]
-    signal_len = len(signal)
-    if ns == 0:
-        ns = signal_len
-    signal = signal[ts:ns]
-    if len(signal) == 0:
-        return None
-    signal = np.flip(signal, axis=0)
+    try:
+        signal = np.asarray(signal)
+        move = np.asarray(move, dtype=bool)
 
-    quantile_a_value = np.quantile(signal, quantile_a)
-    quantile_b_value = np.quantile(signal, quantile_b)
+        signal = signal[sp:]
+        signal_len = len(signal)
+        if ns == 0:
+            ns = signal_len
+        signal = signal[ts:ns]
+        if len(signal) == 0:
+            return None
+        signal = np.flip(signal, axis=0)
 
-    q_shift = max(10.0, shift_mult * (quantile_a_value + quantile_b_value))
-    q_scale = max(1.0, scale_mult * (quantile_b_value - quantile_a_value))
-    signal = (signal - q_shift) / q_scale
+        quantile_a_value = np.quantile(signal, quantile_a)
+        quantile_b_value = np.quantile(signal, quantile_b)
 
-    move_idx = np.where(move)[0][1:] * sampling
-    move_idx = len(signal) - move_idx
-    move_idx = np.flip(move_idx, axis=0)
-    signal = np.array_split(signal, move_idx)
-    if len(signal) == 0:
+        q_shift = max(10.0, shift_mult * (quantile_a_value + quantile_b_value))
+        q_scale = max(1.0, scale_mult * (quantile_b_value - quantile_a_value))
+        signal = (signal - q_shift) / q_scale
+        if not np.all(np.isfinite(signal)):
+            return None
+
+        move_idx = np.where(move)[0][1:] * sampling
+        move_idx = len(signal) - move_idx
+        move_idx = np.flip(move_idx, axis=0)
+        signal = np.array_split(signal, move_idx)
+        if len(signal) == 0:
+            return None
+    except Exception:
         return None
     return signal
 
@@ -343,7 +416,7 @@ def parse_pod5(pod5_path, read_ids):
     return signal_df
 
 
-def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
+def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi, expected_sampling):
     """
     Extract move tags and alignment information from a BAM file in parallel.
 
@@ -355,6 +428,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         bam_path (str): path to the BAM file.
         bq_cutoff (int): minimum average base quality threshold.
         boi (str): base-of-interest for alignment extraction.
+        expected_sampling (int): expected move-tag stride in samples.
 
     Returns:
         None (appends DataFrame to bam_data).
@@ -362,6 +436,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
     bam_df = {k: [] for k in ["read_id", "parent_id", "ts", "ns", "sp", "bq", "mv", "seq", "ref", "ap", "strand"]}
     input_bam = pysam.AlignmentFile(bam_path, "rb", check_sq=False, threads=n_thread)
     ref_index_dict = {ref: i for i, ref in enumerate(input_bam.references)}
+    mv_stride_mismatch = 0
 
     for read_idx, read in tqdm.tqdm(enumerate(input_bam), total=input_bam.mapped + input_bam.unmapped):
         if read_idx % n_procs != pid:
@@ -374,6 +449,19 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
                 continue
         except Exception:
             continue
+
+        try:
+            mv_tag = read.get_tag("mv")
+        except Exception:
+            continue
+        if len(mv_tag) < 2:
+            continue
+
+        mv_sampling = int(mv_tag[0])
+        if mv_sampling != expected_sampling:
+            mv_stride_mismatch += 1
+            continue
+
         ap = np.array(read.get_aligned_pairs(matches_only=True, with_seq=True), dtype=object)
         ap = ap[ap[:, 2] == boi][:, :2].astype(np.int32)
         if len(ap) == 0:
@@ -384,7 +472,7 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         ts = read.get_tag("ts") if read.has_tag("ts") else 0
         ns = read.get_tag("ns") if read.has_tag("ns") else 0
         sp = read.get_tag("sp") if read.has_tag("sp") else 0
-        mv = np.array(read.get_tag("mv")[1:], dtype=bool)
+        mv = np.array(mv_tag[1:], dtype=bool)
         seq = np.array(list(read.query_sequence)).view(np.int32).astype(np.uint8)
         strand = -1 if read.is_reverse else 1
         bam_df["read_id"].append(read_id)
@@ -400,6 +488,13 @@ def parse_bam(pid, n_procs, n_thread, bam_data, bam_path, bq_cutoff, boi):
         bam_df["strand"].append(strand)
 
     input_bam.close()
+    if mv_stride_mismatch > 0:
+        log.warning(
+            "Skipped %d reads in BAM worker %d due to mv-tag stride mismatch with --sampling=%d",
+            mv_stride_mismatch,
+            pid,
+            expected_sampling,
+        )
     bam_df = pd.DataFrame.from_dict(bam_df, orient="columns")
     bam_df["ref"] = bam_df["ref"].map(ref_index_dict)
     bam_df = bam_df.dropna()
@@ -460,6 +555,9 @@ def segment_normalize_signal(
         with pod5.Reader(pod5_path) as reader:
             read_ids = reader.read_ids
 
+        if len(read_ids) == 0:
+            continue
+
         read_id_split = np.array_split(np.array(read_ids), np.ceil(len(read_ids) / process_once))
 
         for read_ids in read_id_split:
@@ -496,6 +594,9 @@ def segment_normalize_signal(
                 ),
                 axis=1,
             )
+            signal_df = signal_df[signal_df["signal"].notnull() & signal_df["dwell_token"].notnull()].copy()
+            if len(signal_df) == 0:
+                continue
 
             ## Explode read-level data to base-level data
             signal_df = (
