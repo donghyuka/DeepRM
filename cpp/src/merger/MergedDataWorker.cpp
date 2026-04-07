@@ -84,6 +84,9 @@ namespace deeprm {
   {
     NormalizationFactors norm_factors;
 
+    // Per-worker POD5 readers, opened lazily for thread-safe access
+    unordered_map<string, Pod5FileReader_t*> worker_readers;
+
     unordered_map<string, Pod5RecordMeta> pod5_index;
     // Build POD5 index for this worker
     pod5_index.reserve(pod5_meta_records.size());
@@ -118,7 +121,20 @@ namespace deeprm {
       // Find matching POD5 record
       auto pod5_it = pod5_index.find(bam_record.parent_id);
       if (pod5_it != pod5_index.end()) {
-        batch_merged.emplace_back(pod5_it->second, bam_record);
+        // Lazy-open per-worker reader for thread-safe POD5 access
+        auto& meta = pod5_it->second;
+        auto [rit, inserted] = worker_readers.try_emplace(meta.file_path, nullptr);
+        if (inserted) {
+          rit->second = pod5_open_file(meta.file_path.c_str());
+          if (!rit->second) {
+            log_err() << "merged data worker " << worker_id
+                      << " failed to open POD5: " << meta.file_path << endl;
+          }
+        }
+        if (!rit->second)
+          continue;
+        meta.reader = rit->second;
+        batch_merged.emplace_back(meta, bam_record);
 
         // Process batch when it reaches process_once size
         if (batch_merged.size() >= static_cast<size_t>(args.process_once)) {
@@ -196,6 +212,11 @@ namespace deeprm {
       log_info() << "merged data worker " << worker_id << " flushing remaining records" << endl;
       writer->flush();
     }
+
+    // Close per-worker POD5 readers
+    for (auto& [path, reader] : worker_readers)
+      if (reader)
+        pod5_close_and_free_reader(reader);
 
     log_info() << "merged data worker " << worker_id
         << " completed processing. Total batches: "
