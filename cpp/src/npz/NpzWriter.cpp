@@ -45,182 +45,118 @@ string NpzWriter::generate_filename(bool is_last_processing_unit, bool is_last_c
 }
 
 void NpzWriter::save_chunk(const vector<ProcessedRecord>& records,
-                           const string& filename)
+                           size_t offset, size_t count, const string& filename)
 {
-  if (records.empty()) {
-    return;
+  if (count == 0) return;
+
+  // Determine max dimensions in this range
+  size_t max_segment_len = 0, max_signal_len = 0, max_kmer_len = 0;
+  size_t max_dwell_motor_len = 0, max_dwell_pore_len = 0, max_bq_len = 0;
+
+  for (size_t i = offset; i < offset + count; ++i) {
+    const auto& r = records[i];
+    max_segment_len = max(max_segment_len, r.segment_len_arr.size());
+    max_signal_len = max(max_signal_len, r.signal_token.size());
+    max_kmer_len = max(max_kmer_len, r.kmer_token.size());
+    max_dwell_motor_len = max(max_dwell_motor_len, r.dwell_motor_token.size());
+    max_dwell_pore_len = max(max_dwell_pore_len, r.dwell_pore_token.size());
+    max_bq_len = max(max_bq_len, r.bq_token.size());
   }
 
-  size_t num_records = records.size();
+  // Reuse member flat arrays (capacity preserved across calls)
+  flat_segment_len.assign(count * max_segment_len, 0);
+  flat_signal.assign(count * max_signal_len, 0.0f);
+  flat_kmer.assign(count * max_kmer_len, 0);
+  flat_dwell_motor.assign(count * max_dwell_motor_len, 0.0f);
+  flat_dwell_pore.assign(count * max_dwell_pore_len, 0.0f);
+  flat_bq.assign(count * max_bq_len, 0);
+  label_ids.assign(count, 0);
+  read_ids.assign(count * 2, 0);
 
-  // Prepare arrays for each field
-  vector<vector<uint16_t>> segment_len_arrays;
-  vector<vector<double>> signal_tokens;
-  vector<vector<uint8_t>> kmer_tokens;
-  vector<vector<float>> dwell_motor_tokens;
-  vector<vector<float>> dwell_pore_tokens;
-  vector<vector<uint8_t>> bq_tokens;
-  vector<int64_t> label_ids;
-  vector<int64_t> read_ids;  // UUID as int64 pairs
+  for (size_t i = 0; i < count; ++i) {
+    const auto& r = records[offset + i];
+    size_t seg_off = i * max_segment_len;
+    size_t sig_off = i * max_signal_len;
+    size_t kmer_off = i * max_kmer_len;
+    size_t dm_off = i * max_dwell_motor_len;
+    size_t dp_off = i * max_dwell_pore_len;
+    size_t bq_off = i * max_bq_len;
 
-  // Determine dimensions
-  size_t max_segment_len = 0;
-  size_t max_signal_len = 0;
-  size_t max_kmer_len = 0;
-  size_t max_dwell_motor_len = 0;
-  size_t max_dwell_pore_len = 0;
-  size_t max_bq_len = 0;
+    copy(r.segment_len_arr.begin(), r.segment_len_arr.end(), flat_segment_len.begin() + seg_off);
+    // signal_token is double, flat_signal is float — convert
+    for (size_t j = 0; j < r.signal_token.size(); ++j)
+      flat_signal[sig_off + j] = static_cast<float>(r.signal_token[j]);
+    copy(r.kmer_token.begin(), r.kmer_token.end(), flat_kmer.begin() + kmer_off);
+    copy(r.dwell_motor_token.begin(), r.dwell_motor_token.end(), flat_dwell_motor.begin() + dm_off);
+    copy(r.dwell_pore_token.begin(), r.dwell_pore_token.end(), flat_dwell_pore.begin() + dp_off);
+    copy(r.bq_token.begin(), r.bq_token.end(), flat_bq.begin() + bq_off);
+    label_ids[i] = r.label_id;
 
-  for (const auto& record : records) {
-    max_segment_len = max(max_segment_len, record.segment_len_arr.size());
-    max_signal_len = max(max_signal_len, record.signal_token.size());
-    max_kmer_len = max(max_kmer_len, record.kmer_token.size());
-    max_dwell_motor_len = max(max_dwell_motor_len, record.dwell_motor_token.size());
-    max_dwell_pore_len = max(max_dwell_pore_len, record.dwell_pore_token.size());
-    max_bq_len = max(max_bq_len, record.bq_token.size());
-  }
-
-  // Create padded arrays
-  for (const auto& record : records) {
-    // Segment length array
-    vector<uint16_t> padded_segment_len = record.segment_len_arr;
-    padded_segment_len.resize(max_segment_len, 0);
-    segment_len_arrays.push_back(padded_segment_len);
-
-    // Signal token
-    vector<double> padded_signal = record.signal_token;
-    padded_signal.resize(max_signal_len, 0.0f);
-    signal_tokens.push_back(padded_signal);
-
-    // K-mer token
-    vector<uint8_t> padded_kmer = record.kmer_token;
-    padded_kmer.resize(max_kmer_len, 0);
-    kmer_tokens.push_back(padded_kmer);
-
-    // Dwell motor token
-    vector<float> padded_dwell_motor = record.dwell_motor_token;
-    padded_dwell_motor.resize(max_dwell_motor_len, 0.0f);
-    dwell_motor_tokens.push_back(padded_dwell_motor);
-
-    // Dwell pore token
-    vector<float> padded_dwell_pore = record.dwell_pore_token;
-    padded_dwell_pore.resize(max_dwell_pore_len, 0.0f);
-    dwell_pore_tokens.push_back(padded_dwell_pore);
-
-    // BQ token
-    vector<uint8_t> padded_bq = record.bq_token;
-    padded_bq.resize(max_bq_len, 0);
-    bq_tokens.push_back(padded_bq);
-
-    // Label ID
-    label_ids.push_back(record.label_id);
-  }
-
-  // Convert read_id strings (UUID) to int64 pairs
-  for (const auto& record : records) {
     uuid_t uuid;
-    if (uuid_parse(record.read_id.c_str(), uuid) == 0) {
-      // UUID is 16 bytes, we convert to 2 int64
+    if (uuid_parse(r.read_id.c_str(), uuid) == 0) {
       int64_t* uuid_as_int64 = reinterpret_cast<int64_t*>(uuid);
-      read_ids.push_back(uuid_as_int64[0]);
-      read_ids.push_back(uuid_as_int64[1]);
-    } else {
-      // If parsing fails, add zeros
-      read_ids.push_back(0);
-      read_ids.push_back(0);
+      read_ids[i * 2] = uuid_as_int64[0];
+      read_ids[i * 2 + 1] = uuid_as_int64[1];
     }
   }
 
-  // Flatten arrays for cnpy
-  vector<uint16_t> flat_segment_len;
-  vector<float> flat_signal;
-  vector<uint8_t> flat_kmer;
-  vector<float> flat_dwell_motor;
-  vector<float> flat_dwell_pore;
-  vector<uint8_t> flat_bq;
-
-  for (const auto& arr : segment_len_arrays) {
-    flat_segment_len.insert(flat_segment_len.end(), arr.begin(), arr.end());
-  }
-
-  for (const auto& arr : signal_tokens) {
-    flat_signal.insert(flat_signal.end(), arr.begin(), arr.end());
-  }
-
-  for (const auto& arr : kmer_tokens) {
-    flat_kmer.insert(flat_kmer.end(), arr.begin(), arr.end());
-  }
-
-  for (const auto& arr : dwell_motor_tokens) {
-    flat_dwell_motor.insert(flat_dwell_motor.end(), arr.begin(), arr.end());
-  }
-
-  for (const auto& arr : dwell_pore_tokens) {
-    flat_dwell_pore.insert(flat_dwell_pore.end(), arr.begin(), arr.end());
-  }
-
-  for (const auto& arr : bq_tokens) {
-    flat_bq.insert(flat_bq.end(), arr.begin(), arr.end());
-  }
-
-  // Save to NPZ file
   try {
     cnpy::npz_save(filename, "segment_len_arr", flat_segment_len.data(),
-                   {num_records, max_segment_len}, "w", true);
+                   {count, max_segment_len}, "w", true);
     cnpy::npz_save(filename, "signal_token", flat_signal.data(),
-                   {num_records, max_signal_len}, "a", true);
+                   {count, max_signal_len}, "a", true);
     cnpy::npz_save(filename, "kmer_token", flat_kmer.data(),
-                   {num_records, max_kmer_len}, "a", true);
+                   {count, max_kmer_len}, "a", true);
     cnpy::npz_save(filename, "dwell_motor_token", flat_dwell_motor.data(),
-                   {num_records, max_dwell_motor_len}, "a", true);
+                   {count, max_dwell_motor_len}, "a", true);
     cnpy::npz_save(filename, "dwell_pore_token", flat_dwell_pore.data(),
-                   {num_records, max_dwell_pore_len}, "a", true);
+                   {count, max_dwell_pore_len}, "a", true);
     cnpy::npz_save(filename, "bq_token", flat_bq.data(),
-                   {num_records, max_bq_len}, "a", true);
-    cnpy::npz_save(filename, "label_id", label_ids.data(),
-                   {num_records}, "a", true);
-    cnpy::npz_save(filename, "read_id", read_ids.data(),
-                   {num_records, 2}, "a", true);
+                   {count, max_bq_len}, "a", true);
+    cnpy::npz_save(filename, "label_id", label_ids.data(), {count}, "a", true);
+    cnpy::npz_save(filename, "read_id", read_ids.data(), {count, 2}, "a", true);
   } catch (const exception& e) {
     cerr << "Error saving NPZ file " << filename << ": " << e.what() << endl;
   }
 }
 
-void NpzWriter::add_records(const vector<ProcessedRecord>& records)
+void NpzWriter::add_records(vector<ProcessedRecord>&& records)
 {
-  buffer.insert(buffer.end(), records.begin(), records.end());
+  buffer.insert(buffer.end(), make_move_iterator(records.begin()),
+                make_move_iterator(records.end()));
 
-  // Process same as Python code: save when chunk_size is reached
-  while (static_cast<int>(buffer.size()) >= chunk_size) {
-    vector<ProcessedRecord> chunk(buffer.begin(), buffer.begin() + chunk_size);
-    buffer.erase(buffer.begin(), buffer.begin() + chunk_size);
-
+  // Save complete chunks directly from buffer using offset
+  size_t offset = 0;
+  while (buffer.size() - offset >= static_cast<size_t>(chunk_size)) {
     string filename = generate_filename(false, false);
-    save_chunk(chunk, filename);
+    save_chunk(buffer, offset, chunk_size, filename);
     chunk_id++;
+    offset += chunk_size;
+  }
+
+  // Keep only remaining records
+  if (offset > 0) {
+    buffer.erase(buffer.begin(), buffer.begin() + offset);
   }
 }
 
 void NpzWriter::flush()
 {
   if (!buffer.empty()) {
-    // Same logic as Python code: save remaining buffer in chunk units
-    while (static_cast<int>(buffer.size()) >= chunk_size) {
-      vector<ProcessedRecord> chunk(buffer.begin(), buffer.begin() + chunk_size);
-      buffer.erase(buffer.begin(), buffer.begin() + chunk_size);
-
+    size_t offset = 0;
+    while (buffer.size() - offset >= static_cast<size_t>(chunk_size)) {
       string filename = generate_filename(true, false);
-      save_chunk(chunk, filename);
-
+      save_chunk(buffer, offset, chunk_size, filename);
       chunk_id++;
+      offset += chunk_size;
     }
 
     // Save remaining records
-    if (!buffer.empty()) {
+    if (offset < buffer.size()) {
       string filename = generate_filename(true, true);
-      save_chunk(buffer, filename);
-      buffer.clear();
+      save_chunk(buffer, offset, buffer.size() - offset, filename);
     }
+    buffer.clear();
   }
 }
 

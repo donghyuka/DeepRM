@@ -196,7 +196,7 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
 
       if (!processed_records.empty()) {
         // Write to NPZ
-        writer.add_records(processed_records);
+        writer.add_records(move(processed_records));
       }
 
       writer.increment_processing_unit();
@@ -226,6 +226,7 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
 int main(int argc, char* argv[])
 {
   auto start_time = chrono::high_resolution_clock::now();
+  log_start_time();
 
   // Parse arguments
   ArgumentParser parser;
@@ -381,6 +382,8 @@ int main(int argc, char* argv[])
   pod5_reader_records.clear();
   pod5_reader_records.shrink_to_fit();
 
+  log_info() << "[MEM] POD5 redistributed: " << get_rss_mb() << " MB" << endl;
+
   // Create POD5 index (read_id -> worker_id mapping)
   log_info() << "Creating POD5 index for merged data workers" << endl;
   unordered_map<string, int> pod5_index;
@@ -390,6 +393,8 @@ int main(int argc, char* argv[])
       pod5_index[record.read_id] = worker_id;
     }
   }
+
+  log_info() << "[MEM] pod5_index created: " << get_rss_mb() << " MB" << endl;
 
   // Check if consistency mode is enabled
   if (args.consistency) {
@@ -492,12 +497,16 @@ int main(int argc, char* argv[])
     }
 
     log_info() << "Started " << num_workers << " merged data workers" << endl;
+    log_info() << "[MEM] workers created: " << get_rss_mb() << " MB" << endl;
 
     // Set workers for SAM dispatcher
     sam_dispatcher.set_workers(&merged_workers, &pod5_index);
 
+    log_info() << "[MEM] dispatch started: " << get_rss_mb() << " MB" << endl;
+
     // Wait for SAM dispatcher to finish
     sam_dispatcher.stop();
+    log_info() << "[MEM] dispatch completed: " << get_rss_mb() << " MB" << endl;
 
     // Signal all workers to stop (notify them to process final batches)
     for (auto worker : merged_workers) {
