@@ -2,6 +2,7 @@
 .idea/
 ## patch
 patch
+*.patch
 ## venv
 venv/
 
