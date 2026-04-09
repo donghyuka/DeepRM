@@ -162,34 +162,32 @@ def worker(df_list, refflat_df, collect_list):
     for transcript_df in tqdm(df_list, desc="Converting to genomic coordinates", leave=False):
         if len(transcript_df) == 0:
             continue
+
         transcript_id = transcript_df["transcript_id"].iloc[0]
         try:
             refflat_row = refflat_df.loc[transcript_id]
         except KeyError:
             continue
-        if len(refflat_row) == 0:
+
+        exon_starts = np.asarray(refflat_row["exonStarts"], dtype=np.int64)
+        exon_ends = np.asarray(refflat_row["exonEnds"], dtype=np.int64)
+        strand = refflat_row["strand"]
+        chrom = refflat_row["chrom"]
+
+        mapper = TranscriptMapper(exon_starts=exon_starts, exon_ends=exon_ends, strand=strand)
+        mapped_df = transcript_df.copy()
+        mapped_df["chrom"] = chrom
+        mapped_df["strand"] = strand
+        mapped_df["pos"] = mapper.map(mapped_df["ref_pos"].to_numpy())
+        mapped_df = mapped_df.dropna(subset=["pos"])
+        if len(mapped_df) == 0:
             continue
+        mapped_df["pos"] = mapped_df["pos"].astype(np.int64)
+        local_collect.append(mapped_df)
 
-        try:
-            exon_starts = refflat_row["exonStarts"]
-            exon_ends = refflat_row["exonEnds"]
-            strand = refflat_row["strand"]
-            chrom = refflat_row["chrom"]
-
-            mapper = TranscriptMapper(exon_starts=np.array(exon_starts), exon_ends=np.array(exon_ends), strand=strand)
-
-            transcript_df["chrom"] = chrom
-            transcript_df["strand"] = strand
-            transcript_df["pos"] = mapper.map(transcript_df["ref_pos"].to_numpy())
-
-            local_collect.append(transcript_df.dropna())
-
-        except Exception:
-            continue
-
-    if len(local_collect) > 0:
-        df = pd.concat(local_collect)
-        df = df.groupby(["chrom", "strand", "pos"]).agg(
+    if local_collect:
+        df = pd.concat(local_collect, ignore_index=True)
+        df = df.groupby(["chrom", "strand", "pos"], as_index=False).agg(
             {
                 "kl_div_neg": "sum",
                 "kl_div_pos": "sum",
@@ -198,9 +196,7 @@ def worker(df_list, refflat_df, collect_list):
                 "logsum_1_p_pos": "sum",
             }
         )
-        df = df.reset_index()
         collect_list.append(df)
-
     return None
 
 
@@ -226,19 +222,35 @@ def load_split_data(data_df, cpu):
         * Groups are sorted by size to improve load balancing.
         * The zig-zag distribution helps avoid piling all large groups onto early shards.
     """
+
+    if cpu <= 0:
+        raise ValueError("cpu must be positive")
+
     data_df = data_df.rename({"ref_names": "transcript_id"}, axis=1)
-    data_df = data_df.groupby("transcript_id")
-    ## sort by size
-    data_df = sorted(data_df, key=lambda x: len(x[1]), reverse=True)
+    grouped = sorted(data_df.groupby("transcript_id"), key=lambda x: len(x[1]), reverse=True)
+    if len(grouped) == 0:
+        return []
 
-    df_list_split = [[] for _ in range(min(cpu, len(data_df)))]
-    for idx, (gene, df) in enumerate(data_df):
-        split_idx = idx % (2 * cpu)
-        if split_idx >= cpu:
-            split_idx = 2 * cpu - split_idx - 1
+    n_shards = min(cpu, len(grouped))
+    df_list_split = [[] for _ in range(n_shards)]
+    cycle = max(1, n_shards)
+    for idx, (_, df) in enumerate(grouped):
+        split_idx = idx % (2 * cycle)
+        if split_idx >= cycle:
+            split_idx = 2 * cycle - split_idx - 1
         df_list_split[split_idx].append(df)
-
     return df_list_split
+
+
+def _parse_exon_array(value):
+    if isinstance(value, np.ndarray):
+        return value.astype(np.int64, copy=False)
+    text = str(value).strip()
+    if text.endswith(","):
+        text = text[:-1]
+    if text == "":
+        return np.array([], dtype=np.int64)
+    return np.fromstring(text, sep=",", dtype=np.int64)
 
 
 def parse_refflat(refflat_path):
@@ -293,34 +305,28 @@ def parse_refflat(refflat_path):
         "exonStarts",
         "exonEnds",
     ]
-    with open(refflat_path) as infile:
-        refflat_df = pd.read_csv(infile, sep="\t", header=None)
+    refflat_df = pd.read_csv(refflat_path, sep="\t", header=None)
 
-    ## check if number of columns is correct (refflat = 11, refgene = 15, genepred = 10)
     n_cols = refflat_df.shape[1]
     if n_cols == 11:
         refflat_df = refflat_df.iloc[:, 1:]
     elif n_cols == 15:
         refflat_df = refflat_df.iloc[:, :10]
-    elif n_cols == 10:
-        pass
-    else:
+    elif n_cols != 10:
         raise ValueError(
             "Invalid annotation file format. Expected 10 (GenePred), 11 (RefFlat), or 15 (RefGene) columns."
         )
 
     refflat_df.columns = col_list
+    refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd", "exonCount"]] = refflat_df[
+        ["txStart", "txEnd", "cdsStart", "cdsEnd", "exonCount"]
+    ].astype(np.int64)
 
-    refflat_df[["txStart", "txEnd", "cdsStart", "cdsEnd"]] = refflat_df[
-        ["txStart", "txEnd", "cdsStart", "cdsEnd"]
-    ].astype(int)
-
-    ## Filter out invalid entries
     refflat_df = refflat_df[refflat_df["txEnd"] > refflat_df["txStart"]]
     refflat_df = refflat_df[refflat_df["cdsEnd"] >= refflat_df["cdsStart"]]
     refflat_df = refflat_df[refflat_df["exonCount"] > 0]
-    refflat_df["exonStarts"] = refflat_df["exonStarts"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
-    refflat_df["exonEnds"] = refflat_df["exonEnds"].apply(lambda x: np.array(x.split(",")[:-1]).astype(int))
+    refflat_df["exonStarts"] = refflat_df["exonStarts"].apply(_parse_exon_array)
+    refflat_df["exonEnds"] = refflat_df["exonEnds"].apply(_parse_exon_array)
     refflat_df = refflat_df[refflat_df["exonStarts"].apply(len) == refflat_df["exonCount"]]
     refflat_df = refflat_df[refflat_df["exonEnds"].apply(len) == refflat_df["exonCount"]]
     refflat_df = refflat_df[refflat_df.apply(lambda x: np.all(x["exonEnds"] > x["exonStarts"]), axis=1)]
@@ -336,55 +342,71 @@ def parse_refflat(refflat_path):
 
 
 def pileup_genomic(args, input_df):
-    """
-    Aggregate per-genomic-position metrics using multiprocessing.
+    def pileup_genomic(args, input_df):
+        """
+        Aggregate per-genomic-position metrics using multiprocessing.
 
-    Spawns up to `args.thread` worker processes to convert transcript-relative
-    positions to genomic coordinates and aggregate metrics across all input rows.
-    Requires an annotation file path at `args.annot`.
+        Spawns up to `args.thread` worker processes to convert transcript-relative
+        positions to genomic coordinates and aggregate metrics across all input rows.
+        Requires an annotation file path at `args.annot`.
 
-    The final output is a DataFrame aggregated by `(chrom, strand, pos)` with
-    derived columns:
-    * `stoichiometry` = `kl_div_pos` / (`kl_div_neg` + `kl_div_pos`)
-    * `modscore` = a modification prediction score.
+        The final output is a DataFrame aggregated by `(chrom, strand, pos)` with
+        derived columns:
+        * `stoichiometry` = `kl_div_pos` / (`kl_div_neg` + `kl_div_pos`)
+        * `modscore` = a modification prediction score.
 
-    Args:
-        args (argparse.Namespace): Must contain:
-            - `annot` (str or path-like): Path to RefFlat/RefGene/GenePred file.
-            - `thread` (int): Number of worker processes to spawn.
-        input_df (pandas.DataFrame): Input rows containing at least:
-            - `ref_names` (str): Transcript ID; will be renamed to `transcript_id`.
-            - `ref_pos` (int): Transcript-relative position (0-based).
-            - `kl_div_neg`, `kl_div_pos`, `count_all`, `count_pos`, `logsum_1_p_pos`:
-            Metric columns to be summed.
+        Args:
+            args (argparse.Namespace): Must contain:
+                - `annot` (str or path-like): Path to RefFlat/RefGene/GenePred file.
+                - `thread` (int): Number of worker processes to spawn.
+            input_df (pandas.DataFrame): Input rows containing at least:
+                - `ref_names` (str): Transcript ID; will be renamed to `transcript_id`.
+                - `ref_pos` (int): Transcript-relative position (0-based).
+                - `kl_div_neg`, `kl_div_pos`, `count_all`, `count_pos`, `logsum_1_p_pos`:
+                Metric columns to be summed.
 
-    Returns:
-        pandas.DataFrame: Aggregated DataFrame with columns:
-            `chrom`, `strand`, `pos`, `modscore`, `stoichiometry`,
-            `count_all`, `count_pos`.
+        Returns:
+            pandas.DataFrame: Aggregated DataFrame with columns:
+                `chrom`, `strand`, `pos`, `modscore`, `stoichiometry`,
+                `count_all`, `count_pos`.
 
-    Raises:
-        ValueError: If no valid genomic positions are produced (e.g., due to
-            mismatched or invalid annotations).
+        Raises:
+            ValueError: If no valid genomic positions are produced (e.g., due to
+                mismatched or invalid annotations).
 
-    Notes:
-        * Uses a `multiprocessing.Manager().list()` to collect per-process results.
-        * `load_split_data` is used to balance workload across processes.
-        * The output `pos` is 0-based genomic coordinate (float in intermediate steps,
-            but will be integral where valid).
-    """
+        Notes:
+            * Uses a `multiprocessing.Manager().list()` to collect per-process results.
+            * `load_split_data` is used to balance workload across processes.
+            * The output `pos` is 0-based genomic coordinate (float in intermediate steps,
+                but will be integral where valid).
+        """
+
+    if len(input_df) == 0:
+        raise ValueError("input_df is empty. No transcript pileup entries were provided.")
+
+    n_proc = getattr(args, "thread", None)
+    if n_proc is None:
+        n_proc = max(1, int(0.95 * mp.cpu_count()))
+    if n_proc <= 0:
+        raise ValueError("args.thread must be a positive integer.")
+
+    refflat_df = parse_refflat(args.annot)
+    df_list_split = load_split_data(input_df, n_proc)
+    if len(df_list_split) == 0:
+        raise ValueError("No transcript groups were available for genomic aggregation.")
+
     man = mp.Manager()
     collect_list = man.list()
     proc_list = []
-    refflat_df = parse_refflat(args.annot)
-    df_list_split = load_split_data(input_df, args.thread)
 
-    for pid, df_list in enumerate(df_list_split):
+    for df_list in df_list_split:
         proc = mp.Process(target=worker, args=(df_list, refflat_df, collect_list))
         proc.start()
         proc_list.append(proc)
     for proc in proc_list:
         proc.join()
+        if proc.exitcode != 0:
+            raise RuntimeError(f"Genomic pileup worker exited with code {proc.exitcode}.")
 
     collect_list = list(collect_list)
     man.shutdown()
@@ -392,10 +414,10 @@ def pileup_genomic(args, input_df):
     if len(collect_list) == 0:
         raise ValueError("No valid genomic position found. Please verify the annotation file.")
 
-    df = pd.concat(collect_list)
+    df = pd.concat(collect_list, ignore_index=True)
     gc.collect()
 
-    df = df.groupby(["chrom", "strand", "pos"]).agg(
+    df = df.groupby(["chrom", "strand", "pos"], as_index=False).agg(
         {
             "kl_div_neg": "sum",
             "kl_div_pos": "sum",
@@ -405,8 +427,9 @@ def pileup_genomic(args, input_df):
         }
     )
 
+    epsilon = getattr(args, "epsilon", 1e-30)
     digitization = 1000
-    df["stoichiometry"] = df["kl_div_pos"] / (df["kl_div_neg"] + df["kl_div_pos"])
+    df["stoichiometry"] = df["kl_div_pos"] / (df["kl_div_neg"] + df["kl_div_pos"] + epsilon)
     df["modscore"] = 1 - np.power(
         10, df["logsum_1_p_pos"] / df["count_all"] * (1 + np.power(10, 2 * (df["stoichiometry"] - 1)))
     )
@@ -414,6 +437,6 @@ def pileup_genomic(args, input_df):
     df["stoichiometry"] = df["stoichiometry"] * (
         (np.log10(1 - args.threshold) * df["stoichiometry"]) > (df["logsum_1_p_pos"] / df["count_all"])
     )
-    df = df.reset_index()
     df = df[["chrom", "strand", "pos", "modscore", "stoichiometry", "count_all", "count_pos"]]
+    df["pos"] = df["pos"].astype(np.int64)
     return df

@@ -1,8 +1,8 @@
 """
-DeespRM Inference Module
+DeepRM Inference Module
 
-This program handles the inference process for DeepRM models, including loading the model,
-processing input data, and saving the output predictions.
+This program handles the inference process for DeepRM models, including loading the
+model, processing input data, and saving the output predictions.
 """
 
 import argparse
@@ -10,8 +10,7 @@ import glob
 import importlib
 import os
 import pathlib
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 import numpy as np
 import tqdm
@@ -45,13 +44,15 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--model-type", "-y", type=str, default="deeprm_model", help="Model type")
     parser.add_argument("--batch", "-s", type=int, default=16000, help="Batch size")
     parser.add_argument("--gpu", "-g", type=int, default=None, help="Num. of GPU devices", dest="num_gpu")
-    parser.add_argument("--prefetch", "-p", type=int, default=4, help="Number of files to load")
+    parser.add_argument("--prefetch", "-p", type=int, default=4, help="Number of files to prefetch")
     parser.add_argument("--worker", "-w", type=int, default=4, help="Number of workers per GPU")
     parser.add_argument("--postfix", "-x", type=str, default="", help="Postfix for output directory")
-    parser.add_argument("--flush", "-f", type=int, default=100, help="Flush interval for intermediate results.")
+    parser.add_argument(
+        "--flush", "-f", type=int, default=100, help="Number of minibatches to accumulate before CPU-side flush."
+    )
     parser.add_argument("--resume", action="store_true", help="Resume terminated inference.")
     parser.add_argument("--gpu-pool", "-gp", type=int, nargs="+", help="GPU pool")
-    parser.add_argument("--output-id", "-id", type=int, default=None, help="Output ID for Multi-output models.")
+    parser.add_argument("--output-id", "-id", type=int, default=None, help="Output ID for multi-output models.")
     parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use for pileup")
     parser.add_argument("--threshold", "-th", type=float, default=0.98, help="Positive threshold")
     parser.add_argument("--epsilon", "-ep", type=float, default=1e-30, help="Epsilon value")
@@ -62,8 +63,48 @@ def add_arguments(parser: argparse.ArgumentParser):
         "--label_div", "-d", type=int, default=10**9, help="Divisor for label_id to separate transcript and position"
     )
     parser.add_argument("--annot", "-a", type=str, default=None, help="Annotation file (e.g., refFlat.txt)")
-
     return None
+
+
+def _validate_args(args: argparse.Namespace) -> None:
+    if args.batch <= 0:
+        raise ValueError("--batch must be a positive integer.")
+    if args.flush <= 0:
+        raise ValueError("--flush must be a positive integer.")
+    if args.prefetch <= 0:
+        raise ValueError("--prefetch must be a positive integer.")
+    if args.worker < 0:
+        raise ValueError("--worker must be non-negative.")
+    if not (0.0 <= args.threshold < 1.0):
+        raise ValueError("--threshold must satisfy 0 <= threshold < 1.")
+    if args.epsilon <= 0:
+        raise ValueError("--epsilon must be positive.")
+
+
+def _normalize_gpu_config(args: argparse.Namespace) -> None:
+    available_gpu = torch.cuda.device_count()
+    if args.gpu_pool is not None:
+        if len(args.gpu_pool) == 0:
+            raise ValueError("--gpu-pool cannot be empty.")
+        if len(set(args.gpu_pool)) != len(args.gpu_pool):
+            raise ValueError("--gpu-pool contains duplicate GPU IDs.")
+        invalid = [gpu for gpu in args.gpu_pool if gpu < 0 or gpu >= available_gpu]
+        if invalid:
+            raise ValueError(f"Invalid GPU IDs in --gpu-pool: {invalid}. Available GPUs: 0..{available_gpu - 1}.")
+        args.num_gpu = len(args.gpu_pool)
+    elif args.num_gpu is None:
+        args.num_gpu = available_gpu
+        args.gpu_pool = list(range(args.num_gpu))
+    elif args.num_gpu > 0:
+        if args.num_gpu > available_gpu:
+            raise ValueError(f"Requested {args.num_gpu} GPUs, but only {available_gpu} are available.")
+        args.gpu_pool = list(range(args.num_gpu))
+    else:
+        args.num_gpu = 0
+        args.gpu_pool = []
+
+    if args.num_gpu == 0:
+        args.gpu_pool = []
 
 
 def main(args: argparse.Namespace):
@@ -90,13 +131,9 @@ def main(args: argparse.Namespace):
         args.data = args.data[:-1]
     if not os.path.isdir(args.data):
         raise ValueError("Invalid data path. It should be a directory containing data files.")
-    if args.num_gpu is None:
-        if args.gpu_pool is None:
-            args.num_gpu = torch.cuda.device_count()
-        else:
-            args.num_gpu = len(args.gpu_pool)
-    if args.gpu_pool is None:
-        args.gpu_pool = list(range(args.num_gpu))
+
+    _validate_args(args)
+    _normalize_gpu_config(args)
 
     output = f"{args.output}/{os.path.basename(args.data)}"
     if len(args.postfix) > 0:
@@ -132,15 +169,55 @@ def run_inference(args):
     torch.multiprocessing.set_sharing_strategy("file_system")
     log.info("Inference Program Started.")
     if args.num_gpu > 0:
-        log.info(f"Using {args.num_gpu} GPUs.")
+        log.info(f"Using {args.num_gpu} GPUs: {args.gpu_pool}.")
     else:
         log.info("Using CPU.")
 
     ## make tensorboard directory
     log.info(f"Model path: {args.model}")
     log.info(f"Output directory: {args.output}")
-    mp.spawn(inference_worker, nprocs=max(1, args.num_gpu), args=(vars(args),), join=True)
+
+    if args.num_gpu > 0:
+        mp.spawn(inference_worker, nprocs=args.num_gpu, args=(vars(args),), join=True)
+    else:
+        inference_worker(0, vars(args))
     return None
+
+
+def _discover_resume_point(output_dir: str, rank: int) -> int:
+    pattern = os.path.join(output_dir, f"inference_{rank}_*.npz")
+    paths = glob.glob(pattern)
+    if not paths:
+        return 0
+
+    indexed_paths = {}
+    for path in paths:
+        stem = os.path.basename(path).rsplit(".", 1)[0]
+        try:
+            idx = int(stem.split("_")[-1])
+        except ValueError:
+            continue
+        indexed_paths[idx] = path
+
+    saved = 0
+    while saved in indexed_paths:
+        saved += 1
+
+    stale_indices = sorted(idx for idx in indexed_paths if idx >= saved)
+    if stale_indices:
+        for idx in stale_indices:
+            try:
+                os.remove(indexed_paths[idx])
+            except OSError:
+                pass
+        log.warning(
+            "Found non-contiguous or stale inference outputs for rank %s. Removed shard indices >= %s: %s",
+            rank,
+            saved,
+            stale_indices,
+        )
+
+    return saved
 
 
 def inference_worker(rank, args_dict):
@@ -153,11 +230,14 @@ def inference_worker(rank, args_dict):
     Returns:
         None
     """
-    gpu_id = args_dict["gpu_pool"][rank]
-    if args_dict["num_gpu"] > 0:
-        save_dict = torch.load(args_dict["model"], map_location={"cuda:0": f"cuda:{gpu_id}"}, weights_only=False)
+    use_gpu = args_dict["num_gpu"] > 0
+    device = torch.device(f"cuda:{args_dict['gpu_pool'][rank]}") if use_gpu else torch.device("cpu")
+
+    if use_gpu:
+        map_location = {"cuda:0": str(device)}
     else:
-        save_dict = torch.load(args_dict["model"], map_location="cpu", weights_only=False)
+        map_location = "cpu"
+    save_dict = torch.load(args_dict["model"], map_location=map_location, weights_only=False)
     model_config = save_dict["model_config"]
 
     if args_dict["model_type"] is not None:
@@ -185,64 +265,67 @@ def inference_worker(rank, args_dict):
     )
 
     if rank == 0:
-        total_params = 0
-        for name, parameter in model.named_parameters():
-            params = parameter.numel()
-            total_params += params
-    if args_dict["num_gpu"] > 0:
-        model.to(gpu_id)
+        total_params = sum(parameter.numel() for parameter in model.parameters())
+        log.info("Model parameters: %s", f"{total_params:,}")
+
     model.load_state_dict(state_dict=save_dict["model_state_dict"], strict=False)
     save_dict.clear()
+    model.to(device)
     model.eval()
 
-    if args_dict["resume"]:
-        saved = glob.glob(os.path.join(args_dict["output"], f"inference_{rank}_*.pkl"))
-        if len(saved) > 0:
-            saved = [int(x.split("/")[-1].split("_")[-1].split(".")[0]) for x in saved]
-            saved = max(saved)
-        else:
-            saved = 0
-    else:
-        saved = 0
+    resume_from = _discover_resume_point(args_dict["output"], rank) if args_dict["resume"] else 0
+    if resume_from > 0:
+        log.info("Rank %d resuming from input shard index %d.", rank, resume_from)
 
     data_loader = load_dataset(
         args_dict["data"],
-        gpu_id,
+        rank,
         max(1, args_dict["num_gpu"]),
+        num_files_read_once=args_dict["prefetch"],
         prefetch_factor=args_dict["prefetch"],
         worker=args_dict["worker"],
         cb_len=model_config["block_len"] + model_config["kmer_size"] - 1,
         kmer_len=model_config["kmer_size"],
         sampling=int(model_config["signal_size"] / model_config["kmer_size"]),
         sig_window=model_config["kmer_size"],
-        resume_from=saved,
+        resume_from=resume_from,
     )
 
-    inference_loop(args_dict, rank, gpu_id, model, data_loader)
-
+    inference_loop(args_dict, rank, device, model, data_loader, start_index=resume_from)
     return None
 
 
-def to_gpu(data, device, stream):
+def to_device(data, device):
     """Transfers data to the specified GPU device using a non-blocking stream.
 
     Args:
         data (dict): Dictionary containing the data to be transferred.
         device (torch.device): The target GPU device.
-        stream (torch.cuda.Stream): The CUDA stream for non-blocking transfer.
 
     Returns:
         tuple: A tuple containing the transferred data tensors (src_kmer, src_signal, src_seg_len, src_dwell_bq).
     """
-    with torch.cuda.stream(stream):
-        src_signal = data["signal_token"].to(device, non_blocking=True)
-        src_seg_len = data["segment_len"].to(device, non_blocking=True)
-        src_kmer = data["kmer_token"].to(device, non_blocking=True)
-        src_dwell_bq = data["dwell_bq_token"].to(device, non_blocking=True)
-    return (src_kmer, src_signal, src_seg_len, src_dwell_bq)
+    non_blocking = device.type == "cuda"
+    return (
+        data["kmer_token"].to(device, non_blocking=non_blocking),
+        data["signal_token"].to(device, non_blocking=non_blocking),
+        data["segment_len"].to(device, non_blocking=non_blocking),
+        data["dwell_bq_token"].to(device, non_blocking=non_blocking),
+    )
 
 
-def inference_loop(args_dict, rank, gpu_id, model, data_loader):
+def _flush_cpu_buffers(pred_buffer, label_id_buffer, read_id_buffer, pred_parts, label_parts, read_parts):
+    if not pred_buffer:
+        return
+    pred_parts.append(np.concatenate(pred_buffer, axis=0))
+    label_parts.append(np.concatenate(label_id_buffer, axis=0))
+    read_parts.append(np.concatenate(read_id_buffer, axis=0))
+    pred_buffer.clear()
+    label_id_buffer.clear()
+    read_id_buffer.clear()
+
+
+def inference_loop(args_dict, rank, device, model, data_loader, start_index=0):
     """Runs the inference loop for the given model and data loader.
 
     Args:
@@ -255,94 +338,77 @@ def inference_loop(args_dict, rank, gpu_id, model, data_loader):
     Returns:
         None
     """
-    with autocast(enabled=True, cache_enabled=True, device_type="cuda"):
+    amp_ctx = autocast(enabled=device.type == "cuda", cache_enabled=device.type == "cuda", device_type="cuda")
+    if device.type != "cuda":
+        amp_ctx = nullcontext()
+
+    with amp_ctx:
         with torch.no_grad():
-            executor = ThreadPoolExecutor(max_workers=1)
-            copy_stream = torch.cuda.Stream(device=gpu_id)
+            processed_any = False
+            for chunk_idx, chunk_data_cpu in enumerate(
+                tqdm.tqdm(data_loader, total=len(data_loader), smoothing=0), start=start_index
+            ):
+                if chunk_data_cpu is None:
+                    continue
+                n_rows = int(chunk_data_cpu["label_id"].shape[0])
+                if n_rows == 0:
+                    log.warning("Skipping empty input shard at rank=%d chunk=%d.", rank, chunk_idx)
+                    continue
 
-            pred_buffer = deque(maxlen=args_dict["flush"])
-            label_id_buffer = deque(maxlen=args_dict["flush"])
-            read_id_buffer = deque(maxlen=args_dict["flush"])
-            processed_batches = -1
+                processed_any = True
+                batch_splits = {k: torch.split(v, args_dict["batch"]) for k, v in chunk_data_cpu.items()}
+                n_batches = len(batch_splits["label_id"])
 
-            batch_data_buffer = None
+                pred_buffer = []
+                label_id_buffer = []
+                read_id_buffer = []
+                pred_parts = []
+                label_parts = []
+                read_parts = []
 
-            for chunk_data_cpu in tqdm.tqdm(data_loader, total=len(data_loader), smoothing=0):
-
-                if batch_data_buffer is not None:
-                    chunk_data_cpu = {k: torch.cat((batch_data_buffer[k], v), dim=0) for k, v in chunk_data_cpu.items()}
-                    batch_data_buffer = None
-                batch_data_split_cpu = {k: torch.split(v, args_dict["batch"]) for k, v in chunk_data_cpu.items()}
-
-                for bidx in range(len(batch_data_split_cpu["label_id"])):
-                    batch_data_cpu = {k: v[bidx] for k, v in batch_data_split_cpu.items()}
-
-                    if len(batch_data_cpu["label_id"]) < args_dict["batch"]:
-                        # Buffer the smaller batch for next read
-                        if batch_data_buffer is not None:
-                            log.warning("Error in data batching - more than one smaller batch occured in a read.")
-                            batch_data_buffer = {
-                                k: torch.cat((batch_data_buffer[k], v), dim=0) for k, v in batch_data_cpu.items()
-                            }
-                        else:
-                            batch_data_buffer = batch_data_cpu
-                        continue
-
-                    if processed_batches == -1:
-                        ## First batch
-                        batch_data_gpu = to_gpu(batch_data_cpu, gpu_id, copy_stream)
-                        label_id = batch_data_cpu["label_id"]
-                        read_id = batch_data_cpu["read_id"]
-                        processed_batches += 1
-                        continue
-
-                    to_gpu_proc = executor.submit(to_gpu, batch_data_cpu, gpu_id, copy_stream)
+                for bidx in range(n_batches):
+                    batch_data_cpu = {k: v[bidx] for k, v in batch_splits.items()}
+                    batch_data_gpu = to_device(batch_data_cpu, device)
                     pred = model(*batch_data_gpu)
 
                     if args_dict["output_id"] is not None:
                         pred = pred[args_dict["output_id"]]
 
-                    label_id_buffer.append(label_id)
-                    read_id_buffer.append(read_id)
-                    pred_buffer.append(pred)
+                    pred_buffer.append(pred.detach().cpu().numpy())
+                    label_id_buffer.append(batch_data_cpu["label_id"].detach().cpu().numpy())
+                    read_id_buffer.append(batch_data_cpu["read_id"].detach().cpu().numpy())
 
-                    processed_batches += 1
+                    if len(pred_buffer) >= args_dict["flush"]:
+                        _flush_cpu_buffers(
+                            pred_buffer,
+                            label_id_buffer,
+                            read_id_buffer,
+                            pred_parts,
+                            label_parts,
+                            read_parts,
+                        )
 
-                    if processed_batches % args_dict["flush"] == 0 and processed_batches > 0:
-                        preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-                        label_ids = torch.cat(list(label_id_buffer), axis=0).numpy()
-                        read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
-                        pred_buffer.clear()
-                        label_id_buffer.clear()
-                        read_id_buffer.clear()
-                        out_path = f"{args_dict['output']}/inference_{rank}_{processed_batches}.npz"
-                        np.savez_compressed(out_path, label_id=label_ids, read_id=read_ids, pred=preds)
+                _flush_cpu_buffers(
+                    pred_buffer,
+                    label_id_buffer,
+                    read_id_buffer,
+                    pred_parts,
+                    label_parts,
+                    read_parts,
+                )
 
-                    torch.cuda.current_stream(gpu_id).wait_stream(copy_stream)
-                    batch_data_gpu = to_gpu_proc.result()
-                    label_id = batch_data_cpu["label_id"]
-                    read_id = batch_data_cpu["read_id"]
+                if not pred_parts:
+                    log.warning("No predictions were produced for rank=%d chunk=%d.", rank, chunk_idx)
+                    continue
 
-            ## Last batch
-            pred = model(*batch_data_gpu)
+                preds = pred_parts[0] if len(pred_parts) == 1 else np.concatenate(pred_parts, axis=0)
+                label_ids = label_parts[0] if len(label_parts) == 1 else np.concatenate(label_parts, axis=0)
+                read_ids = read_parts[0] if len(read_parts) == 1 else np.concatenate(read_parts, axis=0)
 
-            if args_dict["output_id"] is not None:
-                pred = pred[args_dict["output_id"]]
+                out_path = f"{args_dict['output']}/inference_{rank}_{chunk_idx}.npz"
+                np.savez_compressed(out_path, label_id=label_ids, read_id=read_ids, pred=preds)
 
-            label_id_buffer.append(label_id)
-            read_id_buffer.append(read_id)
-            pred_buffer.append(pred)
-            processed_batches += 1
-
-            preds = torch.cat(list(pred_buffer), dim=0).detach().cpu().numpy()
-            ids = torch.cat(list(label_id_buffer), axis=0).numpy()
-            label_id_buffer.clear()
-            read_ids = torch.cat(list(read_id_buffer), axis=0).numpy()
-            read_id_buffer.clear()
-            pred_buffer.clear()
-            out_path = f"{args_dict['output']}/inference_{rank}_{processed_batches}.npz"
-            np.savez_compressed(out_path, label_id=ids, read_id=read_ids, pred=preds)
-
-            executor.shutdown(wait=True)
+            if not processed_any:
+                log.warning("No input shards were processed for rank=%d. No inference outputs were written.", rank)
 
     return None
