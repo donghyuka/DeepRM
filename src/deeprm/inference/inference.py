@@ -29,7 +29,14 @@ from torch.amp import autocast
 
 
 def add_arguments(parser: argparse.ArgumentParser):
-    """Adds command-line arguments."""
+    """Adds command-line arguments.
+
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+
+    Returns:
+        None
+    """
     parser.add_argument("--input", "-i", dest="data", type=str, required=True, help="Data path")
     parser.add_argument("--bam", "-b", type=str, required=True, help="BAM file path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output path")
@@ -101,8 +108,21 @@ def _normalize_gpu_config(args: argparse.Namespace) -> None:
 
 
 def main(args: argparse.Namespace):
-    """Main function to run the evaluation pipeline."""
+    """Main function to run the evaluation pipeline.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+
+    Notes:
+        1. Parse command-line arguments.
+        2. Create necessary directories.
+        3. Run inference.
+    """
     if args.model is None:
+        ## Get directory of the current file
         deeprm_root = pathlib.Path(__file__).parent.parent.resolve()
         args.model = os.path.join(deeprm_root, "weight", "deeprm_weights.pt")
     if not args.model.endswith(".pt"):
@@ -138,7 +158,14 @@ def main(args: argparse.Namespace):
 
 
 def run_inference(args):
-    """Runs the inference process."""
+    """Runs the inference process.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
+    """
     torch.multiprocessing.set_sharing_strategy("file_system")
     log.info("Inference Program Started.")
     if args.num_gpu > 0:
@@ -146,6 +173,7 @@ def run_inference(args):
     else:
         log.info("Using CPU.")
 
+    ## make tensorboard directory
     log.info(f"Model path: {args.model}")
     log.info(f"Output directory: {args.output}")
 
@@ -193,7 +221,15 @@ def _discover_resume_point(output_dir: str, rank: int) -> int:
 
 
 def inference_worker(rank, args_dict):
-    """Worker function for running inference on a single GPU or CPU."""
+    """Worker function for running inference on a single GPU.
+
+    Args:
+        rank (int): Rank of the current process.
+        args_dict (dict): Dictionary of command-line arguments.
+
+    Returns:
+        None
+    """
     use_gpu = args_dict["num_gpu"] > 0
     device = torch.device(f"cuda:{args_dict['gpu_pool'][rank]}") if use_gpu else torch.device("cpu")
 
@@ -260,7 +296,15 @@ def inference_worker(rank, args_dict):
 
 
 def to_device(data, device):
-    """Transfers tensors to the specified device."""
+    """Transfers data to the specified GPU device using a non-blocking stream.
+
+    Args:
+        data (dict): Dictionary containing the data to be transferred.
+        device (torch.device): The target GPU device.
+
+    Returns:
+        tuple: A tuple containing the transferred data tensors (src_kmer, src_signal, src_seg_len, src_dwell_bq).
+    """
     non_blocking = device.type == "cuda"
     return (
         data["kmer_token"].to(device, non_blocking=non_blocking),
@@ -282,7 +326,18 @@ def _flush_cpu_buffers(pred_buffer, label_id_buffer, read_id_buffer, pred_parts,
 
 
 def inference_loop(args_dict, rank, device, model, data_loader, start_index=0):
-    """Runs inference and writes one output shard per input dataset shard."""
+    """Runs the inference loop for the given model and data loader.
+
+    Args:
+        args_dict (dict): Dictionary of command-line arguments.
+        rank (int): Rank of the current process.
+        gpu_id (int): ID of the GPU to use.
+        model (torch.nn.Module): The model to run inference on.
+        data_loader (torch.utils.data.DataLoader): DataLoader for the dataset.
+
+    Returns:
+        None
+    """
     amp_ctx = autocast(enabled=device.type == "cuda", cache_enabled=device.type == "cuda", device_type="cuda")
     if device.type != "cuda":
         amp_ctx = nullcontext()

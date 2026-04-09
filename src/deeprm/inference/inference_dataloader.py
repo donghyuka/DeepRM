@@ -1,5 +1,9 @@
 """
-Dataloader for Nanopore Dataset from NPZ Files.
+Dataloader for Nanopore Dataset from NPZ Files
+
+This module provides an iterator and dataset class for loading
+Nanopore data from NPZ files. It supports parallel reading of files
+and batching of data for efficient processing in PyTorch.
 """
 
 import glob
@@ -22,7 +26,16 @@ check_deps.check_torch_available()
 
 
 class NanoporeDatasetIterator:
-    """Iterator for loading Nanopore dataset from NPZ files."""
+    """
+    Iterator for loading Nanopore dataset from NPZ files.
+
+    Args:
+        file_paths (list): List of file paths to NPZ files.
+        cb_len (int): Context block length.
+        kmer_len (int): K-mer length.
+        sampling (int): Sampling rate.
+        sig_window (int): Signal window size.
+    """
 
     def __init__(self, file_paths, cb_len=21, kmer_len=5, sampling=6, sig_window=5, max_workers=4):
         self.file_paths = file_paths
@@ -39,6 +52,15 @@ class NanoporeDatasetIterator:
         self._closed = False
 
     def _read_df(self, path):
+        """
+        Reads a single NPZ file and returns the data as a dictionary.
+
+        Args:
+            path (str): Path to the NPZ file.
+
+        Returns:
+            dict: Dictionary containing the data from the NPZ file.
+        """
         try:
             with np.load(path) as npz:
                 data = {
@@ -71,9 +93,24 @@ class NanoporeDatasetIterator:
             self._futures = []
 
     def __iter__(self):
+        """
+        Returns the iterator object itself.
+
+        Returns:
+            NanoporeDatasetIterator: The iterator object.
+        """
         return self
 
     def __next__(self):
+        """
+        Returns the next data from the iterator.
+
+        Returns:
+            dict: Dictionary containing the data from the next NPZ file.
+
+        Raises:
+            StopIteration: If there are no more files to read.
+        """
         self._fill_futures()
         if not self._futures:
             self.close()
@@ -90,7 +127,21 @@ class NanoporeDatasetIterator:
 
 
 class NanoporeDataset(IterableDataset):
-    """Iterable dataset for loading Nanopore data from NPZ files."""
+    """
+    Iterable dataset for loading Nanopore data from NPZ files.
+
+    Args:
+        data_path (str): Path to the directory containing NPZ files.
+        rank (int): Rank of the current process.
+        num_replicas (int): Number of replicas.
+        seed (int): Random seed.
+        num_files_read_once (int): Number of files to read at once.
+        cb_len (int): Context block length.
+        kmer_len (int): K-mer length.
+        sampling (int): Sampling rate.
+        sig_window (int): Signal window size.
+        resume_from (int): Number of files to skip from the start.
+    """
 
     def __init__(
         self,
@@ -122,6 +173,12 @@ class NanoporeDataset(IterableDataset):
         self.skip = 0
 
     def __iter__(self):
+        """
+        Returns an iterator for the dataset.
+
+        Returns:
+            NanoporeDatasetIterator: Iterator for the dataset.
+        """
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             worker_id = self.rank
@@ -144,11 +201,27 @@ class NanoporeDataset(IterableDataset):
         )
 
     def __len__(self):
+        """
+        Returns the length of the dataset.
+
+        Returns:
+            int: Number of shards in the dataset.
+        """
         return max(0, self.num_shard - self.resume_from)
 
 
 class NanoporeDataLoader(DataLoader):
-    """DataLoader for loading Nanopore data."""
+    """
+    DataLoader for loading Nanopore data.
+
+    Args:
+        dataset (NanoporeDataset): The dataset to load data from.
+        num_workers (int): Number of worker processes.
+        pin_memory (bool): Whether to pin memory.
+        drop_last (bool): Whether to drop the last incomplete batch.
+        collate_fn (typing.Callable): Function to collate data into batches.
+        prefetch_factor (int): Number of batches to prefetch.
+    """
 
     def __init__(self, dataset: NanoporeDataset, num_workers, pin_memory, drop_last, collate_fn, prefetch_factor):
         kwargs = dict(
@@ -180,7 +253,28 @@ def load_dataset(
     sig_window=5,
     resume_from=0,
 ):
-    """Loads the Nanopore dataset using DataLoader."""
+    """
+    Loads the Nanopore dataset using DataLoader.
+
+    Args:
+        data_path (str): Path to the directory containing NPZ files.
+        batch_size (int): Batch size for loading data.
+        rank (int): Rank of the current process.
+        num_replicas (int): Number of replicas.
+        pad_to (int): Padding length for sequences.
+        bq_clip (int): Base quality clipping value.
+        num_files_read_once (int): Number of files to read at once.
+        prefetch_factor (int): Number of batches to prefetch.
+        worker (int): Number of worker processes.
+        cb_len (int): Context block length.
+        kmer_len (int): K-mer length.
+        sampling (int): Sampling rate.
+        sig_window (int): Signal window size.
+        resume_from (int): Number of files to skip from the start.
+
+    Returns:
+        NanoporeDataLoader: DataLoader for loading the dataset.
+    """
     dataset = NanoporeDataset(
         data_path,
         rank,
@@ -204,7 +298,15 @@ def load_dataset(
 
 
 def collate_fn(batch):
-    """Collate function to process a single NPZ shard."""
+    """
+    Collate function to process a batch of data from the Nanopore dataset.
+
+    Args:
+        batch (list): List of dictionaries containing data from the dataset.
+
+    Returns:
+        dict: Dictionary containing processed data ready for model input.
+    """
     source = {}
     source["read_id"] = torch.as_tensor(batch["read_id"])
     source["label_id"] = torch.as_tensor(batch["label_id"])

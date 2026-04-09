@@ -1,4 +1,23 @@
-"""Utilities for mapping transcript-relative coordinates to genomic coordinates."""
+"""Utilities for mapping transcript-relative coordinates to genomic coordinates
+and aggregating per-site statistics across a transcriptome.
+
+This module provides:
+
+* `TranscriptMapper`: A vectorized mapper that converts 0-based, half-open
+  transcript coordinates into genomic coordinates for both '+' and '-' strands,
+  returning `np.nan` for out-of-bounds inputs.
+* `worker`: A multiprocessing worker that applies the mapper per transcript and
+  aggregates metrics.
+* `parse_refflat`: A helper to parse RefFlat/RefGene/GenePred annotations into a
+  normalized DataFrame.
+* `load_split_data`: A helper that splits grouped input data into balanced shards
+  for parallel processing.
+* `pileup_genomic`: A high-level function that produces a per-(chrom, strand, pos)
+  pileup with derived scores.
+
+All exon intervals are assumed to be 0-based, half-open `[start, end)`, sorted by
+genomic start in ascending order.
+"""
 
 import gc
 import multiprocessing as mp
@@ -9,15 +28,50 @@ from tqdm import tqdm
 
 
 class TranscriptMapper:
-    """Vectorized mapper from transcript coordinates to genomic coordinates."""
+    """Vectorized mapper from transcript coordinates to genomic coordinates.
+
+    This class maps 0-based, half-open transcript offsets into genomic 0-based
+    positions using exon interval metadata. It supports both '+' and '-' strands
+    and returns `np.nan` for any input coordinate that falls outside the valid
+    transcript range `[0, total_len)` or is non-finite.
+
+    Attributes:
+        starts (numpy.ndarray): 1D array of exon start genomic coordinates (0-based, inclusive),
+            sorted ascending.
+        ends (numpy.ndarray): 1D array of exon end genomic coordinates (0-based, exclusive),
+            same shape as `starts`.
+        lengths (numpy.ndarray): Exon lengths, computed as `ends - starts`.
+        total_len (int): Total transcript length, i.e., `lengths.sum()`.
+        strand (str): Strand symbol, either `'+'` or `'-'`.
+        cumsum (numpy.ndarray): Precomputed cumulative exon lengths. For `'+'`,
+            `cumsum[i]` is the total length before exon `i`; for `'-'`, it is
+            computed over reversed exons to enable reverse mapping.
+
+    Raises:
+        ValueError: If `strand` is not `'+'` or `'-'`.
+    """
 
     def __init__(self, exon_starts: np.ndarray, exon_ends: np.ndarray, strand: str):
+        """Initialize the mapper with exon intervals and strand.
+
+        Args:
+            exon_starts (numpy.ndarray): 1D array of exon starts (0-based, inclusive),
+                sorted ascending by genomic coordinate.
+            exon_ends (numpy.ndarray): 1D array of exon ends (0-based, exclusive),
+                same shape as `exon_starts`. Each `end` must be strictly greater
+                than its corresponding `start`.
+            strand (str): `'+'` or `'-'`.
+
+        Raises:
+            ValueError: If `strand` is not `'+'` or `'-'`.
+        """
         self.starts = exon_starts
         self.ends = exon_ends
         self.lengths = self.ends - self.starts
         self.total_len = int(self.lengths.sum())
         self.strand = strand
 
+        # Precompute cumulative sums
         if self.strand == "+":
             self.cumsum = np.concatenate(([0], np.cumsum(self.lengths)))
         elif self.strand == "-":
@@ -26,7 +80,33 @@ class TranscriptMapper:
             raise ValueError("strand must be '+' or '-'.")
 
     def map(self, coords: np.ndarray) -> np.ndarray:
+        """Map transcript offsets to genomic positions (vectorized).
+
+        Input coordinates are treated as 0-based offsets into the concatenated
+        transcript exonic sequence with a valid range `[0, total_len)`. Values
+        outside this range or non-finite values (NaN/Inf) yield `np.nan` in the
+        output. The result is always `float64` to accommodate NaNs.
+
+        For `'+'` strand: genomic position = `starts[idx] + offset`.
+        For `'-'` strand: genomic position = `ends[idx] - 1 - offset`.
+
+        Args:
+            coords (numpy.ndarray): Array-like of transcript offsets to map. May be any
+                shape; the returned array will match this shape.
+
+        Returns:
+            numpy.ndarray: Array of genomic positions (dtype `float64`) with `np.nan`
+            for out-of-bounds or non-finite inputs. Positions are 0-based.
+
+        Notes:
+            * Assumes exon intervals are half-open `[start, end)` and sorted by
+              genomic start ascending. It should be validated in parse_refflat().
+            * No exceptions are raised for invalid `coords`; they are marked as NaN.
+        """
         out = np.full(coords.shape, np.nan, dtype=np.float64)
+
+        # Valid coords in [0, total_len)
+        # also guard against inf/NaN in input by requiring finite
         valid = np.isfinite(coords) & (coords >= 0) & (coords < self.total_len)
         if not np.any(valid):
             return out
@@ -47,7 +127,37 @@ class TranscriptMapper:
 
 
 def worker(df_list, refflat_df, collect_list):
-    """Worker that maps transcript to genomic positions and aggregates metrics."""
+    """Multiprocessing worker that maps transcript to genomic positions and aggregates metrics.
+
+    Iterates over per-transcript DataFrames, maps the `ref_pos` transcript offsets to
+    genomic positions using `TranscriptMapper`, drops rows with NaN genomic positions,
+    and aggregates metrics per (chrom, strand, pos). Results are appended to a shared
+    `multiprocessing.Manager().list()` for collection by the parent process.
+
+    Args:
+        df_list (list): List of DataFrames, each corresponding to a single
+            transcript. Each DataFrame is expected to contain:
+            - `transcript_id` (str): All rows share the same ID.
+            - `ref_pos` (int): Transcript-relative offsets (0-based).
+            - Metric columns used for aggregation:
+            `kl_div_neg`, `kl_div_pos`, `count_all`, `count_pos`, `logsum_1_p_pos`.
+        refflat_df (pandas.DataFrame): Annotation DataFrame indexed by `transcript_id`.
+            Must provide columns: `exonStarts` (numpy.ndarray), `exonEnds` (numpy.ndarray),
+            `strand` ('+'|'-'), and `chrom` (str).
+        collect_list (list): Shared list where the worker
+            appends its aggregated result DataFrame.
+
+    Returns:
+        None: Results are appended to `collect_list` as a `pandas.DataFrame` with columns:
+            `chrom`, `strand`, `pos`, `kl_div_neg`, `kl_div_pos`, `count_all`,
+            `count_pos`, `logsum_1_p_pos`.
+
+    Notes:
+        * Transcripts missing in `refflat_df` or with invalid mapping are skipped.
+        * Any unexpected exception within a transcript block is caught and skipped,
+          allowing the worker to continue processing subsequent transcripts.
+        * A tqdm progress bar is displayed with `leave=False`.
+    """
     local_collect = []
     for transcript_df in tqdm(df_list, desc="Converting to genomic coordinates", leave=False):
         if len(transcript_df) == 0:
@@ -91,7 +201,28 @@ def worker(df_list, refflat_df, collect_list):
 
 
 def load_split_data(data_df, cpu):
-    """Group by transcript and split into balanced shards for parallel processing."""
+    """Group by transcript and split into balanced shards for parallel processing.
+
+    The input is grouped by `transcript_id` (renamed from `ref_names`), sorted by
+    descending group size, then distributed across up to `cpu` shards using a
+    zig-zag assignment (`0..cpu-1..0`) to balance large and small groups.
+
+    Args:
+        data_df (pandas.DataFrame): Input DataFrame containing at least:
+            - `ref_names` (str): Transcript identifier per row; will be renamed to
+            `transcript_id`.
+            - Other columns required downstream (e.g., `ref_pos`, metrics).
+        cpu (int): Maximum number of shards (typically the number of worker processes).
+
+    Returns:
+        list: A list of length `min(cpu, n_groups)` where each element
+        is a list of per-transcript DataFrames to be handled by one worker.
+
+    Notes:
+        * Groups are sorted by size to improve load balancing.
+        * The zig-zag distribution helps avoid piling all large groups onto early shards.
+    """
+
     if cpu <= 0:
         raise ValueError("cpu must be positive")
 
@@ -123,7 +254,45 @@ def _parse_exon_array(value):
 
 
 def parse_refflat(refflat_path):
-    """Parse RefFlat/RefGene/GenePred annotation into a normalized DataFrame."""
+    """
+    Parse RefFlat/RefGene/GenePred annotation into a normalized DataFrame.
+
+    This function reads a tab-delimited annotation file and normalizes it into a
+    common schema with the following columns:
+    `transcript_id`, `chrom`, `strand`, `txStart`, `txEnd`,
+    `cdsStart`, `cdsEnd`, `exonCount`, `exonStarts`, `exonEnds`.
+
+    It accepts three formats based on column count:
+    * 11 columns (RefFlat): drops the first column.
+    * 15 columns (RefGene): keeps the first 10 columns.
+    * 10 columns (GenePred): uses as-is.
+
+    Exon start/end lists are expected as comma-separated strings with a trailing comma
+    (UCSC style) and are converted to `numpy.ndarray` of `int`. Invalid transcripts are
+    filtered out based on interval consistency and ordering. The resulting DataFrame is
+    indexed by `transcript_id`.
+
+    Args:
+        refflat_path (str): Path to the annotation file.
+
+    Returns:
+        pandas.DataFrame: Normalized and validated annotation indexed by `transcript_id`.
+            Columns:
+            - `chrom` (str)
+            - `strand` (str; '+' or '-')
+            - `txStart`, `txEnd`, `cdsStart`, `cdsEnd` (int)
+            - `exonCount` (int)
+            - `exonStarts`, `exonEnds` (numpy.ndarray of int; 0-based, half-open)
+
+    Raises:
+        ValueError: If the file has an unexpected number of columns or if no valid
+            transcripts remain after validation.
+
+    Notes:
+        * Validation ensures: `txEnd > txStart`, `cdsEnd >= cdsStart`, `exonCount > 0`,
+            `len(exonStarts) == len(exonEnds) == exonCount`, strictly positive exon lengths,
+            and non-decreasing starts/ends across exons.
+    """
     col_list = [
         "transcript_id",
         "chrom",
@@ -173,7 +342,45 @@ def parse_refflat(refflat_path):
 
 
 def pileup_genomic(args, input_df):
-    """Aggregate per-genomic-position metrics using multiprocessing."""
+    def pileup_genomic(args, input_df):
+        """
+        Aggregate per-genomic-position metrics using multiprocessing.
+
+        Spawns up to `args.thread` worker processes to convert transcript-relative
+        positions to genomic coordinates and aggregate metrics across all input rows.
+        Requires an annotation file path at `args.annot`.
+
+        The final output is a DataFrame aggregated by `(chrom, strand, pos)` with
+        derived columns:
+        * `stoichiometry` = `kl_div_pos` / (`kl_div_neg` + `kl_div_pos`)
+        * `modscore` = a modification prediction score.
+
+        Args:
+            args (argparse.Namespace): Must contain:
+                - `annot` (str or path-like): Path to RefFlat/RefGene/GenePred file.
+                - `thread` (int): Number of worker processes to spawn.
+            input_df (pandas.DataFrame): Input rows containing at least:
+                - `ref_names` (str): Transcript ID; will be renamed to `transcript_id`.
+                - `ref_pos` (int): Transcript-relative position (0-based).
+                - `kl_div_neg`, `kl_div_pos`, `count_all`, `count_pos`, `logsum_1_p_pos`:
+                Metric columns to be summed.
+
+        Returns:
+            pandas.DataFrame: Aggregated DataFrame with columns:
+                `chrom`, `strand`, `pos`, `modscore`, `stoichiometry`,
+                `count_all`, `count_pos`.
+
+        Raises:
+            ValueError: If no valid genomic positions are produced (e.g., due to
+                mismatched or invalid annotations).
+
+        Notes:
+            * Uses a `multiprocessing.Manager().list()` to collect per-process results.
+            * `load_split_data` is used to balance workload across processes.
+            * The output `pos` is 0-based genomic coordinate (float in intermediate steps,
+                but will be integral where valid).
+        """
+
     if len(input_df) == 0:
         raise ValueError("input_df is empty. No transcript pileup entries were provided.")
 

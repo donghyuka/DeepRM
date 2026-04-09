@@ -1,5 +1,14 @@
 """
-DeepRM Pileup (Post-Processing) Module.
+DeepRM Pileup (Post-Processing) Module
+
+This script performs post-processing on DeepRM prediction files to generate a pileup.
+It reads .npz prediction arrays, groups statistics by label IDs, and computes metrics.
+
+The two metrics calculated are:
+1. modscore: A score reflecting the site-level modification probability. (0-1 range)
+2. stoichiometry: Estimated modification stoichiometry of the site. (0-1 range)
+
+Finally, it writes a .npz file containing the results.
 """
 
 import argparse
@@ -21,7 +30,13 @@ mp.set_start_method("fork", force=True)
 
 
 def add_arguments(parser: argparse.ArgumentParser):
-    """Adds command-line arguments."""
+    """
+    Adds command-line arguments.
+    Args:
+        parser (argparse.ArgumentParser): Argument parser to which arguments will be added.
+    Returns:
+        None
+    """
     parser.add_argument("--input", "-i", type=str, required=True, help="Input (predictions) path")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output (pileup) path")
     parser.add_argument("--thread", "-t", type=int, default=None, help="Number of threads to use")
@@ -53,7 +68,16 @@ def _validate_args(args: argparse.Namespace) -> None:
 
 
 def main(args: argparse.Namespace):
-    """Main pileup function."""
+    """
+    Main function: spawns worker processes, aggregates results, computes final metrics,
+    and writes output .npz file.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None: Results are saved to a .npz file in the specified output directory.
+    """
     import time
 
     start = time.time()
@@ -63,13 +87,16 @@ def main(args: argparse.Namespace):
 
     os.makedirs(args.output, exist_ok=True)
 
+    ## Define keys for shared data storage
     keys = ["logsum_1_p_pos", "kl_div_neg", "kl_div_pos", "count_all", "count_pos", "label_id"]
 
+    ## Gather all prediction files and split them for multiprocessing
     file_paths = sorted(glob.glob(os.path.join(args.input, "*.npz")))
     if len(file_paths) == 0:
         raise ValueError(f"No inference .npz files found in: {args.input}")
     file_paths_split = np.array_split(file_paths, min(args.thread, len(file_paths)))
 
+    ## Create a shared dictionary to store results from all processes
     manager = mp.Manager()
     shared_dict = manager.dict()
     for key in keys:
@@ -77,6 +104,7 @@ def main(args: argparse.Namespace):
     if not args.skip_modbam:
         shared_dict["modbam_data"] = manager.dict()
 
+    ## Start worker processes to process each chunk of files
     proc_list = []
     for pid, file_subset in enumerate(file_paths_split):
         proc = mp.Process(
@@ -116,6 +144,7 @@ def main(args: argparse.Namespace):
         else:
             print("Warning: no valid modBAM entries were produced; skipping modBAM writing.")
 
+    ## find unique label across all chunks
     all_ids = [shared_dict["label_id"].get(pid) for pid in range(len(file_paths_split))]
     all_ids = [arr for arr in all_ids if arr is not None and len(arr) > 0]
     if not all_ids:
@@ -123,12 +152,14 @@ def main(args: argparse.Namespace):
     global_ids = np.unique(np.concatenate(all_ids))
     n_label_id = len(global_ids)
 
+    ## pre-allocate accumulators
     final_count_all = np.zeros(n_label_id, dtype=np.int64)
     final_count_pos = np.zeros(n_label_id, dtype=np.int64)
     final_logsum = np.zeros(n_label_id, dtype=np.float64)
     final_kl_neg = np.zeros(n_label_id, dtype=np.float64)
     final_kl_pos = np.zeros(n_label_id, dtype=np.float64)
 
+    ## vectorized accumulation (because the label_id is already unique for each chunk)
     for pid in tqdm.tqdm(range(len(file_paths_split)), desc="Accumulating data", leave=False):
         label_id = shared_dict["label_id"].get(pid)
         if label_id is None or len(label_id) == 0:
@@ -140,7 +171,10 @@ def main(args: argparse.Namespace):
         final_kl_neg[label_idx] += shared_dict["kl_div_neg"][pid]
         final_kl_pos[label_idx] += shared_dict["kl_div_pos"][pid]
 
+    ## extract only the IDs that were seen
     unique_id = np.nonzero(final_count_all > 0)[0]
+
+    ## slice to compact arrays
     label_id = np.ascontiguousarray(global_ids[unique_id])
     count_all = np.ascontiguousarray(final_count_all[unique_id])
     count_pos = np.ascontiguousarray(final_count_pos[unique_id])
@@ -148,24 +182,30 @@ def main(args: argparse.Namespace):
     kl_div_neg = np.ascontiguousarray(final_kl_neg[unique_id])
     kl_div_pos = np.ascontiguousarray(final_kl_pos[unique_id])
 
+    ## Calculate modscore and stoichiometry metrics
     digitization = 1000
     stoichiometry = kl_div_pos / (kl_div_neg + kl_div_pos + args.epsilon)
     modscore = 1 - np.power(10, logsum_1_p_pos / count_all * (1 + np.power(10, 2 * (stoichiometry - 1))))
     modscore = np.digitize(modscore, np.linspace(0, 1, digitization + 1), right=True) / digitization
     stoichiometry = stoichiometry * ((np.log10(1 - args.threshold) * stoichiometry) > (logsum_1_p_pos / count_all))
 
+    ## Read BAM Header to get reference names
     input_bam = pysam.AlignmentFile(args.bam, "rb", check_sq=False, threads=args.thread)
     ref_arr = np.array(input_bam.references)
     input_bam.close()
 
+    ## Convert label_id to ref_names, ref_pos, and ref_strand
     ref_strand = np.where(label_id > 0, "+", "-")
+    ## 1 was added during preprocessing to avoid zero label_id
     label_id_abs = np.abs(label_id) - 1
     transcript_id = label_id_abs // args.label_div
     if transcript_id.size and np.max(transcript_id) >= len(ref_arr):
         raise ValueError("label_id contains transcript IDs outside the BAM reference range.")
     ref_pos = label_id_abs % args.label_div
+    ## Map transcript_id to reference names with vectorized operation
     ref_names = ref_arr[transcript_id]
 
+    ## Format results into a BED-like structure
     path = f"{args.output}/pileup.bed"
     bed_formatter(
         ref_names=ref_names,
@@ -178,6 +218,7 @@ def main(args: argparse.Namespace):
         output_path=path,
     )
 
+    ## Save results to compressed .npz
     path = f"{args.output}/pileup.npz"
     np.savez_compressed(
         path,
@@ -191,6 +232,7 @@ def main(args: argparse.Namespace):
     )
 
     if args.annot:
+        ## Generate genomic pileup if annotation is provided
         input_df = pd.DataFrame(
             {
                 "ref_names": ref_names,
@@ -234,7 +276,17 @@ def main(args: argparse.Namespace):
 
 
 def grouped_sum(n_unique, idx, vals):
-    """Sum values in vals according to group indices idx."""
+    """
+    Sum values in 'vals' according to group indices 'idx'.
+
+    Args:
+        n_unique (int): Number of unique groups.
+        idx (numpy.ndarray): Integer indices mapping each element in 'vals' to a group.
+        vals (numpy.ndarray): Values to sum per group.
+
+    Returns:
+        numpy.ndarray: Array of summed values of length n_unique.
+    """
     group_sums = np.zeros((n_unique,), dtype=vals.dtype)
     np.add.at(group_sums, idx, vals)
     return group_sums
@@ -263,7 +315,25 @@ def worker(
     flip=False,
     make_modbam=True,
 ):
-    """Worker function to process a subset of prediction files."""
+    """
+    Worker function to process a subset of prediction files.
+    Computes per-label statistics and stores results in a shared dictionary.
+
+    Args:
+        pid (int): Process ID for indexing results.
+        file_paths (list): List of .npz input file paths.
+        keys (list): List of data keys to compute/store.
+        shared_dict (dict): Shared structure for results.
+        slice (int): Column for 2D predictions. Defaults to None. (optional)
+        threshold_pos (float): Threshold to count positive predictions.
+        epsilon (float): Small constant for log and division safety.
+        flip (bool): Whether to invert probabilities (1 - p).
+
+    Returns:
+        None: Results are stored in shared_dict.
+    """
+
+    ## Initialize container dictionary for this process
     if len(file_paths) == 0:
         _empty_worker_payload(shared_dict, pid, make_modbam)
         return None
@@ -271,12 +341,14 @@ def worker(
     data_dict = {k: [] for k in keys}
     modbam_data = []
 
+    ## Iterate over prediction files
     for path in tqdm.tqdm(file_paths, desc="Reading input files", leave=False):
         with np.load(path) as data:
             pred = np.asarray(data["pred"])
             label_id = np.asarray(data["label_id"])
             read_id = np.asarray(data["read_id"])
 
+        ## Ensure correct dtypes
         assert pred.dtype == np.float32, f"Expected pred to be float32, but got {pred.dtype} in {path}"
         assert label_id.dtype in (
             np.int64,
@@ -285,6 +357,7 @@ def worker(
         assert pred.shape[0] == label_id.shape[0], f"Length of pred and label_id do not match in {path}"
         assert read_id.shape[0] == label_id.shape[0], f"Length of read_id and label_id do not match in {path}"
 
+        ## Filter out any NaN or infinite values
         if slice_idx is not None:
             assert pred.ndim == 2, f"Expected pred to be 2D as --slice was given, but got {pred.ndim} in {path}"
             if slice_idx >= pred.shape[1]:
@@ -305,6 +378,7 @@ def worker(
         if pred.size == 0:
             continue
 
+        ## Sanity-check range of predictions
         pred_min = float(np.min(pred))
         pred_max = float(np.max(pred))
         assert pred_min >= 0.0, f"Minimum value of pred is {pred_min} in {path}"
@@ -327,12 +401,14 @@ def worker(
                 )
                 modbam_data.append(modbam_chunk)
 
+        ## Calculate KL divergence
         count_pos = (pred >= threshold_pos).astype(np.int64)
         logsum_1_p_pos = np.log10(np.clip(1 - pred, epsilon, 1.0)) * count_pos
         kl_div = pred * np.log2(2 * pred + epsilon) + (1 - pred) * np.log2(2 * (1 - pred) + epsilon)
         kl_div_neg = kl_div * (pred <= 0.5)
         kl_div_pos = kl_div * (pred > 0.5)
 
+        ## Aggregate data by label_id
         unique_id, id_idx, count_all = np.unique(label_id, return_inverse=True, return_counts=True)
         n_unique = len(unique_id)
         data_dict["label_id"].append(unique_id.astype(np.int64, copy=False))
@@ -374,8 +450,11 @@ def worker(
         final_kl_neg[label_idx] += data_dict["kl_div_neg"][chunk_idx]
         final_kl_pos[label_idx] += data_dict["kl_div_pos"][chunk_idx]
 
+    ## extract only the IDs that were seen
     unique_id = np.nonzero(final_count_all > 0)[0]
 
+    ## slice to compact arrays
+    ## Store in shared dictionary
     shared_dict["label_id"][pid] = np.ascontiguousarray(global_ids[unique_id])
     shared_dict["count_all"][pid] = np.ascontiguousarray(final_count_all[unique_id])
     shared_dict["count_pos"][pid] = np.ascontiguousarray(final_count_pos[unique_id])
@@ -386,7 +465,21 @@ def worker(
 
 
 def bed_formatter(ref_names, ref_pos, ref_strand, modscore, stoichiometry, count_all, count_pos, output_path):
-    """Formats the results into a BED-like structure."""
+    """
+    Formats the results into a BED-like structure.
+
+    Args:
+        ref_names (numpy.ndarray): Array of reference names.
+        ref_pos (numpy.ndarray): Array of reference positions.
+        ref_strand (numpy.ndarray): Array of reference strands.
+        modscore (numpy.ndarray): modscore scores.
+        stoichiometry (numpy.ndarray): stoichiometry scores.
+        count_all (numpy.ndarray): Total counts.
+        count_pos (numpy.ndarray): Positive counts.
+
+    Returns:
+        list: List of formatted strings for each entry.
+    """
     ref_pos = np.asarray(ref_pos, dtype=np.int64)
     count_all = np.asarray(count_all, dtype=np.int64)
     count_pos = np.asarray(count_pos, dtype=np.int64)
@@ -489,8 +582,8 @@ def write_modbam(in_path, out_path, data, threads):
         return None
 
     unsorted_path = out_path + ".unsorted.bam"
-    pysam.merge("-@", str(n_proc), "-f", unsorted_path, *shard_paths)
-    pysam.sort("-@", str(n_proc), "-m", "4G", "-o", out_path, unsorted_path)
+    pysam.merge(f"-@ {threads} -f", unsorted_path, *glob.glob(os.path.join(intermediate_dir, "*.bam")))
+    pysam.sort(f"-@ {threads}", "-m 4G", "-o", out_path, unsorted_path)
     pysam.index(out_path)
 
     shutil.rmtree(intermediate_dir)
@@ -531,10 +624,10 @@ def write_modbam_worker(in_path, out_path, data):
                 pred.append(p)
 
         mm_tag, ml_tag = get_mm_tag(qpos, pred, str(read.query_sequence))
-        if ml_tag:
-            read.set_tag("MM", mm_tag, "Z")
+        read.set_tag("MM", mm_tag, "Z")
+        if len(ml_tag) > 0:
             read.set_tag("ML", ml_tag)
-            out_bam.write(read)
+        out_bam.write(read)
     in_bam.close()
     out_bam.close()
     return None

@@ -4,7 +4,21 @@
     <option name="confirmBeforeDeletion" value="false" />
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="KAKAO">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/vadanamu/datavol/Hyeonseo/release" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="deep1">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/release" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="genome1">
         <serverdata>
           <mappings>
             <mapping deploy="/extdata4/baeklab/Hyeonseo/m6A/release" local="$PROJECT_DIR$" web="/" />
