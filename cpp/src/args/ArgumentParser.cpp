@@ -57,6 +57,8 @@ void ArgumentParser::print_help(const char* program_name)
       << "  -w, --sig-window NUM     Signal window size (default: " << args.sig_window << ")\n"
       << "  -g, --filter-flag NUM    BAM flag bits to filter (default: " <<
         args.filter_flag << ")\n"
+      << "  -Q, --max-queue NUM      Max BAM queue size, 0=auto (default: " <<
+        args.max_queue << ")\n"
       << "  -d, --label-div NUM      Label division factor (default: " << args.label_div << ")\n"
       << "  -h, --help               Show this help message\n"
       << "  -v, --version            Show version information\n";
@@ -89,6 +91,7 @@ Arguments ArgumentParser::parse(int argc, char* argv[])
     {"dwell-shift", required_argument, 0, 'f'},
     {"sig-window", required_argument, 0, 'w'},
     {"filter-flag", required_argument, 0, 'g'},
+    {"max-queue", required_argument, 0, 'Q'},
     {"label-div", required_argument, 0, 'd'},
     {"consistency", no_argument, 0, 'C'},
     {"help", no_argument, 0, 'h'},
@@ -97,7 +100,7 @@ Arguments ArgumentParser::parse(int argc, char* argv[])
   };
 
   int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "p:b:o:t:q:k:z:s:y:e:l:a:n:f:w:g:d:Chv", long_options,
+  while ((opt = getopt_long(argc, argv, "p:b:o:t:q:k:z:s:y:e:l:a:n:f:w:g:Q:d:Chv", long_options,
                             &option_index)) != -1) {
     switch (opt) {
       case 'p':
@@ -208,6 +211,13 @@ Arguments ArgumentParser::parse(int argc, char* argv[])
         args.filter_flag = atoi(optarg);
         if (args.filter_flag < 0) {
           cerr << "Error: Filter flag must be non-negative\n";
+          exit(1);
+        }
+        break;
+      case 'Q':
+        args.max_queue = atoi(optarg);
+        if (args.max_queue < 0) {
+          cerr << "Error: Max queue size must be non-negative\n";
           exit(1);
         }
         break;

@@ -37,6 +37,7 @@ struct Arguments {
   int dwell_shift;
   int sig_window;
   int filter_flag;
+  int max_queue;
   uint64_t label_div;
   bool consistency;
 
@@ -56,6 +57,7 @@ struct Arguments {
     dwell_shift = 10;
     sig_window = 5;
     filter_flag = 276;  // unmapped 4 + reversed 16  non-primary 256
+    max_queue = 0;      // 0 = auto (process_once * 4 * worker_count)
     label_div = 1000000000ULL;
     consistency = false;
   }

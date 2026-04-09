@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -60,6 +61,28 @@ inline string get_timestamp()
   return oss.str();
 }
 
+// Program start time for relative elapsed logging
+inline chrono::steady_clock::time_point& get_start_time()
+{
+  static auto start = chrono::steady_clock::now();
+  return start;
+}
+
+// Relative elapsed time string (HH:MM:SS.ss)
+inline string get_elapsed()
+{
+  auto elapsed = chrono::steady_clock::now() - get_start_time();
+  auto total_ms = chrono::duration_cast<chrono::milliseconds>(elapsed).count();
+  int h = total_ms / 3600000;
+  int m = (total_ms % 3600000) / 60000;
+  double s = (total_ms % 60000) / 1000.0;
+  ostringstream oss;
+  oss << setfill('0') << setw(2) << h << ":"
+      << setw(2) << m << ":"
+      << fixed << setprecision(2) << setw(5) << s;
+  return oss.str();
+}
+
 // Thread-safe logger that buffers output and writes atomically
 class ThreadSafeLogger
 {
@@ -70,7 +93,7 @@ private:
 public:
   explicit ThreadSafeLogger(ostream& os) : out_(os)
   {
-    buffer_ << get_timestamp() << " ";
+    buffer_ << "[" << get_elapsed() << "] ";
   }
 
   ThreadSafeLogger(const ThreadSafeLogger&) = delete;
@@ -103,6 +126,22 @@ public:
 // Inline functions for timestamped logging (thread-safe)
 inline ThreadSafeLogger log_info() { return ThreadSafeLogger(cout); }
 inline ThreadSafeLogger log_err() { return ThreadSafeLogger(cerr); }
+
+// Log absolute start time (call once at program start)
+inline void log_start_time()
+{
+  get_start_time(); // initialize
+  log_info() << "Program start: " << get_timestamp() << endl;
+}
+
+// Read process RSS from /proc/self/statm (Linux only)
+inline size_t get_rss_mb()
+{
+  ifstream statm("/proc/self/statm");
+  size_t size_pages = 0, rss_pages = 0;
+  statm >> size_pages >> rss_pages;
+  return rss_pages * 4096 / (1024 * 1024);
+}
 
 struct NormalizationFactors {
   double quantile_a = 0.2;

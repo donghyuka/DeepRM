@@ -117,6 +117,9 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
   log_info() << "Starting record merger worker " << worker_id
       << " with " << pod5_meta_records.size() << " POD5 records" << endl;
 
+  // Per-worker POD5 readers, opened lazily for thread-safe access
+  unordered_map<string, Pod5FileReader_t*> worker_readers;
+
   // Set normalization factors same as Python code
   NormalizationFactors norm_factors;
 
@@ -155,7 +158,21 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
         auto bam_it = bam_index.find(pod5_meta.read_id);
         if (bam_it != bam_index.end()) {
           for (auto& bam_rec : bam_it->second) {
-            batch_pod5_meta.push_back(pod5_meta);
+            // Lazy-open per-worker reader for thread-safe POD5 access
+            Pod5RecordMeta meta_copy = pod5_meta;
+            auto [rit, inserted] = worker_readers.try_emplace(meta_copy.file_path, nullptr);
+            if (inserted) {
+              rit->second = pod5_open_file(meta_copy.file_path.c_str());
+              if (!rit->second) {
+                log_err() << "Record merger worker " << worker_id
+                          << " failed to open POD5: "
+                          << meta_copy.file_path << endl;
+              }
+            }
+            if (!rit->second)
+              continue;
+            meta_copy.reader = rit->second;
+            batch_pod5_meta.push_back(move(meta_copy));
             batch_bam.push_back(move(bam_rec));
           }
           keys_to_erase.push_back(pod5_meta.read_id);
@@ -179,7 +196,7 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
 
       if (!processed_records.empty()) {
         // Write to NPZ
-        writer.add_records(processed_records);
+        writer.add_records(move(processed_records));
       }
 
       writer.increment_processing_unit();
@@ -196,6 +213,12 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
 
   // Flush remaining records (same as Python code)
   writer.flush();
+
+  // Close per-worker POD5 readers
+  for (auto& [path, reader] : worker_readers)
+    if (reader)
+      pod5_close_and_free_reader(reader);
+
   log_info() << "Record merger worker " << worker_id << " completed" << endl;
 }
 
@@ -203,6 +226,7 @@ void process_merged_data_meta_worker(int worker_id, const Arguments& args,
 int main(int argc, char* argv[])
 {
   auto start_time = chrono::high_resolution_clock::now();
+  log_start_time();
 
   // Parse arguments
   ArgumentParser parser;
@@ -358,6 +382,8 @@ int main(int argc, char* argv[])
   pod5_reader_records.clear();
   pod5_reader_records.shrink_to_fit();
 
+  log_info() << "[MEM] POD5 redistributed: " << get_rss_mb() << " MB" << endl;
+
   // Create POD5 index (read_id -> worker_id mapping)
   log_info() << "Creating POD5 index for merged data workers" << endl;
   unordered_map<string, int> pod5_index;
@@ -367,6 +393,8 @@ int main(int argc, char* argv[])
       pod5_index[record.read_id] = worker_id;
     }
   }
+
+  log_info() << "[MEM] pod5_index created: " << get_rss_mb() << " MB" << endl;
 
   // Check if consistency mode is enabled
   if (args.consistency) {
@@ -434,7 +462,7 @@ int main(int argc, char* argv[])
     log_info() << "Starting merged data processing with "
         << num_workers << " workers" << endl;
 
-    // Index BAM records by read_id - multiple BAM records can have same read_id
+    // Index BAM records by parent_id - multiple BAM records can have same read_id
     unordered_map<string, vector<BamRecord>> bam_index;
     for (auto& bam_rec : entire_bam_records) {
       bam_index[bam_rec.parent_id].push_back(move(bam_rec));
@@ -469,12 +497,16 @@ int main(int argc, char* argv[])
     }
 
     log_info() << "Started " << num_workers << " merged data workers" << endl;
+    log_info() << "[MEM] workers created: " << get_rss_mb() << " MB" << endl;
 
     // Set workers for SAM dispatcher
     sam_dispatcher.set_workers(&merged_workers, &pod5_index);
 
+    log_info() << "[MEM] dispatch started: " << get_rss_mb() << " MB" << endl;
+
     // Wait for SAM dispatcher to finish
     sam_dispatcher.stop();
+    log_info() << "[MEM] dispatch completed: " << get_rss_mb() << " MB" << endl;
 
     // Signal all workers to stop (notify them to process final batches)
     for (auto worker : merged_workers) {

@@ -28,6 +28,7 @@ using namespace std;
 namespace deeprm {
   struct Pod5RecordMeta {
     string read_id;
+    string file_path; // POD5 file path for per-worker reader creation
     Pod5FileReader_t* reader; // Direct pointer to POD5 reader
     size_t batch_index;
     size_t row_index;

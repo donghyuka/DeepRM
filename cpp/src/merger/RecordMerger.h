@@ -50,14 +50,14 @@ namespace deeprm {
     vector<BamRecord> bam_records;
     vector<Pod5RecordMeta> pod5_meta_records;
 
-    bool process_merged_record_with_meta(const BamRecord& bam_rec,
-                                         const Pod5RecordMeta& pod5_meta,
-                                         vector<ProcessedRecord>& output) const;
-
   public:
     RecordMerger(const NormalizationFactors& nf, int cb_len, int kmer_len,
                  int max_token_len, int sampling, int dwell_shift, int sig_window,
                  uint64_t label_div);
+
+    bool process_merged_record_with_meta(const BamRecord& bam_rec,
+                                         const Pod5RecordMeta& pod5_meta,
+                                         vector<ProcessedRecord>& output) const;
 
     void add_bam_records(vector<BamRecord>&& records);
     void add_pod5_meta_records(vector<Pod5RecordMeta>&& meta_records);

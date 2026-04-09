@@ -125,7 +125,8 @@ namespace deeprm {
           // Convert read ID to string
           meta.read_id = read_id_to_string(row_info.read_id);
 
-          // Store reader pointer and indices
+          // Store file path and reader pointer
+          meta.file_path = file_path;
           meta.reader = reader;
           meta.batch_index = batch_index;
           meta.row_index = row;

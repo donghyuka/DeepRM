@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <deque>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -38,8 +39,12 @@ namespace deeprm {
     int bq_cutoff;
     char base_of_interest;
     int bam_threads;
+    static constexpr size_t read_chunk_size = 1024;
+    int process_once;
+    size_t max_queue_size;
+    bool fixed_queue_size;
 
-    queue<bam1_t*> internal_queue;
+    deque<bam1_t*> internal_queue;
     mutex queue_mutex;
     condition_variable queue_cv;
 

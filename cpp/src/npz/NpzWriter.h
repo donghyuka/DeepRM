@@ -33,14 +33,24 @@ private:
 
   vector<ProcessedRecord> buffer;
 
+  // Reusable flat arrays for save_chunk (avoid repeated allocation)
+  vector<uint16_t> flat_segment_len;
+  vector<float> flat_signal;
+  vector<uint8_t> flat_kmer;
+  vector<float> flat_dwell_motor;
+  vector<float> flat_dwell_pore;
+  vector<uint8_t> flat_bq;
+  vector<int64_t> label_ids;
+  vector<int64_t> read_ids;
+
   void save_chunk(const vector<ProcessedRecord>& records,
-                  const string& filename);
+                  size_t offset, size_t count, const string& filename);
   string generate_filename(bool is_last_processing_unit, bool is_last_chunk);
 
 public:
   NpzWriter(const string& output_path, int chunk_size, int worker_id);
 
-  void add_records(const vector<ProcessedRecord>& records);
+  void add_records(vector<ProcessedRecord>&& records);
   void flush();
   void increment_processing_unit();
   void reset_chunk_id();

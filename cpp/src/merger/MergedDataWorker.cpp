@@ -83,6 +83,12 @@ namespace deeprm {
   void MergedDataWorker::process_loop()
   {
     NormalizationFactors norm_factors;
+    RecordMerger merger(norm_factors, args.cb_len, args.kmer_len,
+                        args.max_token_len, args.sampling, args.dwell_shift,
+                        args.sig_window, args.label_div);
+
+    // Per-worker POD5 readers, opened lazily for thread-safe access
+    unordered_map<string, Pod5FileReader_t*> worker_readers;
 
     unordered_map<string, Pod5RecordMeta> pod5_index;
     // Build POD5 index for this worker
@@ -94,7 +100,8 @@ namespace deeprm {
         << " indexed " << pod5_meta_records.size()
         << " POD5 records" << endl;
 
-    vector<pair<Pod5RecordMeta, BamRecord>> batch_merged;
+    vector<pair<const Pod5RecordMeta*, bam1_t*>> batch_queued;
+    vector<ProcessedRecord> processed_records;
 
     while (is_running || !bam_queue.empty()) {
       unique_lock<mutex> lock(queue_mutex);
@@ -110,82 +117,86 @@ namespace deeprm {
       bam_queue.pop();
       lock.unlock();
 
-      // Convert bam1_t to BamRecord
-      BamRecord bam_record;
-      if (!convert_bam1_to_record(read, bam_header, bam_record))
-        continue;
+      // Extract parent_id from bam1_t for POD5 lookup
+      uint8_t* pi_tag = bam_aux_get(read, "pi");
+      string parent_id = pi_tag ? string(bam_aux2Z(pi_tag))
+                                : string(bam_get_qname(read));
 
       // Find matching POD5 record
-      auto pod5_it = pod5_index.find(bam_record.parent_id);
+      auto pod5_it = pod5_index.find(parent_id);
       if (pod5_it != pod5_index.end()) {
-        batch_merged.emplace_back(pod5_it->second, bam_record);
+        // Lazy-open per-worker reader for thread-safe POD5 access
+        auto& meta = pod5_it->second;
+        auto [rit, inserted] = worker_readers.try_emplace(meta.file_path, nullptr);
+        if (inserted) {
+          rit->second = pod5_open_file(meta.file_path.c_str());
+          if (!rit->second) {
+            log_err() << "merged data worker " << worker_id
+                      << " failed to open POD5: " << meta.file_path << endl;
+          }
+        }
+        if (!rit->second) {
+          bam_destroy1(read);
+          continue;
+        }
+        meta.reader = rit->second;
+        batch_queued.emplace_back(&meta, read);
 
         // Process batch when it reaches process_once size
-        if (batch_merged.size() >= static_cast<size_t>(args.process_once)) {
+        if (batch_queued.size() >= static_cast<size_t>(args.process_once)) {
           output_index++;
-          log_info() << "merged data worker " << worker_id
-              << " processing batch " << output_index
-              << " with " << batch_merged.size() << " records" << endl;
-
-          // Create merger and process
-          RecordMerger merger(norm_factors, args.cb_len, args.kmer_len, args.max_token_len,
-                              args.sampling, args.dwell_shift, args.sig_window, args.label_div);
-
-          vector<Pod5RecordMeta> batch_pod5_meta;
-          vector<BamRecord> batch_bam;
-          batch_pod5_meta.reserve(batch_merged.size());
-          batch_bam.reserve(batch_merged.size());
-
-          for (auto& pair : batch_merged) {
-            batch_pod5_meta.push_back(move(pair.first));
-            batch_bam.push_back(move(pair.second));
+          if ((output_index * args.process_once) % 1000 < args.process_once) {
+            if (worker_id == 0) {
+              log_info() << "[MEM] worker 0 pre-batch " << output_index
+                  << " (queue=" << bam_queue.size()
+                  << ", readers=" << worker_readers.size()
+                  << "): " << get_rss_mb() << " MB" << endl;
+            }
+            log_info() << "merged data worker " << worker_id
+                << " processing batch " << output_index
+                << " with " << batch_queued.size() << " records" << endl;
           }
 
-          merger.add_bam_records(move(batch_bam));
-          merger.add_pod5_meta_records(move(batch_pod5_meta));
-
-          vector<ProcessedRecord> processed_records = merger.merge_and_process_with_meta();
+          for (auto& [meta_ptr, bam_read] : batch_queued) {
+            BamRecord bam_record;
+            if (convert_bam1_to_record(bam_read, bam_header, bam_record))
+              merger.process_merged_record_with_meta(bam_record, *meta_ptr, processed_records);
+            bam_destroy1(bam_read);
+          }
 
           if (!processed_records.empty()) {
-            writer->add_records(processed_records);
+            writer->add_records(move(processed_records));
+            processed_records.clear();
           }
 
           writer->increment_processing_unit();
-          batch_merged.clear();
+          batch_queued.clear();
+          if (worker_id == 0 && (output_index * args.process_once) % 1000 < args.process_once) {
+            log_info() << "[MEM] worker 0 post-batch " << output_index
+                << ": " << get_rss_mb() << " MB" << endl;
+          }
         }
+      } else {
+        bam_destroy1(read);
       }
-
-      // Clean up
-      bam_destroy1(read);
     }
 
     // Process remaining records
-    if (!batch_merged.empty()) {
+    if (!batch_queued.empty()) {
       output_index++;
       log_info() << "merged data worker " << worker_id
           << " processing final batch " << output_index
-          << " with " << batch_merged.size() << " records" << endl;
+          << " with " << batch_queued.size() << " records" << endl;
 
-      RecordMerger merger(norm_factors, args.cb_len, args.kmer_len, args.max_token_len,
-                          args.sampling, args.dwell_shift, args.sig_window, args.label_div);
-
-      vector<Pod5RecordMeta> batch_pod5_meta;
-      vector<BamRecord> batch_bam;
-      batch_pod5_meta.reserve(batch_merged.size());
-      batch_bam.reserve(batch_merged.size());
-
-      for (auto& pair : batch_merged) {
-        batch_pod5_meta.push_back(move(pair.first));
-        batch_bam.push_back(move(pair.second));
+      for (auto& [meta_ptr, bam_read] : batch_queued) {
+        BamRecord bam_record;
+        if (convert_bam1_to_record(bam_read, bam_header, bam_record))
+          merger.process_merged_record_with_meta(bam_record, *meta_ptr, processed_records);
+        bam_destroy1(bam_read);
       }
 
-      merger.add_bam_records(move(batch_bam));
-      merger.add_pod5_meta_records(move(batch_pod5_meta));
-
-      vector<ProcessedRecord> processed_records = merger.merge_and_process_with_meta();
-
       if (!processed_records.empty()) {
-        writer->add_records(processed_records);
+        writer->add_records(move(processed_records));
       }
 
       writer->increment_processing_unit();
@@ -195,6 +206,12 @@ namespace deeprm {
     if (writer) {
       log_info() << "merged data worker " << worker_id << " flushing remaining records" << endl;
       writer->flush();
+    }
+
+    // Close per-worker POD5 readers
+    for (auto& [path, reader] : worker_readers) {
+      if (reader)
+        pod5_close_and_free_reader(reader);
     }
 
     log_info() << "merged data worker " << worker_id

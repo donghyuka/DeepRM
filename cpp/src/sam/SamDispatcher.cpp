@@ -24,7 +24,10 @@
 namespace deeprm {
   SamDispatcher::SamDispatcher(const Arguments& args)
     : bam_path(args.bam_path), bq_cutoff(args.qcut), base_of_interest(args.base_of_interest),
-      bam_threads(args.bam_threads),
+      bam_threads(args.bam_threads), process_once(args.process_once),
+      max_queue_size(args.max_queue > 0 ? args.max_queue
+                                        : args.process_once * 4 * args.cpu_count),
+      fixed_queue_size(args.max_queue > 0),
       is_running(false), workers_ready(false), reading_complete(false),
       bam_file(nullptr), header(nullptr), merged_workers(nullptr), pod5_index(nullptr)
   {
@@ -46,7 +49,8 @@ namespace deeprm {
     is_running = true;
 
     log_info() << "Starting SAM dispatcher for " << bam_path
-        << " with " << bam_threads << " decompression threads" << endl;
+        << " with " << bam_threads << " decompression threads"
+        << ", max_queue=" << max_queue_size << endl;
     read_thread = thread(&SamDispatcher::read_loop, this);
   }
 
@@ -73,6 +77,8 @@ namespace deeprm {
   {
     merged_workers = workers;
     pod5_index = index;
+    if (!fixed_queue_size)
+      max_queue_size = process_once * 4 * workers->size();
 
     // Set BAM header for all workers
     for (auto* worker : *workers) {
@@ -111,73 +117,99 @@ namespace deeprm {
       return;
     }
 
-    bam1_t* read = bam_init1();
+    // Chunk-based BAM reading
+    deque<bam1_t*> read_q;
 
-    while (is_running && sam_read1(bam_file, header, read) >= 0) {
+    while (is_running) {
+      // Read a chunk into local read_q
+      while (read_q.size() < read_chunk_size) {
+        bam1_t* read = bam_init1();
+        if (sam_read1(bam_file, header, read) < 0) {
+          bam_destroy1(read);
+          goto read_done;
+        }
+        read_q.push_back(read);
+      }
+
+      // Flush read_q into internal_queue
       {
         unique_lock<mutex> lock(queue_mutex);
-        internal_queue.push(read);
+        if (internal_queue.size() >= max_queue_size) {
+          queue_cv.wait(lock, [this] {
+            return internal_queue.size() < max_queue_size || !is_running;
+          });
+        }
+        if (!is_running) break;
+        internal_queue.insert(internal_queue.end(), read_q.begin(), read_q.end());
+        read_q.clear();
       }
-      queue_cv.notify_one();
-
-      // Allocate new read for next iteration
-      read = bam_init1();
+      queue_cv.notify_all();
     }
 
-    bam_destroy1(read);
+read_done:
+    // Flush remaining reads
+    if (!read_q.empty()) {
+      unique_lock<mutex> lock(queue_mutex);
+      internal_queue.insert(internal_queue.end(), read_q.begin(), read_q.end());
+      read_q.clear();
+      lock.unlock();
+      queue_cv.notify_all();
+    }
 
-    // Mark reading as complete
     reading_complete = true;
-    queue_cv.notify_all(); // Notify dispatch_to_workers that reading is done
-
+    queue_cv.notify_all();
     log_info() << "SAM dispatcher finished reading BAM file" << endl;
   }
 
   void SamDispatcher::dispatch_loop()
   {
-    while (!reading_complete || !internal_queue.empty()) {
-      unique_lock<mutex> lock(queue_mutex);
+    deque<bam1_t*> dispatch_q;
 
-      if (internal_queue.empty()) {
-        if (reading_complete) break;
-        queue_cv.wait(lock);
-        continue;
-      }
+    while (true) {
+      // Pop a chunk from internal_queue
+      {
+        unique_lock<mutex> lock(queue_mutex);
 
-      if (!workers_ready) {
-        // Workers not ready yet, wait
+        if (internal_queue.empty()) {
+          if (reading_complete) break;
+          queue_cv.wait(lock);
+          continue;
+        }
+
+        if (!workers_ready) {
+          lock.unlock();
+          this_thread::sleep_for(chrono::milliseconds(100));
+          continue;
+        }
+
+        size_t count = min(read_chunk_size, internal_queue.size());
+        dispatch_q.insert(dispatch_q.end(),
+                          internal_queue.begin(), internal_queue.begin() + count);
+        internal_queue.erase(internal_queue.begin(), internal_queue.begin() + count);
+
+        bool should_notify = internal_queue.size() <= max_queue_size / 2;
         lock.unlock();
-        this_thread::sleep_for(chrono::milliseconds(100));
-        continue;
+        if (should_notify) queue_cv.notify_all();
       }
 
-      // Get read from queue
-      bam1_t* read = internal_queue.front();
-      internal_queue.pop();
-      lock.unlock();
+      // Dispatch without holding lock
+      for (auto* read : dispatch_q) {
+        uint8_t* pi_tag = bam_aux_get(read, "pi");
+        string parent_id = pi_tag ? string(bam_aux2Z(pi_tag))
+                                  : string(bam_get_qname(read));
 
-      // Get parent ID for POD5 lookup
-      string parent_id;
-      uint8_t* pi_tag = bam_aux_get(read, "pi");
-      if (pi_tag) {
-        parent_id = bam_aux2Z(pi_tag);
-      } else {
-        parent_id = bam_get_qname(read);
-      }
-
-      // Find which worker should process this read
-      auto it = pod5_index->find(parent_id);
-      if (it != pod5_index->end()) {
-        int worker_idx = it->second;
-        if (worker_idx >= 0 && cmp_less(worker_idx, merged_workers->size())) {
-          (*merged_workers)[worker_idx]->add_bam_data(read);
+        auto it = pod5_index->find(parent_id);
+        if (it != pod5_index->end()) {
+          int worker_idx = it->second;
+          if (worker_idx >= 0 && cmp_less(worker_idx, merged_workers->size()))
+            (*merged_workers)[worker_idx]->add_bam_data(read);
+          else
+            bam_destroy1(read);
         } else {
           bam_destroy1(read);
         }
-      } else {
-        // No matching POD5 record, destroy the read
-        bam_destroy1(read);
       }
+      dispatch_q.clear();
     }
 
     log_info() << "SAM dispatcher finished dispatching to workers" << endl;
