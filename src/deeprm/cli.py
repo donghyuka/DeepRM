@@ -114,7 +114,7 @@ def _build_top_parser() -> argparse.ArgumentParser:
     )
 
     # Skeleton subparsers: we *do not* import group modules here.
-    sub = p.add_subparsers(dest="group", metavar="{inference,train,qc}")
+    sub = p.add_subparsers(dest="group", metavar="{call,train,qc,check}")
     for g, info in _HELP_REGISTRY.items():
         # 'help' here enriches the default subcommand listing in argparse,
         # but we still print a custom epilog with more details.

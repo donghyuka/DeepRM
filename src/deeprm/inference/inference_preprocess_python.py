@@ -26,6 +26,7 @@ import pysam
 import tqdm
 
 from deeprm.utils.logging import get_logger
+from deeprm.utils.utils import maybe_index_bam
 
 log = get_logger(__name__)
 
@@ -114,6 +115,8 @@ def main(args: argparse.Namespace):
         raise ValueError("--sampling must be >= 1")
     if args.process_once < 1:
         raise ValueError("--process-once must be >= 1")
+
+    args.bam = maybe_index_bam(args.bam, args.thread)
 
     os.makedirs(args.output, exist_ok=True)
 
