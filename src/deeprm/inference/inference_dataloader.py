@@ -155,6 +155,7 @@ class NanoporeDataset(IterableDataset):
         sampling=6,
         sig_window=5,
         resume_from=0,
+        dataloader_workers=0,
     ):
         super().__init__()
         self.data_path = data_path
@@ -171,6 +172,35 @@ class NanoporeDataset(IterableDataset):
         self.sig_window = sig_window
         self.resume_from = max(0, int(resume_from))
         self.skip = 0
+        self.dataloader_workers = max(0, int(dataloader_workers))
+
+    def _get_partition(self, worker_info=None):
+        """
+        Compute the exact file list partition for this rank / worker replica.
+
+        Important:
+        - resume_from is applied BEFORE worker subdivision, because it refers to
+          the rank-local shard index used by inference_worker.
+        - The same partitioning logic is used by both __iter__() and __len__(),
+          so the reported dataset length matches the actual number of yielded
+          samples under multiprocessing.
+        """
+        # First split files across GPU/process replicas (rank-local view).
+        rank_file_paths = self.file_paths[self.rank :: max(1, self.num_replicas)]
+
+        # Resume counts rank-local shards, so apply it here.
+        if self.resume_from:
+            rank_file_paths = rank_file_paths[self.resume_from :]
+
+        # Then split the rank-local view across DataLoader workers.
+        if worker_info is None:
+            worker_id = 0
+            num_workers = max(1, self.dataloader_workers)
+        else:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+
+        return rank_file_paths[worker_id::num_workers]
 
     def __iter__(self):
         """
@@ -180,16 +210,7 @@ class NanoporeDataset(IterableDataset):
             NanoporeDatasetIterator: Iterator for the dataset.
         """
         worker_info = torch.utils.data.get_worker_info()
-        if worker_info is None:
-            worker_id = self.rank
-            n_workers = self.num_replicas
-        else:
-            worker_id = self.rank * worker_info.num_workers + worker_info.id
-            n_workers = self.num_replicas * worker_info.num_workers
-
-        file_paths = self.file_paths[worker_id::n_workers]
-        if self.resume_from:
-            file_paths = file_paths[self.resume_from :]
+        file_paths = self._get_partition(worker_info)
 
         return NanoporeDatasetIterator(
             file_paths,
@@ -207,7 +228,9 @@ class NanoporeDataset(IterableDataset):
         Returns:
             int: Number of shards in the dataset.
         """
-        return max(0, self.num_shard - self.resume_from)
+        # Must match the total number of samples yielded across all workers
+        # for this rank-specific DataLoader instance.
+        return len(self._get_partition(worker_info=None))
 
 
 class NanoporeDataLoader(DataLoader):
@@ -285,6 +308,7 @@ def load_dataset(
         sampling=sampling,
         sig_window=sig_window,
         resume_from=resume_from,
+        dataloader_workers=worker,
     )
     dataloader = NanoporeDataLoader(
         dataset,

@@ -32,6 +32,7 @@ def maybe_index_bam(bam_path: str, threads: int = 1) -> str:
     """
     from pathlib import Path
 
+    import psutil
     import pysam
 
     bam_path = Path(bam_path)
@@ -87,8 +88,9 @@ def maybe_index_bam(bam_path: str, threads: int = 1) -> str:
                 break
             i += 1
 
-    pysam.sort("-o", str(sorted_path), str(bam_path), nthreads=threads)
-    pysam.index(str(sorted_path), nthreads=threads)
+    pysam_thread_memory = max(1, int(0.5 * psutil.virtual_memory().available / (1024**2) / threads))
+    pysam.sort("-@", str(threads), f"-m {pysam_thread_memory}M", "-o", str(sorted_path), str(bam_path))
+    pysam.index("-@", str(threads), str(sorted_path))
 
     if not _has_usable_index(sorted_path):
         raise RuntimeError(f"Sorted BAM was created but index is not usable: {sorted_path}")
